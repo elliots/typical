@@ -1,0 +1,45 @@
+{
+  "name": "typical",
+  "version": "0.1.0",
+  "description": "Runtime safe TypeScript transformer using typia",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "typical": "dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./tsc-plugin": "./dist/src/tsc-plugin.js",
+    "./esm": "./dist/src/esm-loader.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "node --test dist/test/*.test.js",
+    "postinstall": "tsc"
+  },
+  "keywords": [
+    "typescript",
+    "runtime",
+    "validation",
+    "typia",
+    "transformer"
+  ],
+  "author": "Elliot Shepherd <elliot@jarofworms.com>",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "14.0.1",
+    "glob": "11.0.3",
+    "minimatch": "^10.0.0",
+    "ts-patch": "^3.3.0",
+    "typia": "9.7.2",
+    "unplugin": "2.3.10"
+  },
+  "devDependencies": {
+    "@types/node": "22",
+    "typescript": "5.9.2"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
