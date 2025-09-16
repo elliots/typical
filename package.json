@@ -6,7 +6,8 @@
   "type": "module",
   "bin": {
     "typical": "dist/cli.js",
-    "ttsx": "bin/ttsx"
+    "ttsx": "bin/ttsx",
+    "ttsc": "bin/ttsc"
   },
   "exports": {
     ".": "./dist/index.js",
@@ -19,7 +20,7 @@
     "dev": "tsc --watch",
     "test": "node --test dist/test/*.test.js",
     "postinstall": "tsc",
-    "run-samples": "cd samples/esm && npm install && npm run start && cd ../ttsx && npm install && npm run start && cd ../tsc && npm install && npm run build && npm run start"
+    "run-samples": "cd samples/esm && npm install && npm run start && cd ../ttsx && npm install && npm run start && cd ../tsc && npm install && npm run build && npm run start && cd ../ttsc && npm install && npm run build && npm run start"
   },
   "keywords": [
     "typescript",
@@ -34,9 +35,10 @@
     "commander": "14.0.1",
     "glob": "11.0.3",
     "minimatch": "^10.0.0",
+    "strip-json-comments": "^5.0.3",
     "ts-patch": "^3.3.0",
     "tsx": "^4.19.2",
-    "typia": "9.7.2",
+    "typia": "npm:@matatbread/typia@^9.7.2-nrc",
     "unplugin": "2.3.10"
   },
   "devDependencies": {

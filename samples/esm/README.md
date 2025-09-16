@@ -1,0 +1,1 @@
+a sample project that uses Typical as an ESM loader

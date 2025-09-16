@@ -89,6 +89,10 @@ export class TypicalTransformer {
       };
 
       return (sourceFile: ts.SourceFile) => {
+
+        if (process.env.DEBUG) {
+          console.log("TYPICAL: processing ", sourceFile.fileName);
+        }
         // First apply our transformation
         let transformedSourceFile = this.transformSourceFile(
           sourceFile,
@@ -106,7 +110,7 @@ export class TypicalTransformer {
 
         if (transformedCode.includes("typia.")) {
           try {
-            // console.log("Applying typia transformer to:", sourceFile.fileName);
+            // Apply typia transformation to files with typia calls
 
             // Create a new source file with the transformed code, preserving original filename
             const newSourceFile = this.ts.createSourceFile(
@@ -116,32 +120,9 @@ export class TypicalTransformer {
               true
             );
 
-            // Create a new program with our transformed source
-            const compilerOptions = this.program.getCompilerOptions();
-            const host = this.ts.createCompilerHost(compilerOptions);
-
-            // Override getSourceFile to return our transformed source
-            const originalGetSourceFile = host.getSourceFile;
-            host.getSourceFile = (fileName, languageVersion) => {
-              if (fileName === sourceFile.fileName) {
-                return newSourceFile;
-              }
-              return originalGetSourceFile.call(
-                host,
-                fileName,
-                languageVersion
-              );
-            };
-
-            const newProgram = this.ts.createProgram(
-              [sourceFile.fileName],
-              compilerOptions,
-              host
-            );
-
-            // Create typia transformer with the new program
+            // Create typia transformer with the original program (which has all dependencies)
             const typiaTransformer = typiaTransform(
-              newProgram,
+              this.program,
               {},
               {
                 addDiagnostic(diag: ts.Diagnostic) {
@@ -152,6 +133,7 @@ export class TypicalTransformer {
             );
 
             // Apply the transformer with source map preservation
+            const compilerOptions = this.program.getCompilerOptions();
             const transformationResult = this.ts.transform(
               newSourceFile,
               [typiaTransformer],
@@ -161,11 +143,13 @@ export class TypicalTransformer {
             if (transformationResult.transformed.length > 0) {
               const finalTransformed = transformationResult.transformed[0];
               transformedSourceFile = finalTransformed;
+
+              // Typia transformation completed successfully
             }
 
             transformationResult.dispose();
           } catch (error) {
-            console.warn("Failed to apply typia transformer:", error);
+            console.warn("Failed to apply typia transformer:", sourceFile.fileName, error);
           }
         }
 
@@ -189,7 +173,7 @@ export class TypicalTransformer {
 
     // Check if this file should be transformed
     if (!this.shouldTransformFile(sourceFile.fileName)) {
-      throw new Error("File is excluded from transformation: " + sourceFile.fileName);
+      return sourceFile; // Return unchanged for excluded files
     }
 
     // Reset caches for each file
