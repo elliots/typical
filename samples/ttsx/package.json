@@ -1,12 +1,12 @@
 {
-  "name": "typical-sample-esm",
+  "name": "typical-sample-ttsx",
   "version": "1.0.0",
-  "description": "Sample project using Typical with Node.js ESM loader",
+  "description": "Sample project using Typical TSX",
   "main": "src/index.ts",
   "type": "module",
   "scripts": {
-    "start": "node --import typical/esm src/index.ts",
-    "dev": "node --import typical/esm --watch src/index.ts"
+    "start": "ttsx src/index.ts",
+    "dev": "ttsx --watch src/index.ts"
   },
   "dependencies": {
     "typical": "../.."

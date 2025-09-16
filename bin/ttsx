@@ -1,0 +1,2 @@
+#!/bin/sh
+NODE_OPTIONS="--import typical/esm" exec tsx $@

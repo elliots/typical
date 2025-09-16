@@ -4,19 +4,14 @@
     "module": "esnext",
     "lib": ["ES2024"],
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": "./",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "declaration": true,
     "sourceMap": true,
-    "moduleResolution": "node",
-    "plugins": [
-      {
-        "transform": "typical/tsc-plugin"
-      }
-    ]
+    "moduleResolution": "node"
   },
   "include": ["**/*.ts"],
   "exclude": ["node_modules", "dist"]

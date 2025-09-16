@@ -23,7 +23,8 @@ Why not.
 - ✅ Configurable include/exclude patterns
 - ✅ Optionally reuse validation logic for identical types to optimize performance (enabled by default)
 - ✅ TSC plugin
-- ✅ ESM loader for runtime transformation with `node --loader typical/esm-loader`
+- ✅ ESM loader for runtime transformation with `node --import typical/esm` (or `node --loader typical/esm-loader` for older Node versions)
+- ✅ tsx wrapper (ttsx) for easy use like `npx ttsx script.ts`
 
 ## Installation
 
@@ -47,7 +48,14 @@ If not provided, these default settings will be used.
 
 ## Usage
 
-See ./samples/esm and ./samples/tsc for example usage with ESM loader and TSC plugin.
+See ./samples/esm and ./samples/tsc and ./samples/ttsx
+
+Quickest way to try it out is to use ttsx:
+
+```bash
+npm add github:elliots/typical
+npx ttsx your-script.ts
+```
 
 ## Example
 

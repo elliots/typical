@@ -30,8 +30,6 @@ export function loadConfig(configPath?: string): TypicalConfig {
       return defaultConfig;
     }
   }
-  
-  console.warn(`Config file not found at ${configFile}, using default configuration.`);
 
   return defaultConfig;
 }
