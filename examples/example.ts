@@ -56,3 +56,5 @@ try {
 }
 
 console.log("✅ All tests passed!");
+
+export {}; // Make this file a module

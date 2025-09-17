@@ -176,6 +176,12 @@ export class TypicalTransformer {
       return sourceFile; // Return unchanged for excluded files
     }
 
+    // Check if this file has already been transformed by us
+    const sourceText = sourceFile.getFullText();
+    if (sourceText.includes('__typical_assert_') || sourceText.includes('__typical_stringify_') || sourceText.includes('__typical_parse_')) {
+      throw new Error(`File ${sourceFile.fileName} has already been transformed by Typical! Double transformation detected.`);
+    }
+
     // Reset caches for each file
     this.typeValidators.clear();
     this.typeStringifiers.clear();
@@ -350,10 +356,9 @@ export class TypicalTransformer {
             }
 
             if (this.config.reusableValidators && targetType) {
-              // Use reusable parser
-              const typeText = (targetType as any).getText
-                ? (targetType as any).getText()
-                : "unknown";
+              // Use reusable parser - use typeToString
+              const targetTypeObj = typeChecker.getTypeFromTypeNode(targetType);
+              const typeText = typeChecker.typeToString(targetTypeObj);
               const parserName = this.getOrCreateParser(typeText, targetType);
 
               const newCall = ctx.factory.createCallExpression(
@@ -424,10 +429,9 @@ export class TypicalTransformer {
           const paramIdentifier = ctx.factory.createIdentifier(paramName);
 
           if (this.config.reusableValidators) {
-            // Use reusable validators
-            const typeText = (param.type as any).getText
-              ? (param.type as any).getText()
-              : "unknown";
+            // Use reusable validators - use typeToString
+            const paramType = typeChecker.getTypeFromTypeNode(param.type);
+            const typeText = typeChecker.typeToString(paramType);
             const validatorName = this.getOrCreateValidator(
               typeText,
               param.type
@@ -466,19 +470,37 @@ export class TypicalTransformer {
       // First visit all child nodes (including JSON calls) before adding validation
       const visitedBody = ctx.ts.visitNode(body, visit) as ts.Block;
 
-      // Transform return statements if function has return type
+      // Transform return statements - use explicit type or infer from type checker
       let transformedStatements = visitedBody.statements;
-      if (func.type) {
+      let returnType = func.type;
+
+      // If no explicit return type, try to infer it from the type checker
+      let returnTypeForString: ts.Type | undefined;
+      if (!returnType) {
+        const signature = typeChecker.getSignatureFromDeclaration(func);
+        if (signature) {
+          const inferredReturnType = typeChecker.getReturnTypeOfSignature(signature);
+          returnType = typeChecker.typeToTypeNode(
+            inferredReturnType,
+            func,
+            ts.NodeBuilderFlags.InTypeAlias
+          );
+          returnTypeForString = inferredReturnType;
+        }
+      } else {
+        // For explicit return types, get the Type from the TypeNode
+        returnTypeForString = typeChecker.getTypeFromTypeNode(returnType);
+      }
+
+      if (returnType && returnTypeForString) {
         const returnTransformer = (node: ts.Node): ts.Node => {
           if (ts.isReturnStatement(node) && node.expression) {
             if (this.config.reusableValidators) {
-              // Use reusable validators
-              const returnTypeText = (func.type as any).getText
-                ? (func.type as any).getText()
-                : "unknown";
+              // Use reusable validators - always use typeToString
+              const returnTypeText = typeChecker.typeToString(returnTypeForString!);
               const validatorName = this.getOrCreateValidator(
                 returnTypeText,
-                func.type!
+                returnType
               );
 
               const validatorCall = ctx.factory.createCallExpression(
@@ -498,7 +520,7 @@ export class TypicalTransformer {
               );
               const callExpression = ctx.factory.createCallExpression(
                 propertyAccess,
-                [func.type!],
+                [returnType],
                 [node.expression]
               );
 

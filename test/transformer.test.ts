@@ -45,70 +45,104 @@ function processData(data: User) {
         `JSON.stringify`
       ]
     },
-//     {
-//       name: "JSON.parse transformation",
-//       fileName: "test.ts",
-//       input: `
-// function parseData(jsonStr: string): { id: number, name: string } {
-//   return JSON.parse(jsonStr) as { id: number, name: string };
-// }`,
-//       expectedPatterns: [
-//         /import typia from "typia"/,
-//         /typia\.json\.assertParse/
-//       ],
-//       notExpectedPatterns: [
-//         /JSON\.parse/
-//       ]
-//     },
-//     {
-//       name: "return type validation",
-//       fileName: "test.ts",
-//       input: `
-// function getData(): { id: number, name: string } {
-//   const data = { id: 1, name: "test" };
-//   return data;
-// }`,
-//       expectedPatterns: [
-//         /import typia from "typia"/,
-//         /return typia\.assert/
-//       ],
-//       notExpectedPatterns: []
-//     },
-//     {
-//       name: "arrow functions",
-//       fileName: "test.ts",
-//       input: `
-// const multiply = (a: number, b: number): number => {
-//   return a * b;
-// };`,
-//       expectedPatterns: [
-//         /import typia from "typia"/,
-//         /typia\.assert.*a/,
-//         /typia\.assert.*b/,
-//         /return typia\.assert/
-//       ],
-//       notExpectedPatterns: []
-//     },
-//     {
-//       name: "complex types",
-//       fileName: "test.ts",
-//       input: `
-// interface User {
-//   id: number;
-//   name: string;
-//   email?: string;
-// }
+    {
+      name: "JSON.parse transformation",
+      input: `
+function parseData(jsonStr: string): { id: number, name: string } {
+  return JSON.parse(jsonStr);
+}`,
+      expected: `import typia from "typia";
+const __typical_assert_0 = typia.createAssert<string>();
+const __typical_assert_1 = typia.createAssert<{
+    id: number;
+    name: string;
+}>();
+const __typical_parse_0 = typia.json.createAssertParse<{
+    id: number;
+    name: string;
+}>();
+function parseData(jsonStr: string): {
+    id: number;
+    name: string;
+} {
+    __typical_assert_0(jsonStr);
+    return __typical_assert_1(__typical_parse_0(jsonStr));
+}`
+    },
+    {
+      name: "return type validation",
+      input: `
+function getData(): { id: number, name: string } {
+  const data = { id: 1, name: "test" };
+  return data;
+}`,
+     expected: ` import typia from "typia";
+const __typical_assert_0 = typia.createAssert<{
+    id: number;
+    name: string;
+}>();
+function getData(): {
+    id: number;
+    name: string;
+} {
+    const data = { id: 1, name: "test" };
+    return __typical_assert_0(data);
+}`
+    },
+    {
+      name: "arrow functions",
+      input: `
+const multiply = (a: number, b: number): number => {
+  return a * b;
+};`,
+      expected: `import typia from "typia";
+const __typical_assert_0 = typia.createAssert<number>();
+const multiply = (a: number, b: number): number => {
+    __typical_assert_0(a);
+    __typical_assert_0(b);
+    return __typical_assert_0(a * b);
+};`
+    },
+    {
+      name: "complex types",
+      input: `
+interface User {
+  id: number;
+  name: string;
+  email?: string;
+}
 
-// function processUser(user: User): User {
-//   return { ...user, id: user.id + 1 };
-// }`,
-//       expectedPatterns: [
-//         /import typia from "typia"/,
-//         /typia\.assert.*user/,
-//         /return typia\.assert/
-//       ],
-//       notExpectedPatterns: []
-//     },
+function processUser(user: User): User {
+  return { ...user, id: user.id + 1 };
+}
+function processUserLike(user: User) {
+  return { ...user, id: user.id + 1 };
+}
+function processUserStringId(user: User) {
+  return { ...user, id: user.id + '-1' };
+}`,
+      expected: `import typia from "typia";
+const __typical_assert_0 = typia.createAssert<User>();
+const __typical_assert_1 = typia.createAssert<{ id: number; name: string; email?: string; }>();
+const __typical_assert_2 = typia.createAssert<{ id: string; name: string; email?: string; }>();
+interface User {
+    id: number;
+    name: string;
+    email?: string;
+}
+function processUser(user: User): User {
+    __typical_assert_0(user);
+    return __typical_assert_0({ ...user, id: user.id + 1 });
+}
+function processUserLike(user: User) {
+    __typical_assert_0(user);
+    return __typical_assert_1({ ...user, id: user.id + 1 });
+}
+function processUserStringId(user: User) {
+    __typical_assert_0(user);
+    return __typical_assert_2({ ...user, id: user.id + '-1' });
+}`
+    },
 //     {
 //       name: "excluded files should not be transformed",
 //       fileName: "node_modules/some-lib/index.ts",
@@ -135,9 +169,9 @@ function processData(data: User) {
 
       const transformedCode = transformer.transform(fileName, "basic");
 
-      console.log("Transformed Code:\n", transformedCode);
+      // console.log("Transformed Code:\n", transformedCode);
 
-      if (expected) {
+      if (expected !== undefined) {
         assert.equal(transformedCode.trim(), expected.trim());
       }
 

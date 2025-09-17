@@ -16,10 +16,10 @@
     "./loader": "./dist/src/esm-loader.js"
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "test": "node --test dist/test/*.test.js",
-    "postinstall": "tsc",
+    "build": "npx tsc",
+    "dev": "npx tsc --watch",
+    "test": "rm -f test/test.temp.ts &&npx tsc && node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
+    "postinstall": "npx tsc",
     "run-samples": "cd samples/esm && npm install && npm run start && cd ../ttsx && npm install && npm run start && cd ../tsc && npm install && npm run build && npm run start && cd ../ttsc && npm install && npm run build && npm run start"
   },
   "keywords": [
