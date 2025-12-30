@@ -1,7 +1,32 @@
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
+import { existsSync } from "fs";
 import { TypicalTransformer } from "./transformer.js";
 
 const transformer = new TypicalTransformer();
+
+/**
+ * Resolve hook - rewrites .js imports to .ts if the .ts file exists
+ */
+export async function resolve(specifier: string, context: any, nextResolve: any) {
+  // Only handle relative imports ending in .js
+  if (specifier.startsWith('.') && specifier.endsWith('.js')) {
+    const { parentURL } = context;
+    if (parentURL) {
+      const parentPath = fileURLToPath(parentURL);
+      const dir = parentPath.substring(0, parentPath.lastIndexOf('/'));
+      const tsPath = dir + '/' + specifier.slice(0, -3) + '.ts';
+
+      if (existsSync(tsPath)) {
+        return {
+          url: pathToFileURL(tsPath).href,
+          shortCircuit: true,
+        };
+      }
+    }
+  }
+
+  return nextResolve(specifier, context);
+}
 
 /**
  * Load hook - transforms TypeScript files on the fly

@@ -1,8 +1,8 @@
 {
   "include": ["**/*.ts"],
-  "exclude": ["node_modules/**", "**/*.d.ts", "dist/**", "src/**"],
+  "exclude": ["node_modules/**", "**/*.d.ts", "dist/**"],
   "reusableValidators": true,
-  "validateCasts": true,
+  "validateCasts": false,
   "debug": {
     "writeIntermediateFiles": true
   }

@@ -1,8 +1,13 @@
+export interface TypicalDebugConfig {
+  writeIntermediateFiles?: boolean;
+}
+
 export interface TypicalConfig {
   include?: string[];
   exclude?: string[];
   reusableValidators?: boolean;
   validateCasts?: boolean;
+  debug?: TypicalDebugConfig;
 }
 
 export const defaultConfig: TypicalConfig = {
@@ -10,6 +15,9 @@ export const defaultConfig: TypicalConfig = {
   exclude: ["node_modules/**", "**/*.d.ts", "dist/**", "build/**"],
   reusableValidators: true,
   validateCasts: false,
+  debug: {
+    writeIntermediateFiles: false,
+  },
 };
 
 import fs from 'fs';

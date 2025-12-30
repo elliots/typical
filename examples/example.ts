@@ -62,6 +62,8 @@ try {
     age: 100,
     email: 'not.an.email'
   } as User;
+  console.error("❌ Invalid user data was accepted!");
+  process.exit(1);
 } catch (e: unknown) {
   console.error("Caught error as expected for invalid user object:", (e as Error).message);
 }

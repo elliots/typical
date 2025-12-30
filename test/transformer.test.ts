@@ -13,6 +13,26 @@ interface TestCase {
   notExpectedPatterns?: (RegExp | string)[];
 }
 
+/**
+ * Create a transformer with a minimal program containing only the test file.
+ * This prevents type collisions with other files in the project.
+ */
+function createTestTransformer(fileName: string, content: string, config?: ConstructorParameters<typeof TypicalTransformer>[0]): TypicalTransformer {
+  writeFileSync(fileName, content);
+
+  // Create a minimal program with only the test file
+  const compilerOptions: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ES2020,
+    module: ts.ModuleKind.ESNext,
+    strict: true,
+    esModuleInterop: true,
+    skipLibCheck: true,
+  };
+
+  const program = ts.createProgram([fileName], compilerOptions);
+  return new TypicalTransformer(config, program, ts);
+}
+
 describe("TypicalTransformer", () => {
   test("should create TypicalTransformer instance", () => {
     const transformer = new TypicalTransformer();
@@ -424,11 +444,7 @@ const fn = (s: string): User => JSON.parse(s);`,
     ({ name, input, expected, expectedPatterns, notExpectedPatterns }) => {
       test(name, () => {
         const fileName = "test/test.temp.ts";
-        writeFileSync(fileName, input);
-
-        const transformer = new TypicalTransformer();
-
-        // const sourceFile = transformer.createSourceFile(fileName, input);
+        const transformer = createTestTransformer(fileName, input);
 
         const transformedCode = transformer.transform(fileName, "basic");
 
@@ -493,9 +509,7 @@ interface User {
 const data = { name: "test", age: 30, email: "test@example.com" };
 const user = data as User;
 `;
-      writeFileSync(fileName, input);
-
-      const transformer = new TypicalTransformer({ validateCasts: true, reusableValidators: true });
+      const transformer = createTestTransformer(fileName, input, { validateCasts: true, reusableValidators: true });
       const transformedCode = transformer.transform(fileName, "basic");
 
       // Should have validator
@@ -525,9 +539,7 @@ interface User {
 const data = { name: "test", age: 30 };
 const user = data as User;
 `;
-      writeFileSync(fileName, input);
-
-      const transformer = new TypicalTransformer({ validateCasts: false, reusableValidators: true });
+      const transformer = createTestTransformer(fileName, input, { validateCasts: false, reusableValidators: true });
       const transformedCode = transformer.transform(fileName, "basic");
 
       // Should NOT have validator for the cast
@@ -543,9 +555,7 @@ const user = data as User;
 const data = { name: "test" };
 const escaped = data as any;
 `;
-      writeFileSync(fileName, input);
-
-      const transformer = new TypicalTransformer({ validateCasts: true, reusableValidators: true });
+      const transformer = createTestTransformer(fileName, input, { validateCasts: true, reusableValidators: true });
       const transformedCode = transformer.transform(fileName, "basic");
 
       // Should NOT validate 'as any'
@@ -561,9 +571,7 @@ const escaped = data as any;
 const data = { name: "test" };
 const escaped = data as unknown;
 `;
-      writeFileSync(fileName, input);
-
-      const transformer = new TypicalTransformer({ validateCasts: true, reusableValidators: true });
+      const transformer = createTestTransformer(fileName, input, { validateCasts: true, reusableValidators: true });
       const transformedCode = transformer.transform(fileName, "basic");
 
       // Should NOT validate 'as unknown'

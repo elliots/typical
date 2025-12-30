@@ -1,4 +1,6 @@
 import ts from "typescript";
+import fs from "fs";
+import path from "path";
 import { loadConfig, TypicalConfig } from "./config.js";
 import { shouldTransformFile } from "./file-filter.js";
 
@@ -89,6 +91,10 @@ export class TypicalTransformer {
       };
 
       return (sourceFile: ts.SourceFile) => {
+        // Check if this file should be transformed based on include/exclude patterns
+        if (!this.shouldTransformFile(sourceFile.fileName)) {
+          return sourceFile; // Return unchanged for excluded files
+        }
 
         if (process.env.DEBUG) {
           console.log("TYPICAL: processing ", sourceFile.fileName);
@@ -110,6 +116,28 @@ export class TypicalTransformer {
 
         if (process.env.DEBUG) {
           console.log("TYPICAL: Before typia transform (first 500 chars):", transformedCode.substring(0, 500));
+        }
+
+        // Write intermediate file if debug option is enabled
+        if (this.config.debug?.writeIntermediateFiles) {
+          const compilerOptions = this.program.getCompilerOptions();
+          const outDir = compilerOptions.outDir || ".";
+          const rootDir = compilerOptions.rootDir || ".";
+
+          // Calculate the relative path from rootDir
+          const relativePath = path.relative(rootDir, sourceFile.fileName);
+          // Change extension to .typical.ts to indicate intermediate state
+          const intermediateFileName = relativePath.replace(/\.tsx?$/, ".typical.ts");
+          const intermediateFilePath = path.join(outDir, intermediateFileName);
+
+          // Ensure directory exists
+          const dir = path.dirname(intermediateFilePath);
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+          }
+
+          fs.writeFileSync(intermediateFilePath, transformedCode);
+          console.log(`TYPICAL: Wrote intermediate file: ${intermediateFilePath}`);
         }
 
         if (transformedCode.includes("typia.")) {
@@ -509,9 +537,8 @@ export class TypicalTransformer {
             }
 
             if (this.config.reusableValidators && targetType) {
-              // Use reusable parser - use typeToString
-              const targetTypeObj = typeChecker.getTypeFromTypeNode(targetType);
-              const typeText = typeChecker.typeToString(targetTypeObj);
+              // Use reusable parser - use typeNode text to preserve local aliases
+              const typeText = this.getTypeKey(targetType, typeChecker);
               const parserName = this.getOrCreateParser(typeText, targetType);
 
               const newCall = ctx.factory.createCallExpression(
@@ -568,8 +595,8 @@ export class TypicalTransformer {
         const visitedExpression = ctx.ts.visitNode(node.expression, visit) as ts.Expression;
 
         if (this.config.reusableValidators) {
-          const targetTypeObj = typeChecker.getTypeFromTypeNode(targetType);
-          const typeText = typeChecker.typeToString(targetTypeObj);
+          // Use typeNode text to preserve local aliases
+          const typeText = this.getTypeKey(targetType, typeChecker);
           const validatorName = this.getOrCreateValidator(typeText, targetType);
 
           // Replace `expr as Type` with `__typical_assert_N(expr)`
@@ -794,8 +821,8 @@ export class TypicalTransformer {
           validatedVariables.set(paramName, paramType);
 
           if (this.config.reusableValidators) {
-            // Use reusable validators - use typeToString
-            const typeText = typeChecker.typeToString(paramType);
+            // Use reusable validators - use typeNode text to preserve local aliases
+            const typeText = this.getTypeKey(param.type, typeChecker);
             const validatorName = this.getOrCreateValidator(
               typeText,
               param.type
@@ -965,8 +992,9 @@ export class TypicalTransformer {
             }
 
             if (this.config.reusableValidators) {
-              // Use reusable validators - always use typeToString
-              const returnTypeText = typeChecker.typeToString(returnTypeForString!);
+              // Use reusable validators - use typeNode text to preserve local aliases
+              // Pass returnTypeForString for synthesized nodes (inferred return types)
+              const returnTypeText = this.getTypeKey(returnType, typeChecker, returnTypeForString);
               const validatorName = this.getOrCreateValidator(
                 returnTypeText,
                 returnType
@@ -1128,6 +1156,31 @@ export class TypicalTransformer {
     }
 
     return sourceFile;
+  }
+
+  /**
+   * Gets type text for use as a validator map key.
+   * Uses getText() to preserve local aliases (e.g., "User1" vs "User2"),
+   * but falls back to typeToString() for synthesized nodes without source positions.
+   *
+   * @param typeNode The TypeNode to get a key for
+   * @param typeChecker The TypeChecker to use
+   * @param typeObj Optional Type object - use this for synthesized nodes since
+   *                getTypeFromTypeNode doesn't work correctly on them
+   */
+  private getTypeKey(typeNode: ts.TypeNode, typeChecker: ts.TypeChecker, typeObj?: ts.Type): string {
+    // Check if node has a real position (not synthesized)
+    if (typeNode.pos >= 0 && typeNode.end > typeNode.pos) {
+      try {
+        return typeNode.getText();
+      } catch {
+        // Fall through to typeToString
+      }
+    }
+    // Fallback for synthesized nodes - use the provided Type object if available,
+    // otherwise try to get it from the node (which may not work correctly)
+    const type = typeObj ?? typeChecker.getTypeFromTypeNode(typeNode);
+    return typeChecker.typeToString(type, undefined, ts.TypeFormatFlags.NoTruncation);
   }
 
   private getOrCreateValidator(

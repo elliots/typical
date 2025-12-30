@@ -7,19 +7,24 @@ import { TypicalConfig } from './config.js';
  */
 export function shouldTransformFile(fileName: string, config: TypicalConfig): boolean {
   const relativePath = path.relative(process.cwd(), fileName);
-  
+
+  // Exclude files outside the project directory (e.g., resolved symlinks to parent dirs)
+  if (relativePath.startsWith('..')) {
+    return false;
+  }
+
   // Check include patterns
   const isIncluded = config.include?.some(pattern => {
     return minimatch(relativePath, pattern);
   }) ?? true;
 
   if (!isIncluded) return false;
-  
+
   // Check exclude patterns
   const isExcluded = config.exclude?.some(pattern => {
     return minimatch(relativePath, pattern);
   }) ?? false;
-  
+
   return !isExcluded;
 }
 

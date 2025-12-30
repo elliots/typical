@@ -1,0 +1,13 @@
+{
+  "name": "same-type-name-test",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --import @elliots/typical/esm main.ts"
+  },
+  "dependencies": {
+    "@elliots/typical": "file:../../..",
+    "typia": "^8.0.0",
+    "typescript": "^5.0.0"
+  }
+}
