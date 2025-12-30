@@ -24,6 +24,9 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "rm -f test/test.temp.ts && tsc && node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
+    "bench": "tsc && node --import ./dist/src/esm-loader-register.js dist/bench/runtime-bench.js",
+    "test:integration": "tsc && node dist/test/integration/run-integration.js",
+    "test:all": "npm test && npm run test:integration && npm run bench",
     "prepublishOnly": "npm run build && npm test",
     "sample:esm": "cd samples/esm && npm install && npm run start",
     "sample:ttsx": "cd samples/ttsx && npm install && npm run start",
@@ -58,12 +61,14 @@
     "strip-json-comments": "5.0.3",
     "ts-patch": "3.3.0",
     "tsx": "4.21.0",
+    "typescript": "^5.0.0",
     "typia": "11.0.0",
-    "unplugin": "2.3.11",
-    "typescript": "^5.0.0"
+    "unplugin": "2.3.11"
   },
   "devDependencies": {
-    "@types/node": "22"
+    "@types/node": "22",
+    "tinybench": "^6.0.0",
+    "zod": "^4.2.1"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"

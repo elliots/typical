@@ -1,8 +1,9 @@
 {
   "compilerOptions": {
-    "target": "ES2024",
+    "target": "ES2022",
     "module": "esnext",
-    "lib": ["ES2024"],
+    "moduleResolution": "node",
+    "lib": ["ES2022"],
     "outDir": "./dist",
     "rootDir": "./",
     "strict": true,
@@ -10,10 +11,12 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "declaration": true,
-    "sourceMap": true,
-    "moduleResolution": "node",
-    "resolveJsonModule": true
+    "plugins": [
+      {
+        "transform": "@elliots/typical/tsc-plugin"
+      }
+    ]
   },
-  "include": ["**/*.ts"],
-  "exclude": ["node_modules", "dist", "samples", "test/integration/projects"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }

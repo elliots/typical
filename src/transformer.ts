@@ -457,6 +457,12 @@ export class TypicalTransformer {
 
       func.parameters.forEach((param) => {
         if (param.type) {
+          // Skip 'any' and 'unknown' types - no point validating them
+          if (param.type.kind === ts.SyntaxKind.AnyKeyword ||
+              param.type.kind === ts.SyntaxKind.UnknownKeyword) {
+            return;
+          }
+
           const paramName = ts.isIdentifier(param.name)
             ? param.name.text
             : "param";
@@ -516,15 +522,20 @@ export class TypicalTransformer {
       // If no explicit return type, try to infer it from the type checker
       let returnTypeForString: ts.Type | undefined;
       if (!returnType) {
-        const signature = typeChecker.getSignatureFromDeclaration(func);
-        if (signature) {
-          const inferredReturnType = typeChecker.getReturnTypeOfSignature(signature);
-          returnType = typeChecker.typeToTypeNode(
-            inferredReturnType,
-            func,
-            ts.NodeBuilderFlags.InTypeAlias
-          );
-          returnTypeForString = inferredReturnType;
+        try {
+          const signature = typeChecker.getSignatureFromDeclaration(func);
+          if (signature) {
+            const inferredReturnType = typeChecker.getReturnTypeOfSignature(signature);
+            returnType = typeChecker.typeToTypeNode(
+              inferredReturnType,
+              func,
+              ts.NodeBuilderFlags.InTypeAlias
+            );
+            returnTypeForString = inferredReturnType;
+          }
+        } catch {
+          // Could not infer signature (e.g., untyped arrow function callback)
+          // Skip return type validation for this function
         }
       } else {
         // For explicit return types, get the Type from the TypeNode
@@ -555,7 +566,13 @@ export class TypicalTransformer {
         }
       }
 
-      if (returnType && returnTypeForString) {
+      // Skip 'any' and 'unknown' return types - no point validating them
+      const isAnyOrUnknownReturn = returnType && (
+        returnType.kind === ts.SyntaxKind.AnyKeyword ||
+        returnType.kind === ts.SyntaxKind.UnknownKeyword
+      );
+
+      if (returnType && returnTypeForString && !isAnyOrUnknownReturn) {
         const returnTransformer = (node: ts.Node): ts.Node => {
           if (ts.isReturnStatement(node) && node.expression) {
             // For async functions, we need to await the expression before validating
