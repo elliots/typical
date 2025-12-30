@@ -24,7 +24,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "rm -f test/test.temp.ts && tsc && node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
-    "bench": "tsc && node --import ./dist/src/esm-loader-register.js dist/bench/runtime-bench.js",
+    "bench": "cd bench && npm install && npm run bench",
     "test:integration": "tsc && node dist/test/integration/run-integration.js",
     "test:all": "npm test && npm run test:integration && npm run bench",
     "prepublishOnly": "npm run build && npm test",
@@ -66,9 +66,7 @@
     "unplugin": "2.3.11"
   },
   "devDependencies": {
-    "@types/node": "22",
-    "tinybench": "^6.0.0",
-    "zod": "^4.2.1"
+    "@types/node": "22"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"

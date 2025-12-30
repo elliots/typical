@@ -44,14 +44,14 @@ export interface LargePayload {
   };
 }
 
-// Zod schemas
-const zodSmallPayload = z.object({
+// Zod schemas - exported for direct use in benchmarks
+export const zodSmallPayload = z.object({
   id: z.number(),
   name: z.string(),
   active: z.boolean(),
 });
 
-const zodMediumPayload = z.object({
+export const zodMediumPayload = z.object({
   id: z.string().regex(/^.+-.+-.+-.+-.+$/),
   email: z.string().regex(/^.+@.+\..+$/),
   name: z.string(),
@@ -59,7 +59,7 @@ const zodMediumPayload = z.object({
   tags: z.array(z.string()),
 });
 
-const zodLargePayload = z.object({
+export const zodLargePayload = z.object({
   id: z.string().regex(/^.+-.+-.+-.+-.+$/),
   users: z.array(z.object({
     id: z.string().regex(/^.+-.+-.+-.+-.+$/),
@@ -81,118 +81,20 @@ const zodLargePayload = z.object({
   }),
 });
 
-// === JSON.parse functions ===
+export const zodLargeArray = z.array(zodLargePayload);
 
-// Typical - will be transformed to use typia.json.assertParse
-export function parseSmall(json: string): SmallPayload {
-  return JSON.parse(json);
-}
+// Typia validators - exported for direct use in benchmarks
+import typia from "typia";
 
-export function parseMedium(json: string): MediumPayload {
-  return JSON.parse(json);
-}
+export const typiaParseSmall = typia.json.createAssertParse<SmallPayload>();
+export const typiaParseMedium = typia.json.createAssertParse<MediumPayload>();
+export const typiaParseLarge = typia.json.createAssertParse<LargePayload>();
+export const typiaParseLargeArray = typia.json.createAssertParse<LargePayload[]>();
 
-export function parseLarge(json: string): LargePayload {
-  return JSON.parse(json);
-}
-
-// No validation baseline
-export function noValidateParseSmall(json: any): any {
-  return JSON.parse(json);
-}
-
-export function noValidateParseMedium(json: any): any {
-  return JSON.parse(json);
-}
-
-export function noValidateParseLarge(json: any): any {
-  return JSON.parse(json);
-}
-
-// Zod validation
-export function zodParseSmall(json: any): any {
-  return zodSmallPayload.parse(JSON.parse(json));
-}
-
-export function zodParseMedium(json: any): any {
-  return zodMediumPayload.parse(JSON.parse(json));
-}
-
-export function zodParseLarge(json: any): any {
-  return zodLargePayload.parse(JSON.parse(json));
-}
-
-// === JSON.stringify functions ===
-
-// Typical - will be transformed to use typia.json.stringify
-export function stringifySmall(data: SmallPayload): string {
-  return JSON.stringify(data);
-}
-
-export function stringifyMedium(data: MediumPayload): string {
-  return JSON.stringify(data);
-}
-
-export function stringifyLarge(data: LargePayload): string {
-  return JSON.stringify(data);
-}
-
-// No validation baseline
-export function noValidateStringifySmall(data: any): any {
-  return JSON.stringify(data);
-}
-
-export function noValidateStringifyMedium(data: any): any {
-  return JSON.stringify(data);
-}
-
-export function noValidateStringifyLarge(data: any): any {
-  return JSON.stringify(data);
-}
-
-// Zod validation (validate then stringify)
-export function zodStringifySmall(data: any): any {
-  return JSON.stringify(zodSmallPayload.parse(data));
-}
-
-export function zodStringifyMedium(data: any): any {
-  return JSON.stringify(zodMediumPayload.parse(data));
-}
-
-export function zodStringifyLarge(data: any): any {
-  return JSON.stringify(zodLargePayload.parse(data));
-}
-
-// === Large array (1000 items) ===
-
-const zodLargeArray = z.array(zodLargePayload);
-
-// Typical
-export function parseLargeArray(json: string): LargePayload[] {
-  return JSON.parse(json);
-}
-
-export function stringifyLargeArray(data: LargePayload[]): string {
-  return JSON.stringify(data);
-}
-
-// No validation baseline
-export function noValidateParseLargeArray(json: any): any {
-  return JSON.parse(json);
-}
-
-export function noValidateStringifyLargeArray(data: any): any {
-  return JSON.stringify(data);
-}
-
-// Zod validation
-export function zodParseLargeArray(json: any): any {
-  return zodLargeArray.parse(JSON.parse(json));
-}
-
-export function zodStringifyLargeArray(data: any): any {
-  return JSON.stringify(zodLargeArray.parse(data));
-}
+export const typiaStringifySmall = typia.json.createStringify<SmallPayload>();
+export const typiaStringifyMedium = typia.json.createStringify<MediumPayload>();
+export const typiaStringifyLarge = typia.json.createStringify<LargePayload>();
+export const typiaStringifyLargeArray = typia.json.createStringify<LargePayload[]>();
 
 // Test data
 export const testSmallPayload: SmallPayload = {

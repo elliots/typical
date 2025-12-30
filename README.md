@@ -87,3 +87,6 @@ But basically you shouldn't need to care about how it works internally, it makes
 
 ## Credits
 The actual validation work is done by [typia](https://github.com/samchon/typia). This package just generates the necessary code to call typia's functions based on your TypeScript types.
+
+> NOTE: The whole package was all mostly LLM. Feel free to improve it without care for the author's feelings. 
+

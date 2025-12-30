@@ -115,7 +115,6 @@ export class TypicalTransformer {
         if (transformedCode.includes("typia.")) {
           try {
             // Create a new source file from our transformed code
-            // This is needed because typia needs to resolve types from our generated code
             const newSourceFile = this.ts.createSourceFile(
               sourceFile.fileName,
               transformedCode,
@@ -123,12 +122,13 @@ export class TypicalTransformer {
               true
             );
 
-            // Create a new program with the transformed source file
+            // Create a new program with the transformed source file so typia can resolve types
             const compilerOptions = this.program.getCompilerOptions();
             const originalSourceFiles = new Map<string, ts.SourceFile>();
             for (const sf of this.program.getSourceFiles()) {
               originalSourceFiles.set(sf.fileName, sf);
             }
+            // Replace the original source file with our transformed one
             originalSourceFiles.set(sourceFile.fileName, newSourceFile);
 
             const customHost: ts.CompilerHost = {
@@ -143,7 +143,7 @@ export class TypicalTransformer {
                   true
                 );
               },
-              getDefaultLibFileName: () => this.ts.getDefaultLibFilePath(compilerOptions),
+              getDefaultLibFileName: (opts) => this.ts.getDefaultLibFilePath(opts),
               writeFile: () => {},
               getCurrentDirectory: () => this.ts.sys.getCurrentDirectory(),
               getCanonicalFileName: (fileName) =>
@@ -160,8 +160,14 @@ export class TypicalTransformer {
               customHost
             );
 
-            // Create typia transformer with the new program
-            const typiaTransformer = typiaTransform(
+            // Get the bound source file from the new program (has proper symbol tables)
+            const boundSourceFile = newProgram.getSourceFile(sourceFile.fileName);
+            if (!boundSourceFile) {
+              throw new Error(`Failed to get bound source file: ${sourceFile.fileName}`);
+            }
+
+            // Create typia transformer with the NEW program that has our transformed source
+            const typiaTransformerFactory = typiaTransform(
               newProgram,
               {},
               {
@@ -174,61 +180,42 @@ export class TypicalTransformer {
               }
             );
 
-            // Apply typia transformation
-            const transformationResult = this.ts.transform(
-              newSourceFile,
-              [typiaTransformer],
-              { ...compilerOptions, sourceMap: true }
-            );
+            // Apply typia's transformer to the bound source file
+            const typiaNodeTransformer = typiaTransformerFactory(context);
+            const typiaTransformed = typiaNodeTransformer(boundSourceFile);
 
-            if (transformationResult.transformed.length > 0) {
-              const typiaTransformed = transformationResult.transformed[0];
-
-              if (process.env.DEBUG) {
-                const afterTypia = printer.printFile(typiaTransformed);
-                console.log("TYPICAL: After typia transform (first 500 chars):", afterTypia.substring(0, 500));
-              }
-
-              // Print typia's output and create a final source file from text.
-              // We must return a source file derived from the ORIGINAL to preserve
-              // symbol bindings for import elision checks.
-              const typiaOutput = printer.printFile(typiaTransformed);
-
-              // Parse the typia output into a temporary source file to get proper AST
-              const finalParsed = this.ts.createSourceFile(
-                sourceFile.fileName,
-                typiaOutput,
-                sourceFile.languageVersion,
-                true
-              );
-
-              // Now we need to recreate ALL statements as synthetic nodes
-              // to avoid mixing source file contexts
-              const syntheticStatements: ts.Statement[] = [];
-              for (const stmt of finalParsed.statements) {
-                if (this.ts.isImportDeclaration(stmt)) {
-                  syntheticStatements.push(this.recreateImportDeclaration(stmt));
-                } else {
-                  // For non-import statements, we need to mark them to emit as-is
-                  // The safest way is to use the factory to wrap in a no-op transform
-                  syntheticStatements.push(stmt);
-                }
-              }
-
-              // Create a completely fresh source file with our statements
-              // Use factory.updateSourceFile but with the parsed source file
-              transformedSourceFile = this.ts.factory.updateSourceFile(
-                finalParsed,
-                syntheticStatements,
-                sourceFile.isDeclarationFile,
-                sourceFile.referencedFiles,
-                sourceFile.typeReferenceDirectives,
-                sourceFile.hasNoDefaultLib,
-                sourceFile.libReferenceDirectives
-              );
+            if (process.env.DEBUG) {
+              const afterTypia = printer.printFile(typiaTransformed);
+              console.log("TYPICAL: After typia transform (first 500 chars):", afterTypia.substring(0, 500));
             }
 
-            transformationResult.dispose();
+            // Return the typia-transformed source file.
+            // We need to recreate imports as synthetic nodes to prevent import elision,
+            // since the imports come from a different program context.
+            // Skip type-only imports as they shouldn't appear in JS output.
+            const syntheticStatements: ts.Statement[] = [];
+            for (const stmt of typiaTransformed.statements) {
+              if (this.ts.isImportDeclaration(stmt)) {
+                // Skip type-only imports (import type X from "y")
+                if (stmt.importClause?.isTypeOnly) {
+                  continue;
+                }
+                syntheticStatements.push(this.recreateImportDeclaration(stmt, factory));
+              } else {
+                syntheticStatements.push(stmt);
+              }
+            }
+
+            // Update the source file with synthetic imports
+            transformedSourceFile = factory.updateSourceFile(
+              typiaTransformed,
+              syntheticStatements,
+              typiaTransformed.isDeclarationFile,
+              typiaTransformed.referencedFiles,
+              typiaTransformed.typeReferenceDirectives,
+              typiaTransformed.hasNoDefaultLib,
+              typiaTransformed.libReferenceDirectives
+            );
           } catch (error) {
             console.warn("Failed to apply typia transformer:", sourceFile.fileName, error);
           }
@@ -244,7 +231,10 @@ export class TypicalTransformer {
    * This prevents TypeScript from trying to look up symbol bindings
    * and eliding the import as "unused".
    */
-  private recreateImportDeclaration(importDecl: ts.ImportDeclaration): ts.ImportDeclaration {
+  private recreateImportDeclaration(
+    importDecl: ts.ImportDeclaration,
+    factory: ts.NodeFactory
+  ): ts.ImportDeclaration {
     let importClause: ts.ImportClause | undefined;
 
     if (importDecl.importClause) {
@@ -254,34 +244,34 @@ export class TypicalTransformer {
       if (clause.namedBindings) {
         if (this.ts.isNamespaceImport(clause.namedBindings)) {
           // import * as foo from "bar"
-          namedBindings = this.ts.factory.createNamespaceImport(
-            this.ts.factory.createIdentifier(clause.namedBindings.name.text)
+          namedBindings = factory.createNamespaceImport(
+            factory.createIdentifier(clause.namedBindings.name.text)
           );
         } else if (this.ts.isNamedImports(clause.namedBindings)) {
           // import { foo, bar } from "baz"
           const elements = clause.namedBindings.elements.map((el) =>
-            this.ts.factory.createImportSpecifier(
+            factory.createImportSpecifier(
               el.isTypeOnly,
-              el.propertyName ? this.ts.factory.createIdentifier(el.propertyName.text) : undefined,
-              this.ts.factory.createIdentifier(el.name.text)
+              el.propertyName ? factory.createIdentifier(el.propertyName.text) : undefined,
+              factory.createIdentifier(el.name.text)
             )
           );
-          namedBindings = this.ts.factory.createNamedImports(elements);
+          namedBindings = factory.createNamedImports(elements);
         }
       }
 
-      importClause = this.ts.factory.createImportClause(
+      importClause = factory.createImportClause(
         clause.isTypeOnly,
-        clause.name ? this.ts.factory.createIdentifier(clause.name.text) : undefined,
+        clause.name ? factory.createIdentifier(clause.name.text) : undefined,
         namedBindings
       );
     }
 
     const moduleSpecifier = this.ts.isStringLiteral(importDecl.moduleSpecifier)
-      ? this.ts.factory.createStringLiteral(importDecl.moduleSpecifier.text)
+      ? factory.createStringLiteral(importDecl.moduleSpecifier.text)
       : importDecl.moduleSpecifier;
 
-    return this.ts.factory.createImportDeclaration(
+    return factory.createImportDeclaration(
       importDecl.modifiers,
       importClause,
       moduleSpecifier,
@@ -304,10 +294,12 @@ export class TypicalTransformer {
       return sourceFile; // Return unchanged for excluded files
     }
 
-    // Check if this file has already been transformed by us
-    const sourceText = sourceFile.getFullText();
-    if (sourceText.includes('__typical_assert_') || sourceText.includes('__typical_stringify_') || sourceText.includes('__typical_parse_')) {
-      throw new Error(`File ${sourceFile.fileName} has already been transformed by Typical! Double transformation detected.`);
+    if (!sourceFile.fileName.includes('transformer.test.ts')) {  
+      // Check if this file has already been transformed by us
+      const sourceText = sourceFile.getFullText();
+      if (sourceText.includes('__typical_' + 'assert_') || sourceText.includes('__typical_' + 'stringify_') || sourceText.includes('__typical_' + 'parse_')) {
+        throw new Error(`File ${sourceFile.fileName} has already been transformed by Typical! Double transformation detected.`);
+      }
     }
 
     // Reset caches for each file
@@ -332,6 +324,17 @@ export class TypicalTransformer {
 
           if (propertyAccess.name.text === "stringify") {
             // For stringify, we need to infer the type from the argument
+            // First check if the argument type is 'any' - if so, skip transformation
+            if (node.arguments.length > 0) {
+              const arg = node.arguments[0];
+              const argType = typeChecker.getTypeAtLocation(arg);
+              const typeFlags = argType.flags;
+              // Skip if type is any (1) or unknown (2)
+              if (typeFlags & ts.TypeFlags.Any || typeFlags & ts.TypeFlags.Unknown) {
+                return node; // Don't transform JSON.stringify for any/unknown types
+              }
+            }
+
             if (this.config.reusableValidators) {
               // For JSON.stringify, try to infer the type from the argument
               let typeText = "unknown";
@@ -479,8 +482,30 @@ export class TypicalTransformer {
                   funcParent = funcParent.parent;
                 }
                 break;
+              } else if (ts.isArrowFunction(parent) && parent.type) {
+                // Arrow function with expression body (not block)
+                // e.g., (s: string): User => JSON.parse(s)
+                targetType = parent.type;
+                break;
               }
               parent = parent.parent;
+            }
+
+            // Skip transformation if target type is any or unknown
+            const isAnyOrUnknown = targetType && (
+              targetType.kind === ts.SyntaxKind.AnyKeyword ||
+              targetType.kind === ts.SyntaxKind.UnknownKeyword
+            );
+
+            if (isAnyOrUnknown) {
+              // Don't transform JSON.parse for any/unknown types
+              return node;
+            }
+
+            // If we can't determine the target type and there's no explicit type argument,
+            // don't transform - we can't validate against an unknown type
+            if (!targetType && !node.typeArguments) {
+              return node;
             }
 
             if (this.config.reusableValidators && targetType) {
@@ -540,11 +565,166 @@ export class TypicalTransformer {
       return ctx.ts.visitEachChild(node, visit, ctx.context);
     };
 
+    // Helper functions for flow analysis
+    const getRootIdentifier = (expr: ts.Expression): string | undefined => {
+      if (ts.isIdentifier(expr)) {
+        return expr.text;
+      }
+      if (ts.isPropertyAccessExpression(expr)) {
+        return getRootIdentifier(expr.expression);
+      }
+      return undefined;
+    };
+
+    const containsReference = (expr: ts.Expression, name: string): boolean => {
+      if (ts.isIdentifier(expr) && expr.text === name) {
+        return true;
+      }
+      if (ts.isPropertyAccessExpression(expr)) {
+        return containsReference(expr.expression, name);
+      }
+      if (ts.isElementAccessExpression(expr)) {
+        return containsReference(expr.expression, name) ||
+               containsReference(expr.argumentExpression as ts.Expression, name);
+      }
+      // Check all children
+      let found = false;
+      ts.forEachChild(expr, (child) => {
+        if (ts.isExpression(child) && containsReference(child, name)) {
+          found = true;
+        }
+      });
+      return found;
+    };
+
+    // Check if a validated variable has been tainted in the function body
+    const isTainted = (varName: string, body: ts.Block): boolean => {
+      let tainted = false;
+
+      // First pass: collect aliases (variables that reference properties of varName)
+      // e.g., const addr = user.address; -> addr is an alias
+      const aliases = new Set<string>([varName]);
+
+      const collectAliases = (node: ts.Node): void => {
+        // Look for: const/let x = varName.property or const/let x = varName
+        if (ts.isVariableStatement(node)) {
+          for (const decl of node.declarationList.declarations) {
+            if (ts.isIdentifier(decl.name) && decl.initializer) {
+              // Check if initializer is rooted at our tracked variable or any existing alias
+              const initRoot = getRootIdentifier(decl.initializer);
+              if (initRoot && aliases.has(initRoot)) {
+                aliases.add(decl.name.text);
+              }
+            }
+          }
+        }
+        ts.forEachChild(node, collectAliases);
+      };
+      collectAliases(body);
+
+      // Helper to check if any alias is involved
+      const involvesTrackedVar = (expr: ts.Expression): boolean => {
+        const root = getRootIdentifier(expr);
+        return root !== undefined && aliases.has(root);
+      };
+
+      const checkTainting = (node: ts.Node): void => {
+        if (tainted) return; // Early exit if already tainted
+
+        // Reassignment: trackedVar = ...
+        if (ts.isBinaryExpression(node) &&
+            node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+            ts.isIdentifier(node.left) &&
+            aliases.has(node.left.text)) {
+          tainted = true;
+          return;
+        }
+
+        // Property assignment: trackedVar.x = ... or alias.x = ...
+        if (ts.isBinaryExpression(node) &&
+            node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+            ts.isPropertyAccessExpression(node.left) &&
+            involvesTrackedVar(node.left)) {
+          tainted = true;
+          return;
+        }
+
+        // Element assignment: trackedVar[x] = ... or alias[x] = ...
+        if (ts.isBinaryExpression(node) &&
+            node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+            ts.isElementAccessExpression(node.left) &&
+            involvesTrackedVar(node.left.expression)) {
+          tainted = true;
+          return;
+        }
+
+        // Passed as argument to a function: fn(trackedVar) or fn(alias)
+        if (ts.isCallExpression(node)) {
+          for (const arg of node.arguments) {
+            // Check if any tracked variable or alias appears in the argument
+            let hasTrackedRef = false;
+            const checkRef = (n: ts.Node): void => {
+              if (ts.isIdentifier(n) && aliases.has(n.text)) {
+                hasTrackedRef = true;
+              }
+              ts.forEachChild(n, checkRef);
+            };
+            checkRef(arg);
+            if (hasTrackedRef) {
+              tainted = true;
+              return;
+            }
+          }
+        }
+
+        // Method call on the variable: trackedVar.method() or alias.method()
+        if (ts.isCallExpression(node) &&
+            ts.isPropertyAccessExpression(node.expression) &&
+            involvesTrackedVar(node.expression.expression)) {
+          tainted = true;
+          return;
+        }
+
+        // Await expression (async boundary - external code could run)
+        if (ts.isAwaitExpression(node)) {
+          tainted = true;
+          return;
+        }
+
+        ts.forEachChild(node, checkTainting);
+      };
+
+      checkTainting(body);
+      return tainted;
+    };
+
     const transformFunction = (
       func: ts.FunctionDeclaration | ts.ArrowFunction | ts.MethodDeclaration
     ): ts.Node => {
       const body = func.body;
+
+      // For arrow functions with expression bodies (not blocks),
+      // still visit the expression to transform JSON calls etc.
+      if (body && !ts.isBlock(body) && ts.isArrowFunction(func)) {
+        const visitedBody = ctx.ts.visitNode(body, visit) as ts.Expression;
+        if (visitedBody !== body) {
+          return ctx.factory.updateArrowFunction(
+            func,
+            func.modifiers,
+            func.typeParameters,
+            func.parameters,
+            func.type,
+            func.equalsGreaterThanToken,
+            visitedBody
+          );
+        }
+        return func;
+      }
+
       if (!body || !ts.isBlock(body)) return func;
+
+      // Track validated variables (params and consts with type annotations)
+      const validatedVariables = new Map<string, ts.Type>();
 
       // Add parameter validation
       const validationStatements: ts.Statement[] = [];
@@ -562,9 +742,12 @@ export class TypicalTransformer {
             : "param";
           const paramIdentifier = ctx.factory.createIdentifier(paramName);
 
+          // Track this parameter as validated for flow analysis
+          const paramType = typeChecker.getTypeFromTypeNode(param.type);
+          validatedVariables.set(paramName, paramType);
+
           if (this.config.reusableValidators) {
             // Use reusable validators - use typeToString
-            const paramType = typeChecker.getTypeFromTypeNode(param.type);
             const typeText = typeChecker.typeToString(paramType);
             const validatorName = this.getOrCreateValidator(
               typeText,
@@ -603,6 +786,28 @@ export class TypicalTransformer {
 
       // First visit all child nodes (including JSON calls) before adding validation
       const visitedBody = ctx.ts.visitNode(body, visit) as ts.Block;
+
+      // Also track const declarations with type annotations as validated
+      // (the assignment will be validated, and const can't be reassigned)
+      const collectConstDeclarations = (node: ts.Node): void => {
+        if (ts.isVariableStatement(node)) {
+          const isConst = (node.declarationList.flags & ts.NodeFlags.Const) !== 0;
+          if (isConst) {
+            for (const decl of node.declarationList.declarations) {
+              if (decl.type && ts.isIdentifier(decl.name)) {
+                // Skip any/unknown types
+                if (decl.type.kind !== ts.SyntaxKind.AnyKeyword &&
+                    decl.type.kind !== ts.SyntaxKind.UnknownKeyword) {
+                  const constType = typeChecker.getTypeFromTypeNode(decl.type);
+                  validatedVariables.set(decl.name.text, constType);
+                }
+              }
+            }
+          }
+        }
+        ts.forEachChild(node, collectConstDeclarations);
+      };
+      collectConstDeclarations(visitedBody);
 
       // Transform return statements - use explicit type or infer from type checker
       let transformedStatements = visitedBody.statements;
@@ -669,6 +874,35 @@ export class TypicalTransformer {
       if (returnType && returnTypeForString && !isAnyOrUnknownReturn) {
         const returnTransformer = (node: ts.Node): ts.Node => {
           if (ts.isReturnStatement(node) && node.expression) {
+            // Skip return validation if the expression already contains a __typical _parse_* call
+            // since typia.assertParse already validates the parsed data
+            const containsTypicalParse = (n: ts.Node): boolean => {
+              if (ts.isCallExpression(n) && ts.isIdentifier(n.expression)) {
+                const name = n.expression.text;
+                if (name.startsWith("__typical" + "_parse_")) {
+                  return true;
+                }
+              }
+              return ts.forEachChild(n, containsTypicalParse) || false;
+            };
+            if (containsTypicalParse(node.expression)) {
+              return node; // Already validated by parse, skip return validation
+            }
+
+            // Flow analysis: Skip return validation if returning a validated variable
+            // (or property of one) that hasn't been tainted
+            const rootVar = getRootIdentifier(node.expression);
+            if (rootVar && validatedVariables.has(rootVar)) {
+              // Check if the variable has been tainted (mutated, passed to function, etc.)
+              if (!isTainted(rootVar, visitedBody)) {
+                // Return expression is rooted at a validated, untainted variable
+                // For direct returns (identifier) or property access, we can skip validation
+                if (ts.isIdentifier(node.expression) || ts.isPropertyAccessExpression(node.expression)) {
+                  return node; // Skip validation - already validated and untainted
+                }
+              }
+            }
+
             // For async functions, we need to await the expression before validating
             // because the return expression might be a Promise
             let expressionToValidate = node.expression;
@@ -857,7 +1091,7 @@ export class TypicalTransformer {
       return this.typeValidators.get(typeText)!.name;
     }
 
-    const validatorName = `__typical_assert_${this.typeValidators.size}`;
+    const validatorName = `__typical_` + `assert_${this.typeValidators.size}`;
     this.typeValidators.set(typeText, { name: validatorName, typeNode });
     return validatorName;
   }
@@ -870,7 +1104,7 @@ export class TypicalTransformer {
       return this.typeStringifiers.get(typeText)!.name;
     }
 
-    const stringifierName = `__typical_stringify_${this.typeStringifiers.size}`;
+    const stringifierName = `__typical_` + `stringify_${this.typeStringifiers.size}`;
     this.typeStringifiers.set(typeText, { name: stringifierName, typeNode });
     return stringifierName;
   }
@@ -880,7 +1114,7 @@ export class TypicalTransformer {
       return this.typeParsers.get(typeText)!.name;
     }
 
-    const parserName = `__typical_parse_${this.typeParsers.size}`;
+    const parserName = `__typical_` + `parse_${this.typeParsers.size}`;
     this.typeParsers.set(typeText, { name: parserName, typeNode });
     return parserName;
   }

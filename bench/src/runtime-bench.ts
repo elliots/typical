@@ -57,32 +57,23 @@ import {
   testComplexConfig,
 } from "./scenarios/complex-types.js";
 
-// JSON types
+// JSON types - direct validators for inline benchmarks
 import {
-  parseSmall,
-  parseMedium,
-  parseLarge,
-  parseLargeArray,
-  noValidateParseSmall,
-  noValidateParseMedium,
-  noValidateParseLarge,
-  noValidateParseLargeArray,
-  zodParseSmall,
-  zodParseMedium,
-  zodParseLarge,
-  zodParseLargeArray,
-  stringifySmall,
-  stringifyMedium,
-  stringifyLarge,
-  stringifyLargeArray,
-  noValidateStringifySmall,
-  noValidateStringifyMedium,
-  noValidateStringifyLarge,
-  noValidateStringifyLargeArray,
-  zodStringifySmall,
-  zodStringifyMedium,
-  zodStringifyLarge,
-  zodStringifyLargeArray,
+  // Typia validators (transformed at compile time)
+  typiaParseSmall,
+  typiaParseMedium,
+  typiaParseLarge,
+  typiaParseLargeArray,
+  typiaStringifySmall,
+  typiaStringifyMedium,
+  typiaStringifyLarge,
+  typiaStringifyLargeArray,
+  // Zod schemas
+  zodSmallPayload,
+  zodMediumPayload,
+  zodLargePayload,
+  zodLargeArray,
+  // Test data
   testSmallPayload,
   testMediumPayload,
   testLargePayload,
@@ -98,8 +89,8 @@ interface BenchmarkResult {
   noValidationOps: number;
   typicalOps: number;
   zodOps: number;
-  typicalOverhead: number;
-  zodOverhead: number;
+  typicalVsNoValid: number; // % overhead vs no validation
+  typicalVsZod: number; // % faster/slower vs zod
 }
 
 async function runBenchmark(
@@ -130,16 +121,16 @@ async function runBenchmark(
   const typicalOps = typicalResult.throughput?.mean ?? typicalResult.hz ?? 0;
   const zodOps = zodResult.throughput?.mean ?? zodResult.hz ?? 0;
 
-  const typicalOverhead = typicalOps > 0 ? ((noValidationOps - typicalOps) / typicalOps) * 100 : 0;
-  const zodOverhead = zodOps > 0 ? ((noValidationOps - zodOps) / zodOps) * 100 : 0;
+  const typicalVsNoValid = typicalOps > 0 ? ((noValidationOps - typicalOps) / typicalOps) * 100 : 0;
+  const typicalVsZod = zodOps > 0 ? ((zodOps - typicalOps) / zodOps) * 100 : 0;
 
   return {
     name,
     noValidationOps,
     typicalOps,
     zodOps,
-    typicalOverhead,
-    zodOverhead,
+    typicalVsNoValid,
+    typicalVsZod,
   };
 }
 
@@ -152,10 +143,29 @@ function formatOps(ops: number): string {
   return ops.toFixed(0);
 }
 
+// ANSI color codes
+const colors = {
+  green: "\x1b[32m",
+  red: "\x1b[31m",
+  yellow: "\x1b[33m",
+  reset: "\x1b[0m",
+};
+
+// Color a value based on whether lower is better or higher is better
+function colorValue(value: number, text: string, lowerIsBetter: boolean, threshold = 5): string {
+  const isNeutral = Math.abs(value) <= threshold;
+  if (isNeutral) {
+    return `${colors.yellow}${text}${colors.reset}`;
+  }
+  const isGood = lowerIsBetter ? value < 0 : value > 0;
+  const color = isGood ? colors.green : colors.red;
+  return `${color}${text}${colors.reset}`;
+}
+
 function printResults(results: BenchmarkResult[]) {
   console.log("\n");
-  console.log("Runtime Validation Benchmark Results (typical vs zod)");
-  console.log("======================================================");
+  console.log("Runtime Validation Benchmark Results");
+  console.log("=====================================");
   console.log("");
 
   // Calculate column widths
@@ -166,28 +176,33 @@ function printResults(results: BenchmarkResult[]) {
   console.log(
     "Scenario".padEnd(nameWidth) +
       " | " +
-      "No Valid".padStart(opsWidth) +
+      "Nothing".padStart(opsWidth) +
       " | " +
       "Typical".padStart(opsWidth) +
       " | " +
       "Zod".padStart(opsWidth) +
       " | " +
-      "Typical %".padStart(10) +
+      "vs Nothing".padStart(11) +
       " | " +
-      "Zod %".padStart(10)
+      "vs Zod".padStart(10)
   );
-  console.log("-".repeat(nameWidth + opsWidth * 3 + 35));
+  console.log("-".repeat(nameWidth + opsWidth * 3 + 36));
 
   // Results
   for (const result of results) {
-    const typicalStr =
-      result.typicalOverhead >= 0
-        ? `+${result.typicalOverhead.toFixed(0)}%`
-        : `${result.typicalOverhead.toFixed(0)}%`;
-    const zodStr =
-      result.zodOverhead >= 0
-        ? `+${result.zodOverhead.toFixed(0)}%`
-        : `${result.zodOverhead.toFixed(0)}%`;
+    const vsNoValidStr =
+      result.typicalVsNoValid >= 0
+        ? `+${result.typicalVsNoValid.toFixed(0)}%`
+        : `${result.typicalVsNoValid.toFixed(0)}%`;
+    const vsZodStr =
+      result.typicalVsZod >= 0
+        ? `+${result.typicalVsZod.toFixed(0)}%`
+        : `${result.typicalVsZod.toFixed(0)}%`;
+
+    // vs Nothing: lower is better (less overhead = green)
+    const coloredVsNoValid = colorValue(result.typicalVsNoValid, vsNoValidStr.padStart(11), true);
+    // vs Zod: lower is better (negative = faster than zod = green)
+    const coloredVsZod = colorValue(result.typicalVsZod, vsZodStr.padStart(10), true);
 
     console.log(
       result.name.padEnd(nameWidth) +
@@ -198,14 +213,15 @@ function printResults(results: BenchmarkResult[]) {
         " | " +
         `${formatOps(result.zodOps)}/s`.padStart(opsWidth) +
         " | " +
-        typicalStr.padStart(10) +
+        coloredVsNoValid +
         " | " +
-        zodStr.padStart(10)
+        coloredVsZod
     );
   }
 
   console.log("");
-  console.log("% = overhead compared to no validation (lower is better)");
+  console.log("vs Nothing = overhead vs no validation (lower is better)");
+  console.log("vs Zod = negative means faster than zod (better)");
   console.log("");
 }
 
@@ -317,81 +333,81 @@ async function main() {
     )
   );
 
-  // JSON.parse benchmarks
+  // JSON.parse benchmarks - direct calls without function wrapper overhead
   console.log("Benchmarking JSON.parse...");
 
   results.push(
     await runBenchmark(
       "JSON.parse (small)",
-      () => noValidateParseSmall(testSmallJson),
-      () => parseSmall(testSmallJson),
-      () => zodParseSmall(testSmallJson)
+      () => JSON.parse(testSmallJson),
+      () => typiaParseSmall(testSmallJson),
+      () => zodSmallPayload.parse(JSON.parse(testSmallJson))
     )
   );
 
   results.push(
     await runBenchmark(
       "JSON.parse (medium)",
-      () => noValidateParseMedium(testMediumJson),
-      () => parseMedium(testMediumJson),
-      () => zodParseMedium(testMediumJson)
+      () => JSON.parse(testMediumJson),
+      () => typiaParseMedium(testMediumJson),
+      () => zodMediumPayload.parse(JSON.parse(testMediumJson))
     )
   );
 
   results.push(
     await runBenchmark(
       "JSON.parse (large)",
-      () => noValidateParseLarge(testLargeJson),
-      () => parseLarge(testLargeJson),
-      () => zodParseLarge(testLargeJson)
+      () => JSON.parse(testLargeJson),
+      () => typiaParseLarge(testLargeJson),
+      () => zodLargePayload.parse(JSON.parse(testLargeJson))
     )
   );
 
   results.push(
     await runBenchmark(
       "JSON.parse (1000 large)",
-      () => noValidateParseLargeArray(testLargeArrayJson),
-      () => parseLargeArray(testLargeArrayJson),
-      () => zodParseLargeArray(testLargeArrayJson)
+      () => JSON.parse(testLargeArrayJson),
+      () => typiaParseLargeArray(testLargeArrayJson),
+      () => zodLargeArray.parse(JSON.parse(testLargeArrayJson))
     )
   );
 
-  // JSON.stringify benchmarks
+  // JSON.stringify benchmarks - direct calls without function wrapper overhead
   console.log("Benchmarking JSON.stringify...");
 
   results.push(
     await runBenchmark(
       "JSON.stringify (small)",
-      () => noValidateStringifySmall(testSmallPayload),
-      () => stringifySmall(testSmallPayload),
-      () => zodStringifySmall(testSmallPayload)
+      () => JSON.stringify(testSmallPayload as any),
+      () => JSON.stringify(testSmallPayload),
+      () => JSON.stringify(zodSmallPayload.parse(testSmallPayload) as any)
     )
   );
 
   results.push(
     await runBenchmark(
       "JSON.stringify (medium)",
-      () => noValidateStringifyMedium(testMediumPayload),
-      () => stringifyMedium(testMediumPayload),
-      () => zodStringifyMedium(testMediumPayload)
+      () => JSON.stringify(testMediumPayload as any),
+      () => JSON.stringify(testMediumPayload),
+      () => JSON.stringify(zodMediumPayload.parse(testMediumPayload) as any)
     )
   );
 
   results.push(
     await runBenchmark(
       "JSON.stringify (large)",
-      () => noValidateStringifyLarge(testLargePayload),
-      () => stringifyLarge(testLargePayload),
-      () => zodStringifyLarge(testLargePayload)
+      () => JSON.stringify(testLargePayload as any),
+      () => JSON.stringify(testLargePayload),
+      () => JSON.stringify(zodLargePayload.parse(testLargePayload) as any)
     )
   );
 
   results.push(
     await runBenchmark(
       "JSON.stringify (1000 large)",
-      () => noValidateStringifyLargeArray(testLargeArrayPayload),
-      () => stringifyLargeArray(testLargeArrayPayload),
-      () => zodStringifyLargeArray(testLargeArrayPayload)
+      () => JSON.stringify(testLargeArrayPayload as any),
+      () => JSON.stringify(testLargeArrayPayload),
+      () => JSON.stringify(zodLargeArray.parse(testLargeArrayPayload) as any)
     )
   );
 
