@@ -1,5 +1,4 @@
 import { Bench } from "tinybench";
-import { z } from "zod";
 
 // Primitive types
 import {
@@ -9,6 +8,9 @@ import {
   noValidateString,
   noValidateNumber,
   noValidateBoolean,
+  zodValidateString,
+  zodValidateNumber,
+  zodValidateBoolean,
   testString,
   testNumber,
   testBoolean,
@@ -18,6 +20,7 @@ import {
 import {
   validateSimpleUser,
   noValidateSimpleUser,
+  zodValidateSimpleUser,
   testSimpleUser,
 } from "./scenarios/object-types.js";
 
@@ -25,6 +28,7 @@ import {
 import {
   validateNestedUser,
   noValidateNestedUser,
+  zodValidateNestedUser,
   testNestedUser,
 } from "./scenarios/nested-types.js";
 
@@ -32,6 +36,7 @@ import {
 import {
   validateArray,
   noValidateArray,
+  zodValidateArray,
   testArray10,
   testArray100,
 } from "./scenarios/array-types.js";
@@ -40,82 +45,53 @@ import {
 import {
   validateTaskWithUnion,
   noValidateTaskWithUnion,
+  zodValidateTaskWithUnion,
   validateUserWithTemplates,
   noValidateUserWithTemplates,
+  zodValidateUserWithTemplates,
   validateComplexConfig,
   noValidateComplexConfig,
+  zodValidateComplexConfig,
   testTaskWithUnion,
   testUserWithTemplates,
   testComplexConfig,
 } from "./scenarios/complex-types.js";
 
-// Zod schemas for comparison
-const zodString = z.string();
-const zodNumber = z.number();
-const zodBoolean = z.boolean();
-
-const zodSimpleUser = z.object({
-  name: z.string(),
-  age: z.number(),
-  active: z.boolean(),
-});
-
-const zodAddress = z.object({
-  street: z.string(),
-  city: z.string(),
-  country: z.string(),
-  zip: z.string(),
-});
-
-const zodCompany = z.object({
-  name: z.string(),
-  address: zodAddress,
-});
-
-const zodNestedUser = z.object({
-  name: z.string(),
-  age: z.number(),
-  email: z.string(),
-  address: zodAddress,
-  company: zodCompany,
-});
-
-const zodArrayItem = z.object({
-  id: z.number(),
-  name: z.string(),
-  value: z.number(),
-});
-
-const zodArray = z.array(zodArrayItem);
-
-const zodTaskWithUnion = z.object({
-  id: z.number(),
-  title: z.string(),
-  status: z.enum(["pending", "active", "completed", "cancelled"]),
-  priority: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
-});
-
-const zodUserWithTemplates = z.object({
-  id: z.string().regex(/^.+-.+-.+-.+-.+$/),
-  email: z.string().regex(/^.+@.+\..+$/),
-  name: z.string(),
-});
-
-const zodComplexConfig = z.object({
-  name: z.string(),
-  version: z.string(),
-  settings: z.object({
-    enabled: z.boolean(),
-    timeout: z.number().optional(),
-    retries: z.number().optional(),
-    options: z.object({
-      debug: z.boolean().optional(),
-      verbose: z.boolean().optional(),
-      logLevel: z.enum(["error", "warn", "info", "debug"]).optional(),
-    }).optional(),
-  }),
-  tags: z.array(z.string()).optional(),
-});
+// JSON types
+import {
+  parseSmall,
+  parseMedium,
+  parseLarge,
+  parseLargeArray,
+  noValidateParseSmall,
+  noValidateParseMedium,
+  noValidateParseLarge,
+  noValidateParseLargeArray,
+  zodParseSmall,
+  zodParseMedium,
+  zodParseLarge,
+  zodParseLargeArray,
+  stringifySmall,
+  stringifyMedium,
+  stringifyLarge,
+  stringifyLargeArray,
+  noValidateStringifySmall,
+  noValidateStringifyMedium,
+  noValidateStringifyLarge,
+  noValidateStringifyLargeArray,
+  zodStringifySmall,
+  zodStringifyMedium,
+  zodStringifyLarge,
+  zodStringifyLargeArray,
+  testSmallPayload,
+  testMediumPayload,
+  testLargePayload,
+  testLargeArrayPayload,
+  testSmallJson,
+  testMediumJson,
+  testLargeJson,
+  testLargeArrayJson,
+} from "./scenarios/json-types.js";
 
 interface BenchmarkResult {
   name: string;
@@ -132,7 +108,7 @@ async function runBenchmark(
   typicalFn: () => void,
   zodFn: () => void
 ): Promise<BenchmarkResult> {
-  const bench = new Bench({ time: 500, warmupTime: 50, iterations: 1000 });
+  const bench = new Bench({ time: 100, warmupTime: 20, iterations: 100 });
 
   bench
     .add("no-validation", noValidationFn)
@@ -247,7 +223,7 @@ async function main() {
       "string",
       () => noValidateString(testString),
       () => validateString(testString),
-      () => zodString.parse(testString)
+      () => zodValidateString(testString)
     )
   );
 
@@ -256,7 +232,7 @@ async function main() {
       "number",
       () => noValidateNumber(testNumber),
       () => validateNumber(testNumber),
-      () => zodNumber.parse(testNumber)
+      () => zodValidateNumber(testNumber)
     )
   );
 
@@ -265,7 +241,7 @@ async function main() {
       "boolean",
       () => noValidateBoolean(testBoolean),
       () => validateBoolean(testBoolean),
-      () => zodBoolean.parse(testBoolean)
+      () => zodValidateBoolean(testBoolean)
     )
   );
 
@@ -274,19 +250,19 @@ async function main() {
 
   results.push(
     await runBenchmark(
-      "simple object (3 fields)",
+      "object w/ template literals",
       () => noValidateSimpleUser(testSimpleUser),
       () => validateSimpleUser(testSimpleUser),
-      () => zodSimpleUser.parse(testSimpleUser)
+      () => zodValidateSimpleUser(testSimpleUser)
     )
   );
 
   results.push(
     await runBenchmark(
-      "nested object (3 levels)",
+      "nested w/ template literals",
       () => noValidateNestedUser(testNestedUser),
       () => validateNestedUser(testNestedUser),
-      () => zodNestedUser.parse(testNestedUser)
+      () => zodValidateNestedUser(testNestedUser)
     )
   );
 
@@ -295,19 +271,19 @@ async function main() {
 
   results.push(
     await runBenchmark(
-      "array (10 items)",
+      "array w/ templates (10)",
       () => noValidateArray(testArray10),
       () => validateArray(testArray10),
-      () => zodArray.parse(testArray10)
+      () => zodValidateArray(testArray10)
     )
   );
 
   results.push(
     await runBenchmark(
-      "array (100 items)",
+      "array w/ templates (100)",
       () => noValidateArray(testArray100),
       () => validateArray(testArray100),
-      () => zodArray.parse(testArray100)
+      () => zodValidateArray(testArray100)
     )
   );
 
@@ -319,7 +295,7 @@ async function main() {
       "union types",
       () => noValidateTaskWithUnion(testTaskWithUnion),
       () => validateTaskWithUnion(testTaskWithUnion),
-      () => zodTaskWithUnion.parse(testTaskWithUnion)
+      () => zodValidateTaskWithUnion(testTaskWithUnion)
     )
   );
 
@@ -328,7 +304,7 @@ async function main() {
       "template literals",
       () => noValidateUserWithTemplates(testUserWithTemplates),
       () => validateUserWithTemplates(testUserWithTemplates),
-      () => zodUserWithTemplates.parse(testUserWithTemplates)
+      () => zodValidateUserWithTemplates(testUserWithTemplates)
     )
   );
 
@@ -337,7 +313,85 @@ async function main() {
       "complex config",
       () => noValidateComplexConfig(testComplexConfig),
       () => validateComplexConfig(testComplexConfig),
-      () => zodComplexConfig.parse(testComplexConfig)
+      () => zodValidateComplexConfig(testComplexConfig)
+    )
+  );
+
+  // JSON.parse benchmarks
+  console.log("Benchmarking JSON.parse...");
+
+  results.push(
+    await runBenchmark(
+      "JSON.parse (small)",
+      () => noValidateParseSmall(testSmallJson),
+      () => parseSmall(testSmallJson),
+      () => zodParseSmall(testSmallJson)
+    )
+  );
+
+  results.push(
+    await runBenchmark(
+      "JSON.parse (medium)",
+      () => noValidateParseMedium(testMediumJson),
+      () => parseMedium(testMediumJson),
+      () => zodParseMedium(testMediumJson)
+    )
+  );
+
+  results.push(
+    await runBenchmark(
+      "JSON.parse (large)",
+      () => noValidateParseLarge(testLargeJson),
+      () => parseLarge(testLargeJson),
+      () => zodParseLarge(testLargeJson)
+    )
+  );
+
+  results.push(
+    await runBenchmark(
+      "JSON.parse (1000 large)",
+      () => noValidateParseLargeArray(testLargeArrayJson),
+      () => parseLargeArray(testLargeArrayJson),
+      () => zodParseLargeArray(testLargeArrayJson)
+    )
+  );
+
+  // JSON.stringify benchmarks
+  console.log("Benchmarking JSON.stringify...");
+
+  results.push(
+    await runBenchmark(
+      "JSON.stringify (small)",
+      () => noValidateStringifySmall(testSmallPayload),
+      () => stringifySmall(testSmallPayload),
+      () => zodStringifySmall(testSmallPayload)
+    )
+  );
+
+  results.push(
+    await runBenchmark(
+      "JSON.stringify (medium)",
+      () => noValidateStringifyMedium(testMediumPayload),
+      () => stringifyMedium(testMediumPayload),
+      () => zodStringifyMedium(testMediumPayload)
+    )
+  );
+
+  results.push(
+    await runBenchmark(
+      "JSON.stringify (large)",
+      () => noValidateStringifyLarge(testLargePayload),
+      () => stringifyLarge(testLargePayload),
+      () => zodStringifyLarge(testLargePayload)
+    )
+  );
+
+  results.push(
+    await runBenchmark(
+      "JSON.stringify (1000 large)",
+      () => noValidateStringifyLargeArray(testLargeArrayPayload),
+      () => stringifyLargeArray(testLargeArrayPayload),
+      () => zodStringifyLargeArray(testLargeArrayPayload)
     )
   );
 

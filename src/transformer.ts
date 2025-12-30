@@ -104,29 +104,31 @@ export class TypicalTransformer {
           return transformedSourceFile;
         }
 
-        // Then apply typia if we added typia calls
+        // Apply typia transformation
         const printer = this.ts.createPrinter();
         const transformedCode = printer.printFile(transformedSourceFile);
 
+        if (process.env.DEBUG) {
+          console.log("TYPICAL: Before typia transform (first 500 chars):", transformedCode.substring(0, 500));
+        }
+
         if (transformedCode.includes("typia.")) {
           try {
-            // Apply typia transformation to files with typia calls
-
-            // Create a new source file with the transformed code, preserving original filename
+            // Create a new source file from our transformed code
+            // This is needed because typia needs to resolve types from our generated code
             const newSourceFile = this.ts.createSourceFile(
-              sourceFile.fileName, // Use original filename to maintain source map references
+              sourceFile.fileName,
               transformedCode,
               sourceFile.languageVersion,
               true
             );
 
-            // Create a new program with the transformed source file so typia's type checker works
+            // Create a new program with the transformed source file
             const compilerOptions = this.program.getCompilerOptions();
             const originalSourceFiles = new Map<string, ts.SourceFile>();
             for (const sf of this.program.getSourceFiles()) {
               originalSourceFiles.set(sf.fileName, sf);
             }
-            // Replace the original source file with the transformed one
             originalSourceFiles.set(sourceFile.fileName, newSourceFile);
 
             const customHost: ts.CompilerHost = {
@@ -158,19 +160,21 @@ export class TypicalTransformer {
               customHost
             );
 
-            // Create typia transformer with the NEW program that has the transformed source
+            // Create typia transformer with the new program
             const typiaTransformer = typiaTransform(
               newProgram,
               {},
               {
                 addDiagnostic(diag: ts.Diagnostic) {
-                  console.warn("Typia diagnostic:", diag);
+                  if (process.env.DEBUG) {
+                    console.warn("Typia diagnostic:", diag);
+                  }
                   return 0;
                 },
               }
             );
 
-            // Apply the transformer with source map preservation
+            // Apply typia transformation
             const transformationResult = this.ts.transform(
               newSourceFile,
               [typiaTransformer],
@@ -178,10 +182,50 @@ export class TypicalTransformer {
             );
 
             if (transformationResult.transformed.length > 0) {
-              const finalTransformed = transformationResult.transformed[0];
-              transformedSourceFile = finalTransformed;
+              const typiaTransformed = transformationResult.transformed[0];
 
-              // Typia transformation completed successfully
+              if (process.env.DEBUG) {
+                const afterTypia = printer.printFile(typiaTransformed);
+                console.log("TYPICAL: After typia transform (first 500 chars):", afterTypia.substring(0, 500));
+              }
+
+              // Print typia's output and create a final source file from text.
+              // We must return a source file derived from the ORIGINAL to preserve
+              // symbol bindings for import elision checks.
+              const typiaOutput = printer.printFile(typiaTransformed);
+
+              // Parse the typia output into a temporary source file to get proper AST
+              const finalParsed = this.ts.createSourceFile(
+                sourceFile.fileName,
+                typiaOutput,
+                sourceFile.languageVersion,
+                true
+              );
+
+              // Now we need to recreate ALL statements as synthetic nodes
+              // to avoid mixing source file contexts
+              const syntheticStatements: ts.Statement[] = [];
+              for (const stmt of finalParsed.statements) {
+                if (this.ts.isImportDeclaration(stmt)) {
+                  syntheticStatements.push(this.recreateImportDeclaration(stmt));
+                } else {
+                  // For non-import statements, we need to mark them to emit as-is
+                  // The safest way is to use the factory to wrap in a no-op transform
+                  syntheticStatements.push(stmt);
+                }
+              }
+
+              // Create a completely fresh source file with our statements
+              // Use factory.updateSourceFile but with the parsed source file
+              transformedSourceFile = this.ts.factory.updateSourceFile(
+                finalParsed,
+                syntheticStatements,
+                sourceFile.isDeclarationFile,
+                sourceFile.referencedFiles,
+                sourceFile.typeReferenceDirectives,
+                sourceFile.hasNoDefaultLib,
+                sourceFile.libReferenceDirectives
+              );
             }
 
             transformationResult.dispose();
@@ -193,6 +237,56 @@ export class TypicalTransformer {
         return transformedSourceFile;
       };
     };
+  }
+
+  /**
+   * Re-create an import declaration as a fully synthetic node.
+   * This prevents TypeScript from trying to look up symbol bindings
+   * and eliding the import as "unused".
+   */
+  private recreateImportDeclaration(importDecl: ts.ImportDeclaration): ts.ImportDeclaration {
+    let importClause: ts.ImportClause | undefined;
+
+    if (importDecl.importClause) {
+      const clause = importDecl.importClause;
+      let namedBindings: ts.NamedImportBindings | undefined;
+
+      if (clause.namedBindings) {
+        if (this.ts.isNamespaceImport(clause.namedBindings)) {
+          // import * as foo from "bar"
+          namedBindings = this.ts.factory.createNamespaceImport(
+            this.ts.factory.createIdentifier(clause.namedBindings.name.text)
+          );
+        } else if (this.ts.isNamedImports(clause.namedBindings)) {
+          // import { foo, bar } from "baz"
+          const elements = clause.namedBindings.elements.map((el) =>
+            this.ts.factory.createImportSpecifier(
+              el.isTypeOnly,
+              el.propertyName ? this.ts.factory.createIdentifier(el.propertyName.text) : undefined,
+              this.ts.factory.createIdentifier(el.name.text)
+            )
+          );
+          namedBindings = this.ts.factory.createNamedImports(elements);
+        }
+      }
+
+      importClause = this.ts.factory.createImportClause(
+        clause.isTypeOnly,
+        clause.name ? this.ts.factory.createIdentifier(clause.name.text) : undefined,
+        namedBindings
+      );
+    }
+
+    const moduleSpecifier = this.ts.isStringLiteral(importDecl.moduleSpecifier)
+      ? this.ts.factory.createStringLiteral(importDecl.moduleSpecifier.text)
+      : importDecl.moduleSpecifier;
+
+    return this.ts.factory.createImportDeclaration(
+      importDecl.modifiers,
+      importClause,
+      moduleSpecifier,
+      importDecl.attributes
+    );
   }
 
   /**

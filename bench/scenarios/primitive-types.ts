@@ -1,6 +1,12 @@
 // Primitive type validation benchmarks
-// These functions will be transformed by typical to add runtime validation
+import { z } from "zod";
 
+// Zod schemas
+const zodString = z.string();
+const zodNumber = z.number();
+const zodBoolean = z.boolean();
+
+// Typical validation - transformed by typical to add runtime validation
 export function validateString(value: string): string {
   return value;
 }
@@ -24,6 +30,19 @@ export function noValidateNumber(value: any): any {
 
 export function noValidateBoolean(value: any): any {
   return value;
+}
+
+// Zod validation - use 'any' return type so typical won't add validation
+export function zodValidateString(value: any): any {
+  return zodString.parse(value);
+}
+
+export function zodValidateNumber(value: any): any {
+  return zodNumber.parse(value);
+}
+
+export function zodValidateBoolean(value: any): any {
+  return zodBoolean.parse(value);
 }
 
 // Test data
