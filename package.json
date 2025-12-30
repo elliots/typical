@@ -20,7 +20,11 @@
     "dev": "npx tsc --watch",
     "test": "rm -f test/test.temp.ts &&npx tsc && node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
     "postinstall": "npx tsc",
-    "run-samples": "cd samples/esm && npm install && npm run start && cd ../ttsx && npm install && npm run start && cd ../tsc && npm install && npm run build && npm run start && cd ../ttsc && npm install && npm run build && npm run start"
+    "sample:esm": "cd samples/esm && npm install && npm run start",
+    "sample:ttsx": "cd samples/ttsx && npm install && npm run start",
+    "sample:tsc": "cd samples/tsc && npm install && npm run build && npm run start",
+    "sample:ttsc": "cd samples/ttsc && npm install && npm run build && npm run start",
+    "samples": "npm run sample:esm && npm run sample:ttsx && npm run sample:tsc && npm run sample:ttsc"
   },
   "keywords": [
     "typescript",
@@ -32,18 +36,18 @@
   "author": "Elliot Shepherd <elliot@jarofworms.com>",
   "license": "MIT",
   "dependencies": {
-    "commander": "14.0.1",
-    "glob": "11.0.3",
-    "minimatch": "^10.0.0",
-    "strip-json-comments": "^5.0.3",
-    "ts-patch": "^3.3.0",
-    "tsx": "^4.19.2",
-    "typia": "npm:@matatbread/typia@^9.7.2-nrc",
-    "unplugin": "2.3.10"
+    "commander": "14.0.2",
+    "glob": "13.0.0",
+    "minimatch": "10.0.1",
+    "strip-json-comments": "5.0.3",
+    "ts-patch": "3.3.0",
+    "tsx": "4.21.0",
+    "typia": "11.0.0",
+    "unplugin": "2.3.11"
   },
   "devDependencies": {
     "@types/node": "22",
-    "typescript": "5.9.2"
+    "typescript": "^5.0.0"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
