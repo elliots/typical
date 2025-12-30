@@ -1,4 +1,4 @@
-// monkeypatch fs.readFileSync to automatically add typical/tsc-plugin to tsconfig.json (if not present)
+// monkeypatch fs.readFileSync to automatically add @elliots/typical/tsc-plugin to tsconfig.json (if not present)
 
 const fs = require("fs");
 const stripJsonComments = require('strip-json-comments').default;
@@ -24,7 +24,7 @@ fs.readFileSync = function (path, ...args) {
       }
 
       const hasTypical = config.compilerOptions.plugins.some(
-        (plugin) => plugin.transform === "typical/tsc-plugin"
+        (plugin) => plugin.transform === "@elliots/typical/tsc-plugin"
       );
 
       if (!hasTypical) {
@@ -35,7 +35,7 @@ fs.readFileSync = function (path, ...args) {
           });
         } else {
           config.compilerOptions.plugins.push({
-            transform: "typical/tsc-plugin",
+            transform: "@elliots/typical/tsc-plugin",
           });
         }
       }
@@ -44,7 +44,7 @@ fs.readFileSync = function (path, ...args) {
 
       return JSON.stringify(config, null, 2);
     } catch (e) {
-      console.error("ERROR patching tsconfig.json to add typical/tsc-plugin", e);
+      console.error("ERROR patching tsconfig.json to add @elliots/typical/tsc-plugin", e);
       throw e;
     }
   }

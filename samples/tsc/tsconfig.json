@@ -14,7 +14,7 @@
     "moduleResolution": "node",
     "plugins": [
       {
-        "transform": "typical/tsc-plugin"
+        "transform": "@elliots/typical/tsc-plugin"
       }
     ]
   },

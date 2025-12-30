@@ -1,3 +1,3 @@
 #!/bin/sh
 
-NODE_OPTIONS="--import typical/esm" exec tsx $@
+NODE_OPTIONS="--import @elliots/typical/esm" exec tsx $@

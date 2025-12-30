@@ -143,18 +143,68 @@ function processUserStringId(user: User) {
     return __typical_assert_2({ ...user, id: user.id + '-1' });
 }`
     },
-//     {
-//       name: "excluded files should not be transformed",
-//       fileName: "node_modules/some-lib/index.ts",
-//       input: `
-// function simpleFunction(x: any) {
-//   return x;
-// }`,
-//       expectedPatterns: [],
-//       notExpectedPatterns: [
-//         /import typia from "typia"/
-//       ]
-//     }
+{
+      name: "async functions unwrap Promise return type",
+      input: `
+interface User {
+  id: number;
+  name: string;
+}
+async function fetchUser(id: number): Promise<User> {
+  return { id, name: "test" };
+}`,
+      expectedPatterns: [
+        `import typia from "typia"`,
+        `typia.createAssert<number>()`,
+        `typia.createAssert<User>()`,
+        `return __typical_assert_1(await { id, name: "test" })`,  // Should await the expression
+      ],
+      notExpectedPatterns: [
+        `createAssert<Promise<User>>`,  // Should NOT validate Promise<User>, should validate User
+      ]
+    },
+    {
+      name: "async functions with await return correct type",
+      input: `
+interface User {
+  id: number;
+  name: string;
+}
+declare function fetchFromApi(url: string): Promise<User>;
+async function getUser(url: string): Promise<User> {
+  const user = await fetchFromApi(url);
+  return user;
+}`,
+      expectedPatterns: [
+        `import typia from "typia"`,
+        `typia.createAssert<string>()`,
+        `typia.createAssert<User>()`,
+        `return __typical_assert_1(await user)`,  // Should await the variable (even if already resolved)
+      ],
+      notExpectedPatterns: [
+        `createAssert<Promise<User>>`,
+      ]
+    },
+    {
+      name: "async functions returning promise directly adds await",
+      input: `
+interface User {
+  id: number;
+  name: string;
+}
+declare function fetchFromApi(url: string): Promise<User>;
+async function getUser(url: string): Promise<User> {
+  return fetchFromApi(url);
+}`,
+      expectedPatterns: [
+        `import typia from "typia"`,
+        `typia.createAssert<User>()`,
+        `return __typical_assert_1(await fetchFromApi(url))`,  // Must await before validating
+      ],
+      notExpectedPatterns: [
+        `createAssert<Promise<User>>`,
+      ]
+    },
   ];
 
   testCases.forEach(({ name, input, expected, expectedPatterns, notExpectedPatterns }) => {

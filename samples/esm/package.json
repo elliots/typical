@@ -5,8 +5,8 @@
   "main": "src/index.ts",
   "type": "module",
   "scripts": {
-    "start": "node --import typical/esm src/index.ts",
-    "dev": "node --import typical/esm --watch src/index.ts"
+    "start": "node --import @elliots/typical/esm src/index.ts",
+    "dev": "node --import @elliots/typical/esm --watch src/index.ts"
   },
   "dependencies": {
     "typical": "../.."

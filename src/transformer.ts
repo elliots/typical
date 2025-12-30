@@ -508,6 +508,11 @@ export class TypicalTransformer {
       let transformedStatements = visitedBody.statements;
       let returnType = func.type;
 
+      // Check if this is an async function
+      const isAsync = func.modifiers?.some(
+        (mod) => mod.kind === ts.SyntaxKind.AsyncKeyword
+      );
+
       // If no explicit return type, try to infer it from the type checker
       let returnTypeForString: ts.Type | undefined;
       if (!returnType) {
@@ -526,9 +531,47 @@ export class TypicalTransformer {
         returnTypeForString = typeChecker.getTypeFromTypeNode(returnType);
       }
 
+      // For async functions, unwrap Promise<T> to get T
+      // The return statement in an async function returns T, not Promise<T>
+      if (isAsync && returnType && returnTypeForString) {
+        const promiseSymbol = returnTypeForString.getSymbol();
+        if (promiseSymbol && promiseSymbol.getName() === "Promise") {
+          // Get the type argument of Promise<T>
+          const typeArgs = (returnTypeForString as ts.TypeReference).typeArguments;
+          if (typeArgs && typeArgs.length > 0) {
+            returnTypeForString = typeArgs[0];
+            // Also update the TypeNode to match
+            if (ts.isTypeReferenceNode(returnType) && returnType.typeArguments && returnType.typeArguments.length > 0) {
+              returnType = returnType.typeArguments[0];
+            } else {
+              // Create a new type node from the unwrapped type
+              returnType = typeChecker.typeToTypeNode(
+                returnTypeForString,
+                func,
+                ts.NodeBuilderFlags.InTypeAlias
+              );
+            }
+          }
+        }
+      }
+
       if (returnType && returnTypeForString) {
         const returnTransformer = (node: ts.Node): ts.Node => {
           if (ts.isReturnStatement(node) && node.expression) {
+            // For async functions, we need to await the expression before validating
+            // because the return expression might be a Promise
+            let expressionToValidate = node.expression;
+
+            if (isAsync) {
+              // Check if the expression is already an await expression
+              const isAlreadyAwaited = ts.isAwaitExpression(node.expression);
+
+              if (!isAlreadyAwaited) {
+                // Wrap in await: return validate(await expr)
+                expressionToValidate = ctx.factory.createAwaitExpression(node.expression);
+              }
+            }
+
             if (this.config.reusableValidators) {
               // Use reusable validators - always use typeToString
               const returnTypeText = typeChecker.typeToString(returnTypeForString!);
@@ -540,7 +583,7 @@ export class TypicalTransformer {
               const validatorCall = ctx.factory.createCallExpression(
                 ctx.factory.createIdentifier(validatorName),
                 undefined,
-                [node.expression]
+                [expressionToValidate]
               );
 
               return ctx.factory.updateReturnStatement(node, validatorCall);
@@ -555,7 +598,7 @@ export class TypicalTransformer {
               const callExpression = ctx.factory.createCallExpression(
                 propertyAccess,
                 [returnType],
-                [node.expression]
+                [expressionToValidate]
               );
 
               return ctx.factory.updateReturnStatement(node, callExpression);
