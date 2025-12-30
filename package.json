@@ -43,11 +43,11 @@
     "ts-patch": "3.3.0",
     "tsx": "4.21.0",
     "typia": "11.0.0",
-    "unplugin": "2.3.11"
+    "unplugin": "2.3.11",
+    "typescript": "^5.0.0"
   },
   "devDependencies": {
-    "@types/node": "22",
-    "typescript": "^5.0.0"
+    "@types/node": "22"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
