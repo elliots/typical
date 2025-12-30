@@ -1183,6 +1183,39 @@ export class TypicalTransformer {
     return typeChecker.typeToString(type, undefined, ts.TypeFormatFlags.NoTruncation);
   }
 
+  /**
+   * Creates a readable name suffix from a type string.
+   * For simple identifiers like "User" or "string", returns the name directly.
+   * For complex types, returns a numeric index.
+   */
+  private getTypeNameSuffix(typeText: string, existingNames: Set<string>, fallbackIndex: number): string {
+    // Strip known prefixes that wrap the actual type name
+    let normalizedTypeText = typeText;
+    if (typeText.startsWith('Expression_')) {
+      normalizedTypeText = typeText.slice('Expression_'.length);
+    } else if (typeText.startsWith('ObjectLiteral_')) {
+      // Object literals use property names, fall back to numeric
+      return String(fallbackIndex);
+    }
+
+    // Check if it's a simple identifier (letters, numbers, underscore, starting with letter/underscore)
+    if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(normalizedTypeText)) {
+      // It's a simple type name like "User", "string", "MyType"
+      let name = normalizedTypeText;
+      // Handle collisions by appending a number
+      if (existingNames.has(name)) {
+        let i = 2;
+        while (existingNames.has(`${normalizedTypeText}${i}`)) {
+          i++;
+        }
+        name = `${normalizedTypeText}${i}`;
+      }
+      return name;
+    }
+    // Complex type - use numeric index
+    return String(fallbackIndex);
+  }
+
   private getOrCreateValidator(
     typeText: string,
     typeNode: ts.TypeNode
@@ -1191,7 +1224,12 @@ export class TypicalTransformer {
       return this.typeValidators.get(typeText)!.name;
     }
 
-    const validatorName = `__typical_` + `assert_${this.typeValidators.size}`;
+    const existingSuffixes = [...this.typeValidators.values()].map(v => v.name.replace('__typical_assert_', ''));
+    const existingNames = new Set(existingSuffixes);
+    // Count only numeric suffixes for the fallback index
+    const numericCount = existingSuffixes.filter(s => /^\d+$/.test(s)).length;
+    const suffix = this.getTypeNameSuffix(typeText, existingNames, numericCount);
+    const validatorName = `__typical_assert_${suffix}`;
     this.typeValidators.set(typeText, { name: validatorName, typeNode });
     return validatorName;
   }
@@ -1204,7 +1242,12 @@ export class TypicalTransformer {
       return this.typeStringifiers.get(typeText)!.name;
     }
 
-    const stringifierName = `__typical_` + `stringify_${this.typeStringifiers.size}`;
+    const existingSuffixes = [...this.typeStringifiers.values()].map(v => v.name.replace('__typical_stringify_', ''));
+    const existingNames = new Set(existingSuffixes);
+    // Count only numeric suffixes for the fallback index
+    const numericCount = existingSuffixes.filter(s => /^\d+$/.test(s)).length;
+    const suffix = this.getTypeNameSuffix(typeText, existingNames, numericCount);
+    const stringifierName = `__typical_stringify_${suffix}`;
     this.typeStringifiers.set(typeText, { name: stringifierName, typeNode });
     return stringifierName;
   }
@@ -1214,7 +1257,12 @@ export class TypicalTransformer {
       return this.typeParsers.get(typeText)!.name;
     }
 
-    const parserName = `__typical_` + `parse_${this.typeParsers.size}`;
+    const existingSuffixes = [...this.typeParsers.values()].map(v => v.name.replace('__typical_parse_', ''));
+    const existingNames = new Set(existingSuffixes);
+    // Count only numeric suffixes for the fallback index
+    const numericCount = existingSuffixes.filter(s => /^\d+$/.test(s)).length;
+    const suffix = this.getTypeNameSuffix(typeText, existingNames, numericCount);
+    const parserName = `__typical_parse_${suffix}`;
     this.typeParsers.set(typeText, { name: parserName, typeNode });
     return parserName;
   }

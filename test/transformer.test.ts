@@ -44,8 +44,8 @@ describe("TypicalTransformer", () => {
       name: "function with basic parameter and return type validation",
       input: `function greet(name: string): string {return "Hello " + name;}`,
       expected: `import typia from "typia";
-const __typical_assert_0 = typia.createAssert<string>();
-function greet(name: string): string { __typical_assert_0(name); return __typical_assert_0("Hello " + name); }`,
+const __typical_assert_string = typia.createAssert<string>();
+function greet(name: string): string { __typical_assert_string(name); return __typical_assert_string("Hello " + name); }`,
     },
     {
       name: "JSON.stringify transformation",
@@ -71,7 +71,7 @@ function parseData(jsonStr: string): { id: number, name: string } {
 }`,
       // Note: No return validation wrapper since assertParse already validates
       expected: `import typia from "typia";
-const __typical_assert_0 = typia.createAssert<string>();
+const __typical_assert_string = typia.createAssert<string>();
 const __typical_parse_0 = typia.json.createAssertParse<{
     id: number;
     name: string;
@@ -80,7 +80,7 @@ function parseData(jsonStr: string): {
     id: number;
     name: string;
 } {
-    __typical_assert_0(jsonStr);
+    __typical_assert_string(jsonStr);
     return __typical_parse_0(jsonStr);
 }`,
     },
@@ -111,11 +111,11 @@ const multiply = (a: number, b: number): number => {
   return a * b;
 };`,
       expected: `import typia from "typia";
-const __typical_assert_0 = typia.createAssert<number>();
+const __typical_assert_number = typia.createAssert<number>();
 const multiply = (a: number, b: number): number => {
-    __typical_assert_0(a);
-    __typical_assert_0(b);
-    return __typical_assert_0(a * b);
+    __typical_assert_number(a);
+    __typical_assert_number(b);
+    return __typical_assert_number(a * b);
 };`,
     },
     {
@@ -137,25 +137,25 @@ function processUserStringId(user: User) {
   return { ...user, id: user.id + '-1' };
 }`,
       expected: `import typia from "typia";
-const __typical_assert_0 = typia.createAssert<User>();
-const __typical_assert_1 = typia.createAssert<{ id: number; name: string; email?: string; }>();
-const __typical_assert_2 = typia.createAssert<{ id: string; name: string; email?: string; }>();
+const __typical_assert_User = typia.createAssert<User>();
+const __typical_assert_0 = typia.createAssert<{ id: number; name: string; email?: string; }>();
+const __typical_assert_1 = typia.createAssert<{ id: string; name: string; email?: string; }>();
 interface User {
     id: number;
     name: string;
     email?: string;
 }
 function processUser(user: User): User {
-    __typical_assert_0(user);
-    return __typical_assert_0({ ...user, id: user.id + 1 });
+    __typical_assert_User(user);
+    return __typical_assert_User({ ...user, id: user.id + 1 });
 }
 function processUserLike(user: User) {
-    __typical_assert_0(user);
-    return __typical_assert_1({ ...user, id: user.id + 1 });
+    __typical_assert_User(user);
+    return __typical_assert_0({ ...user, id: user.id + 1 });
 }
 function processUserStringId(user: User) {
-    __typical_assert_0(user);
-    return __typical_assert_2({ ...user, id: user.id + '-1' });
+    __typical_assert_User(user);
+    return __typical_assert_1({ ...user, id: user.id + '-1' });
 }`,
     },
     {
@@ -172,7 +172,7 @@ async function fetchUser(id: number): Promise<User> {
         `import typia from "typia"`,
         `typia.createAssert<number>()`,
         `typia.createAssert<User>()`,
-        `return __typical_assert_1(await { id, name: "test" })`, // Should await the expression
+        `return __typical_assert_User(await { id, name: "test" })`, // Should await the expression
       ],
       notExpectedPatterns: [
         `createAssert<Promise<User>>`, // Should NOT validate Promise<User>, should validate User
@@ -194,7 +194,7 @@ async function getUser(url: string): Promise<User> {
         `import typia from "typia"`,
         `typia.createAssert<string>()`,
         `typia.createAssert<User>()`,
-        `return __typical_assert_1(await user)`, // Should await the variable (even if already resolved)
+        `return __typical_assert_User(await user)`, // Should await the variable (even if already resolved)
       ],
       notExpectedPatterns: [`createAssert<Promise<User>>`],
     },
@@ -212,7 +212,7 @@ async function getUser(url: string): Promise<User> {
       expectedPatterns: [
         `import typia from "typia"`,
         `typia.createAssert<User>()`,
-        `return __typical_assert_1(await fetchFromApi(url))`, // Must await before validating
+        `return __typical_assert_User(await fetchFromApi(url))`, // Must await before validating
       ],
       notExpectedPatterns: [`createAssert<Promise<User>>`],
     },
@@ -228,7 +228,7 @@ function validate(user: User): User {
   return user;
 }`,
       expectedPatterns: [
-        `__typical_assert_0(user);`, // Parameter should be validated
+        `__typical_assert_User(user);`, // Parameter should be validated
         `return user;`, // Return should NOT be wrapped
       ],
       notExpectedPatterns: [
@@ -250,7 +250,7 @@ function getAddress(user: User): Address {
   return user.address;
 }`,
       expectedPatterns: [
-        `__typical_assert_0(user);`, // Parameter should be validated
+        `__typical_assert_User(user);`, // Parameter should be validated
         `return user.address;`, // Return should NOT be wrapped
       ],
       notExpectedPatterns: [
@@ -270,8 +270,8 @@ function processUser(user: User): User {
   return user;
 }`,
       expectedPatterns: [
-        `__typical_assert_0(user);`, // Parameter validation
-        `return __typical_assert_0(user);`, // Return MUST be validated (tainted)
+        `__typical_assert_User(user);`, // Parameter validation
+        `return __typical_assert_User(user);`, // Return MUST be validated (tainted)
       ],
     },
     {
@@ -286,8 +286,8 @@ function updateUser(user: User): User {
   return user;
 }`,
       expectedPatterns: [
-        `__typical_assert_0(user);`, // Parameter validation
-        `return __typical_assert_0(user);`, // Return MUST be validated (tainted)
+        `__typical_assert_User(user);`, // Parameter validation
+        `return __typical_assert_User(user);`, // Return MUST be validated (tainted)
       ],
     },
     {
@@ -303,8 +303,8 @@ async function asyncProcess(user: User): Promise<User> {
   return user;
 }`,
       expectedPatterns: [
-        `__typical_assert_0(user);`, // Parameter validation
-        `return __typical_assert_0(await user);`, // Return MUST be validated (tainted by await) - same validator as param since same type
+        `__typical_assert_User(user);`, // Parameter validation
+        `return __typical_assert_User(await user);`, // Return MUST be validated (tainted by await) - same validator as param since same type
       ],
     },
     {
@@ -318,8 +318,8 @@ function cloneUser(user: User): User {
   return { ...user };
 }`,
       expectedPatterns: [
-        `__typical_assert_0(user);`, // Parameter validation
-        `return __typical_assert_0({ ...user });`, // Return MUST be validated (new object)
+        `__typical_assert_User(user);`, // Parameter validation
+        `return __typical_assert_User({ ...user });`, // Return MUST be validated (new object)
       ],
     },
     {
@@ -420,7 +420,7 @@ const user: User = { id: 1, name: "test" };
 const fn = () => (() => JSON.stringify(user))();`,
       expectedPatterns: [
         `typia.json.createStringify<User>()`,
-        `const fn = () => (() => __typical_stringify_0(user))()`,
+        `const fn = () => (() => __typical_stringify_User(user))()`,
       ],
       notExpectedPatterns: [`JSON.stringify`],
     },
@@ -434,7 +434,7 @@ interface User {
 const fn = (s: string): User => JSON.parse(s);`,
       expectedPatterns: [
         `typia.json.createAssertParse<User>()`,
-        `=> __typical_parse_`,
+        `=> __typical_parse_User`,
       ],
       notExpectedPatterns: [`JSON.parse`],
     },
