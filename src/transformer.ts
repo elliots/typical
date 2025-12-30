@@ -544,6 +544,53 @@ export class TypicalTransformer {
         }
       }
 
+      // Transform type assertions (as expressions) when validateCasts is enabled
+      // e.g., `obj as User` becomes `__typical_assert_N(obj)`
+      if (this.config.validateCasts && ts.isAsExpression(node)) {
+        const targetType = node.type;
+
+        // Skip 'as any' and 'as unknown' casts - these are intentional escapes
+        if (targetType.kind === ts.SyntaxKind.AnyKeyword ||
+            targetType.kind === ts.SyntaxKind.UnknownKeyword) {
+          return ctx.ts.visitEachChild(node, visit, ctx.context);
+        }
+
+        // Skip primitive types - no runtime validation needed
+        if (targetType.kind === ts.SyntaxKind.StringKeyword ||
+            targetType.kind === ts.SyntaxKind.NumberKeyword ||
+            targetType.kind === ts.SyntaxKind.BooleanKeyword) {
+          return ctx.ts.visitEachChild(node, visit, ctx.context);
+        }
+
+        needsTypiaImport = true;
+
+        // Visit the expression first to transform any nested casts
+        const visitedExpression = ctx.ts.visitNode(node.expression, visit) as ts.Expression;
+
+        if (this.config.reusableValidators) {
+          const targetTypeObj = typeChecker.getTypeFromTypeNode(targetType);
+          const typeText = typeChecker.typeToString(targetTypeObj);
+          const validatorName = this.getOrCreateValidator(typeText, targetType);
+
+          // Replace `expr as Type` with `__typical_assert_N(expr)`
+          return ctx.factory.createCallExpression(
+            ctx.factory.createIdentifier(validatorName),
+            undefined,
+            [visitedExpression]
+          );
+        } else {
+          // Inline validator: typia.assert<Type>(expr)
+          return ctx.factory.createCallExpression(
+            ctx.factory.createPropertyAccessExpression(
+              ctx.factory.createIdentifier("typia"),
+              "assert"
+            ),
+            [targetType],
+            [visitedExpression]
+          );
+        }
+      }
+
       // Transform function declarations
       if (ts.isFunctionDeclaration(node)) {
         needsTypiaImport = true;

@@ -51,10 +51,19 @@ try {
   service.loadUser('{"name":"Charlie","age":"22","email":"charlie at example.com"}');
   console.error("❌ Invalid user data was accepted!");
   process.exit(1);
-} catch (e) {
-  console.error("Caught error as expected for invalid user data:");
+} catch (e: unknown) {
+  console.error("Caught error as expected for invalid user data:", (e as Error).message);
+}
+
+try {
+  // @ts-expect-error i want to test runtime validation
+  const invalidUser = {
+    name: 'Elliot',
+    age: 100,
+    email: 'not.an.email'
+  } as User;
+} catch (e: unknown) {
+  console.error("Caught error as expected for invalid user object:", (e as Error).message);
 }
 
 console.log("✅ All tests passed!");
-
-export {}; // Make this file a module

@@ -479,4 +479,98 @@ const fn = (s: string): User => JSON.parse(s);`,
       });
     }
   );
+
+  // Cast validation tests (validateCasts option)
+  describe("validateCasts option", () => {
+    test("transforms 'as' casts when validateCasts is enabled", () => {
+      const fileName = "test/test.temp.ts";
+      const input = `
+interface User {
+  name: string;
+  age: number;
+  email: \`\${string}@\${string}\`;
+}
+const data = { name: "test", age: 30, email: "test@example.com" };
+const user = data as User;
+`;
+      writeFileSync(fileName, input);
+
+      const transformer = new TypicalTransformer({ validateCasts: true, reusableValidators: true });
+      const transformedCode = transformer.transform(fileName, "basic");
+
+      // Should have validator
+      assert.ok(
+        transformedCode.includes("typia.createAssert<User>()"),
+        "Should create validator for User type"
+      );
+      // Should wrap the cast
+      assert.ok(
+        transformedCode.includes("__typical_assert_"),
+        "Should replace cast with validator call"
+      );
+      // Should NOT have 'as User'
+      assert.ok(
+        !transformedCode.includes("as User"),
+        "Should not have 'as User' cast in output"
+      );
+    });
+
+    test("does not transform casts when validateCasts is disabled (default)", () => {
+      const fileName = "test/test.temp.ts";
+      const input = `
+interface User {
+  name: string;
+  age: number;
+}
+const data = { name: "test", age: 30 };
+const user = data as User;
+`;
+      writeFileSync(fileName, input);
+
+      const transformer = new TypicalTransformer({ validateCasts: false, reusableValidators: true });
+      const transformedCode = transformer.transform(fileName, "basic");
+
+      // Should NOT have validator for the cast
+      assert.ok(
+        !transformedCode.includes("__typical_assert_"),
+        "Should not add validator when validateCasts is false"
+      );
+    });
+
+    test("skips 'as any' casts", () => {
+      const fileName = "test/test.temp.ts";
+      const input = `
+const data = { name: "test" };
+const escaped = data as any;
+`;
+      writeFileSync(fileName, input);
+
+      const transformer = new TypicalTransformer({ validateCasts: true, reusableValidators: true });
+      const transformedCode = transformer.transform(fileName, "basic");
+
+      // Should NOT validate 'as any'
+      assert.ok(
+        !transformedCode.includes("__typical_assert_"),
+        "Should not validate 'as any' casts"
+      );
+    });
+
+    test("skips 'as unknown' casts", () => {
+      const fileName = "test/test.temp.ts";
+      const input = `
+const data = { name: "test" };
+const escaped = data as unknown;
+`;
+      writeFileSync(fileName, input);
+
+      const transformer = new TypicalTransformer({ validateCasts: true, reusableValidators: true });
+      const transformedCode = transformer.transform(fileName, "basic");
+
+      // Should NOT validate 'as unknown'
+      assert.ok(
+        !transformedCode.includes("__typical_assert_"),
+        "Should not validate 'as unknown' casts"
+      );
+    });
+  });
 });

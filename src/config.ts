@@ -2,12 +2,14 @@ export interface TypicalConfig {
   include?: string[];
   exclude?: string[];
   reusableValidators?: boolean;
+  validateCasts?: boolean;
 }
 
 export const defaultConfig: TypicalConfig = {
   include: ["**/*.ts", "**/*.tsx"],
   exclude: ["node_modules/**", "**/*.d.ts", "dist/**", "build/**"],
   reusableValidators: true,
+  validateCasts: false,
 };
 
 import fs from 'fs';

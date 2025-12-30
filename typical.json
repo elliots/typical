@@ -1,5 +1,6 @@
 {
   "include": ["**/*.ts"],
-  "exclude": ["node_modules/**", "**/*.d.ts", "dist/**"],
-  "reusableValidators": true
+  "exclude": ["node_modules/**", "**/*.d.ts", "dist/**", "src/**"],
+  "reusableValidators": true,
+  "validateCasts": true
 }
