@@ -9,7 +9,7 @@
     "dev": "ttsx --watch src/index.ts"
   },
   "dependencies": {
-    "typical": "../.."
+    "@elliots/typical": "../.."
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
