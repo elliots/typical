@@ -228,7 +228,10 @@ export class TypicalTransformer {
                 if (stmt.importClause?.isTypeOnly) {
                   continue;
                 }
-                syntheticStatements.push(this.recreateImportDeclaration(stmt, factory));
+                const recreated = this.recreateImportDeclaration(stmt, factory, newProgram.getTypeChecker());
+                if (recreated) {
+                  syntheticStatements.push(recreated);
+                }
               } else {
                 syntheticStatements.push(stmt);
               }
@@ -261,8 +264,9 @@ export class TypicalTransformer {
    */
   private recreateImportDeclaration(
     importDecl: ts.ImportDeclaration,
-    factory: ts.NodeFactory
-  ): ts.ImportDeclaration {
+    factory: ts.NodeFactory,
+    typeChecker: ts.TypeChecker
+  ): ts.ImportDeclaration | undefined {
     let importClause: ts.ImportClause | undefined;
 
     if (importDecl.importClause) {
@@ -277,20 +281,54 @@ export class TypicalTransformer {
           );
         } else if (this.ts.isNamedImports(clause.namedBindings)) {
           // import { foo, bar } from "baz"
-          const elements = clause.namedBindings.elements.map((el) =>
-            factory.createImportSpecifier(
-              el.isTypeOnly,
-              el.propertyName ? factory.createIdentifier(el.propertyName.text) : undefined,
-              factory.createIdentifier(el.name.text)
-            )
-          );
-          namedBindings = factory.createNamedImports(elements);
+          // Filter out type-only imports (explicit or inferred from symbol)
+          const elements = clause.namedBindings.elements
+            .filter((el) => {
+              // Skip explicit type-only specifiers
+              if (el.isTypeOnly) return false;
+              // Check if the symbol is type-only (interface, type alias, etc.)
+              let symbol = typeChecker.getSymbolAtLocation(el.name);
+              // Follow alias to get the actual exported symbol
+              if (symbol && symbol.flags & this.ts.SymbolFlags.Alias) {
+                symbol = typeChecker.getAliasedSymbol(symbol);
+              }
+              if (symbol) {
+                const declarations = symbol.getDeclarations();
+                if (declarations && declarations.length > 0) {
+                  // If all declarations are type-only, skip this import
+                  const allTypeOnly = declarations.every((decl) =>
+                    this.ts.isInterfaceDeclaration(decl) ||
+                    this.ts.isTypeAliasDeclaration(decl) ||
+                    this.ts.isTypeLiteralNode(decl)
+                  );
+                  if (allTypeOnly) return false;
+                }
+              }
+              return true;
+            })
+            .map((el) =>
+              factory.createImportSpecifier(
+                false,
+                el.propertyName ? factory.createIdentifier(el.propertyName.text) : undefined,
+                factory.createIdentifier(el.name.text)
+              )
+            );
+          // Only create named imports if there are non-type specifiers
+          if (elements.length > 0) {
+            namedBindings = factory.createNamedImports(elements);
+          }
         }
+      }
+
+      // Skip import entirely if no default import and no named bindings remain
+      const defaultName = clause.name ? factory.createIdentifier(clause.name.text) : undefined;
+      if (!defaultName && !namedBindings) {
+        return undefined;
       }
 
       importClause = factory.createImportClause(
         clause.isTypeOnly,
-        clause.name ? factory.createIdentifier(clause.name.text) : undefined,
+        defaultName,
         namedBindings
       );
     }

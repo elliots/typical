@@ -59,15 +59,6 @@ import {
 
 // JSON types - direct validators for inline benchmarks
 import {
-  // Typia validators (transformed at compile time)
-  typiaParseSmall,
-  typiaParseMedium,
-  typiaParseLarge,
-  typiaParseLargeArray,
-  typiaStringifySmall,
-  typiaStringifyMedium,
-  typiaStringifyLarge,
-  typiaStringifyLargeArray,
   // Zod schemas
   zodSmallPayload,
   zodMediumPayload,
@@ -82,6 +73,11 @@ import {
   testMediumJson,
   testLargeJson,
   testLargeArrayJson,
+  testSmallWithExtrasJson,
+  testSmallPayloadWithExtras,
+  LargePayload,
+  MediumPayload,
+  SmallPayload,
 } from "./scenarios/json-types.js";
 
 interface BenchmarkResult {
@@ -340,8 +336,17 @@ async function main() {
     await runBenchmark(
       "JSON.parse (small)",
       () => JSON.parse(testSmallJson),
-      () => typiaParseSmall(testSmallJson),
+      () => JSON.parse(testSmallJson) as SmallPayload,
       () => zodSmallPayload.parse(JSON.parse(testSmallJson))
+    )
+  );
+
+  results.push(
+    await runBenchmark(
+      "JSON.parse (small+extras)",
+      () => JSON.parse(testSmallWithExtrasJson),
+      () => JSON.parse(testSmallWithExtrasJson) as SmallPayload,
+      () => zodSmallPayload.parse(JSON.parse(testSmallWithExtrasJson))
     )
   );
 
@@ -349,7 +354,7 @@ async function main() {
     await runBenchmark(
       "JSON.parse (medium)",
       () => JSON.parse(testMediumJson),
-      () => typiaParseMedium(testMediumJson),
+      () => JSON.parse(testMediumJson) as MediumPayload,
       () => zodMediumPayload.parse(JSON.parse(testMediumJson))
     )
   );
@@ -358,7 +363,7 @@ async function main() {
     await runBenchmark(
       "JSON.parse (large)",
       () => JSON.parse(testLargeJson),
-      () => typiaParseLarge(testLargeJson),
+      () => JSON.parse(testLargeJson) as LargePayload,
       () => zodLargePayload.parse(JSON.parse(testLargeJson))
     )
   );
@@ -367,7 +372,7 @@ async function main() {
     await runBenchmark(
       "JSON.parse (1000 large)",
       () => JSON.parse(testLargeArrayJson),
-      () => typiaParseLargeArray(testLargeArrayJson),
+      () => JSON.parse(testLargeArrayJson) as LargePayload[],
       () => zodLargeArray.parse(JSON.parse(testLargeArrayJson))
     )
   );
@@ -381,6 +386,15 @@ async function main() {
       () => JSON.stringify(testSmallPayload as any),
       () => JSON.stringify(testSmallPayload),
       () => JSON.stringify(zodSmallPayload.parse(testSmallPayload) as any)
+    )
+  );
+
+  results.push(
+    await runBenchmark(
+      "JSON.stringify (small+extras)",
+      () => JSON.stringify(testSmallPayloadWithExtras as any),
+      () => JSON.stringify(testSmallPayloadWithExtras),
+      () => JSON.stringify(zodSmallPayload.parse(testSmallPayloadWithExtras) as any)
     )
   );
 

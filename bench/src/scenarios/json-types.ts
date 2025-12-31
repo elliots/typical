@@ -83,19 +83,6 @@ export const zodLargePayload = z.object({
 
 export const zodLargeArray = z.array(zodLargePayload);
 
-// Typia validators - exported for direct use in benchmarks
-import typia from "typia";
-
-export const typiaParseSmall = typia.json.createAssertParse<SmallPayload>();
-export const typiaParseMedium = typia.json.createAssertParse<MediumPayload>();
-export const typiaParseLarge = typia.json.createAssertParse<LargePayload>();
-export const typiaParseLargeArray = typia.json.createAssertParse<LargePayload[]>();
-
-export const typiaStringifySmall = typia.json.createStringify<SmallPayload>();
-export const typiaStringifyMedium = typia.json.createStringify<MediumPayload>();
-export const typiaStringifyLarge = typia.json.createStringify<LargePayload>();
-export const typiaStringifyLargeArray = typia.json.createStringify<LargePayload[]>();
-
 // Test data
 export const testSmallPayload: SmallPayload = {
   id: 1,
@@ -156,8 +143,24 @@ export const testLargeArrayPayload: LargePayload[] = Array.from({ length: 1000 }
   },
 }));
 
+// Small payload with 10 extra fields not in the type
+export const testSmallPayloadWithExtras: SmallPayload = {
+  ...testSmallPayload,
+  extra1: "extra value 1",
+  extra2: 12345,
+  extra3: true,
+  extra4: ["a", "b", "c"],
+  extra5: { nested: "object" },
+  extra6: "another string",
+  extra7: 99999,
+  extra8: false,
+  extra9: null,
+  extra10: "final extra",
+} as unknown as SmallPayload;
+
 // Pre-stringified JSON for parse benchmarks
 export const testSmallJson = JSON.stringify(testSmallPayload);
 export const testMediumJson = JSON.stringify(testMediumPayload);
 export const testLargeJson = JSON.stringify(testLargePayload);
 export const testLargeArrayJson = JSON.stringify(testLargeArrayPayload);
+export const testSmallWithExtrasJson = JSON.stringify(testSmallPayloadWithExtras);
