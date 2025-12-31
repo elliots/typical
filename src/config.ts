@@ -9,6 +9,12 @@ export interface TypicalConfig {
   validateCasts?: boolean;
   hoistRegex?: boolean;
   debug?: TypicalDebugConfig;
+  /**
+   * Type patterns to skip validation for (supports wildcards).
+   * Use this for types that typia cannot process (e.g., React event types).
+   * Example: ["React.*", "Express.Request", "*.Event"]
+   */
+  ignoreTypes?: string[];
 }
 
 export const defaultConfig: TypicalConfig = {

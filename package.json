@@ -2,7 +2,7 @@
   "name": "@elliots/typical",
   "version": "0.1.5",
   "description": "Runtime safe TypeScript transformer using typia",
-  "main": "dist/index.js",
+  "main": "dist/src/index.js",
   "type": "module",
   "bin": {
     "typical": "bin/typical",
@@ -10,7 +10,7 @@
     "ttsc": "bin/ttsc"
   },
   "exports": {
-    ".": "./dist/index.js",
+    ".": "./dist/src/index.js",
     "./tsc-plugin": "./dist/src/tsc-plugin.js",
     "./esm": "./dist/src/esm-loader-register.js",
     "./loader": "./dist/src/esm-loader.js"

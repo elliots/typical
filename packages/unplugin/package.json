@@ -68,7 +68,9 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "tsdown": "^0.18.3",
+    "tsdown": "^0.18.3"
+  },
+  "peerDependencies": {
     "typescript": "^5.0.0"
   }
 }

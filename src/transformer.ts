@@ -127,8 +127,8 @@ export class TypicalTransformer {
 
           // Calculate the relative path from rootDir
           const relativePath = path.relative(rootDir, sourceFile.fileName);
-          // Change extension to .typical.ts to indicate intermediate state
-          const intermediateFileName = relativePath.replace(/\.tsx?$/, ".typical.ts");
+          // Change extension to .typical.ts(x) to indicate intermediate state, preserving tsx
+          const intermediateFileName = relativePath.replace(/\.(tsx?)$/, ".typical.$1");
           const intermediateFilePath = path.join(outDir, intermediateFileName);
 
           // Ensure directory exists
@@ -257,7 +257,25 @@ export class TypicalTransformer {
                 factory
               );
             }
+
+            // Check for untransformed typia calls - these indicate types typia couldn't process
+            const finalCode = printer.printFile(transformedSourceFile);
+            const untransformedCalls = this.findUntransformedTypiaCalls(finalCode);
+            if (untransformedCalls.length > 0) {
+              const failedTypes = untransformedCalls.map(c => c.type).filter((v, i, a) => a.indexOf(v) === i);
+              throw new Error(
+                `TYPICAL: Failed to transform the following types (typia cannot process them):\n` +
+                failedTypes.map(t => `  - ${t}`).join('\n') +
+                `\n\nTo skip validation for these types, add to ignoreTypes in typical.json:\n` +
+                `  "ignoreTypes": [${failedTypes.map(t => `"${t}"`).join(', ')}]` +
+                `\n\nFile: ${sourceFile.fileName}`
+              );
+            }
           } catch (error) {
+            // Re-throw our own errors, only catch typia transform failures
+            if (error instanceof Error && error.message.startsWith('TYPICAL:')) {
+              throw error;
+            }
             console.warn("Failed to apply typia transformer:", sourceFile.fileName, error);
           }
         }
@@ -620,6 +638,18 @@ export class TypicalTransformer {
             return;
           }
 
+          // Skip types matching ignoreTypes patterns
+          const typeText = this.getTypeKey(param.type, typeChecker);
+          if (process.env.DEBUG) {
+            console.log(`TYPICAL: Processing parameter type: ${typeText}`);
+          }
+          if (this.isIgnoredType(typeText)) {
+            if (process.env.DEBUG) {
+              console.log(`TYPICAL: Skipping ignored type for parameter: ${typeText}`);
+            }
+            return;
+          }
+
           const paramName = ts.isIdentifier(param.name)
             ? param.name.text
             : "param";
@@ -631,7 +661,6 @@ export class TypicalTransformer {
 
           if (this.config.reusableValidators) {
             // Use reusable validators - use typeNode text to preserve local aliases
-            const typeText = this.getTypeKey(param.type, typeChecker);
             const validatorName = this.getOrCreateValidator(
               typeText,
               param.type
@@ -748,7 +777,15 @@ export class TypicalTransformer {
       }
 
       // Skip 'any' and 'unknown' return types - no point validating them
-      if (returnType && returnTypeForString && !this.isAnyOrUnknownType(returnType)) {
+      // Also skip types matching ignoreTypes patterns
+      const returnTypeText = returnType && returnTypeForString
+        ? this.getTypeKey(returnType, typeChecker, returnTypeForString)
+        : null;
+      const isIgnoredReturnType = returnTypeText && this.isIgnoredType(returnTypeText);
+      if (isIgnoredReturnType && process.env.DEBUG) {
+        console.log(`TYPICAL: Skipping ignored type for return: ${returnTypeText}`);
+      }
+      if (returnType && returnTypeForString && !this.isAnyOrUnknownType(returnType) && !isIgnoredReturnType) {
         const returnTransformer = (node: ts.Node): ts.Node => {
           if (ts.isReturnStatement(node) && node.expression) {
             // Skip return validation if the expression already contains a __typical _parse_* call
@@ -938,6 +975,52 @@ export class TypicalTransformer {
   private isAnyOrUnknownTypeFlags(type: ts.Type): boolean {
     return (type.flags & this.ts.TypeFlags.Any) !== 0 ||
            (type.flags & this.ts.TypeFlags.Unknown) !== 0;
+  }
+
+  /**
+   * Check if a type name matches any of the ignoreTypes patterns.
+   * Supports wildcards: "React.*" matches "React.FormEvent", "React.ChangeEvent", etc.
+   */
+  private isIgnoredType(typeName: string): boolean {
+    const patterns = this.config.ignoreTypes ?? [];
+    if (patterns.length === 0) return false;
+
+    return patterns.some(pattern => {
+      // Convert glob pattern to regex: "React.*" -> /^React\..*$/
+      const regexStr = '^' + pattern
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')  // Escape special regex chars except *
+        .replace(/\*/g, '.*') + '$';
+      return new RegExp(regexStr).test(typeName);
+    });
+  }
+
+  /**
+   * Find untransformed typia calls in the output code.
+   * These indicate types that typia could not process.
+   */
+  private findUntransformedTypiaCalls(code: string): Array<{ method: string; type: string }> {
+    const results: Array<{ method: string; type: string }> = [];
+
+    // Match patterns like: typia.createAssert<Type>() or typia.json.createAssertParse<Type>()
+    // The type argument can contain nested generics like React.FormEvent<HTMLElement>
+    const patterns = [
+      /typia\.createAssert<([^>]+(?:<[^>]*>)?)>\s*\(\)/g,
+      /typia\.json\.createAssertParse<([^>]+(?:<[^>]*>)?)>\s*\(\)/g,
+      /typia\.json\.createStringify<([^>]+(?:<[^>]*>)?)>\s*\(\)/g,
+    ];
+
+    for (const pattern of patterns) {
+      let match;
+      while ((match = pattern.exec(code)) !== null) {
+        const methodMatch = match[0].match(/typia\.([\w.]+)</);
+        results.push({
+          method: methodMatch ? methodMatch[1] : 'unknown',
+          type: match[1]
+        });
+      }
+    }
+
+    return results;
   }
 
   /**

@@ -1,6 +1,7 @@
 import { createUnplugin, type UnpluginInstance } from 'unplugin'
-import { TypicalTransformer, loadConfig, type TypicalConfig } from '@elliots/typical'
+import { loadConfig, type TypicalConfig } from '@elliots/typical'
 import { resolveOptions, type Options } from './core/options'
+import { transformTypia } from './core/transform'
 
 export const Typical: UnpluginInstance<Options | undefined, false> =
   createUnplugin((rawOptions = {}) => {
@@ -10,8 +11,6 @@ export const Typical: UnpluginInstance<Options | undefined, false> =
       ...loadConfig(),
       ...options.typical,
     }
-
-    const transformer = new TypicalTransformer(typicalConfig)
 
     const name = 'unplugin-typical'
     return {
@@ -23,8 +22,7 @@ export const Typical: UnpluginInstance<Options | undefined, false> =
           id: { include: options.include, exclude: options.exclude },
         },
         handler(code, id) {
-          const sourceFile = transformer.createSourceFile(id, code)
-          return transformer.transform(sourceFile, 'js')
+          return transformTypia(id, code, typicalConfig)
         },
       },
     }
