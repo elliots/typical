@@ -1,7 +1,7 @@
 {
   "name": "@elliots/unplugin-typical",
   "type": "module",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Unplugin for typical - runtime safe TypeScript transformer",
   "author": "Elliot Shepherd <elliot@jarofworms.com>",
   "license": "MIT",
