@@ -317,11 +317,6 @@ export class TypicalTransformer {
   ): ts.SourceFile {
     const { ts } = ctx;
 
-    // Check if this file should be transformed
-    if (!this.shouldTransformFile(sourceFile.fileName)) {
-      return sourceFile; // Return unchanged for excluded files
-    }
-
     if (!sourceFile.fileName.includes('transformer.test.ts')) {  
       // Check if this file has already been transformed by us
       const sourceText = sourceFile.getFullText();
@@ -356,115 +351,22 @@ export class TypicalTransformer {
             if (node.arguments.length > 0) {
               const arg = node.arguments[0];
               const argType = typeChecker.getTypeAtLocation(arg);
-              const typeFlags = argType.flags;
-              // Skip if type is any (1) or unknown (2)
-              if (typeFlags & ts.TypeFlags.Any || typeFlags & ts.TypeFlags.Unknown) {
+              if (this.isAnyOrUnknownTypeFlags(argType)) {
                 return node; // Don't transform JSON.stringify for any/unknown types
               }
             }
 
             if (this.config.reusableValidators) {
-              // For JSON.stringify, try to infer the type from the argument
-              let typeText = "unknown";
-              let typeNodeForCache: ts.TypeNode | undefined;
+              // Infer type from argument
+              const arg = node.arguments[0];
+              const { typeText, typeNode } = this.inferStringifyType(arg, typeChecker, ctx);
 
-              if (node.arguments.length > 0) {
-                const arg = node.arguments[0];
-
-                // Check if it's a type assertion
-                if (ts.isAsExpression(arg)) {
-                  // For type assertions, use the asserted type directly
-                  const assertedType = arg.type;
-                  const objectType =
-                    typeChecker.getTypeFromTypeNode(assertedType);
-
-                  const typeNode = assertedType;
-
-                  if (typeNode) {
-                    const typeString = typeChecker.typeToString(objectType);
-                    typeText = `Asserted_${typeString.replace(
-                      /[^a-zA-Z0-9_]/g,
-                      "_"
-                    )}`;
-                    typeNodeForCache = typeNode;
-                  } else {
-                    typeText = "unknown";
-                    typeNodeForCache = ctx.factory.createKeywordTypeNode(
-                      ctx.ts.SyntaxKind.UnknownKeyword
-                    );
-                  }
-                } else if (ts.isObjectLiteralExpression(arg)) {
-                  // For object literals, use the type checker to get the actual type
-                  const objectType = typeChecker.getTypeAtLocation(arg);
-
-                  const typeNode = typeChecker.typeToTypeNode(
-                    objectType,
-                    arg,
-                    ts.NodeBuilderFlags.InTypeAlias
-                  );
-
-                  if (typeNode) {
-                    const propNames = arg.properties
-                      .map((prop) => {
-                        if (ts.isShorthandPropertyAssignment(prop)) {
-                          return prop.name.text;
-                        } else if (
-                          ts.isPropertyAssignment(prop) &&
-                          ts.isIdentifier(prop.name)
-                        ) {
-                          return prop.name.text;
-                        }
-                        return "unknown";
-                      })
-                      .sort()
-                      .join("_");
-
-                    typeText = `ObjectLiteral_${propNames}`;
-                    typeNodeForCache = typeNode;
-                  } else {
-                    // typeText = "unknown";
-                    // typeNodeForCache = ctx.factory.createKeywordTypeNode(
-                    //   ctx.ts.SyntaxKind.UnknownKeyword
-                    // );
-                    throw new Error('unknown type node for object literal: ' + arg.getText());
-                  }
-                } else {
-                  // For other expressions, try to get the type from the type checker
-                  const argType = typeChecker.getTypeAtLocation(arg);
-
-                  const typeNode = typeChecker.typeToTypeNode(
-                    argType,
-                    arg,
-                    ts.NodeBuilderFlags.InTypeAlias
-                  );
-                  if (typeNode) {
-                    const typeString = typeChecker.typeToString(argType);
-                    typeText = `Expression_${typeString.replace(
-                      /[^a-zA-Z0-9_]/g,
-                      "_"
-                    )}`;
-                    typeNodeForCache = typeNode;
-                  } else {
-                    typeText = "unknown";
-                    typeNodeForCache = ctx.factory.createKeywordTypeNode(
-                      ctx.ts.SyntaxKind.UnknownKeyword
-                    )
-                  }
-                }
-              }
-
-              const stringifierName = this.getOrCreateStringifier(
-                typeText,
-                typeNodeForCache!
-              );
-
-              const newCall = ctx.factory.createCallExpression(
+              const stringifierName = this.getOrCreateStringifier(typeText, typeNode);
+              return ctx.factory.createCallExpression(
                 ctx.factory.createIdentifier(stringifierName),
                 undefined,
                 node.arguments
               );
-
-              return newCall;
             } else {
               // Use inline typia.json.stringify
               return ctx.factory.updateCallExpression(
@@ -519,13 +421,7 @@ export class TypicalTransformer {
               parent = parent.parent;
             }
 
-            // Skip transformation if target type is any or unknown
-            const isAnyOrUnknown = targetType && (
-              targetType.kind === ts.SyntaxKind.AnyKeyword ||
-              targetType.kind === ts.SyntaxKind.UnknownKeyword
-            );
-
-            if (isAnyOrUnknown) {
+            if (targetType && this.isAnyOrUnknownType(targetType)) {
               // Don't transform JSON.parse for any/unknown types
               return node;
             }
@@ -577,8 +473,7 @@ export class TypicalTransformer {
         const targetType = node.type;
 
         // Skip 'as any' and 'as unknown' casts - these are intentional escapes
-        if (targetType.kind === ts.SyntaxKind.AnyKeyword ||
-            targetType.kind === ts.SyntaxKind.UnknownKeyword) {
+        if (this.isAnyOrUnknownType(targetType)) {
           return ctx.ts.visitEachChild(node, visit, ctx.context);
         }
 
@@ -639,139 +534,6 @@ export class TypicalTransformer {
       return ctx.ts.visitEachChild(node, visit, ctx.context);
     };
 
-    // Helper functions for flow analysis
-    const getRootIdentifier = (expr: ts.Expression): string | undefined => {
-      if (ts.isIdentifier(expr)) {
-        return expr.text;
-      }
-      if (ts.isPropertyAccessExpression(expr)) {
-        return getRootIdentifier(expr.expression);
-      }
-      return undefined;
-    };
-
-    const containsReference = (expr: ts.Expression, name: string): boolean => {
-      if (ts.isIdentifier(expr) && expr.text === name) {
-        return true;
-      }
-      if (ts.isPropertyAccessExpression(expr)) {
-        return containsReference(expr.expression, name);
-      }
-      if (ts.isElementAccessExpression(expr)) {
-        return containsReference(expr.expression, name) ||
-               containsReference(expr.argumentExpression as ts.Expression, name);
-      }
-      // Check all children
-      let found = false;
-      ts.forEachChild(expr, (child) => {
-        if (ts.isExpression(child) && containsReference(child, name)) {
-          found = true;
-        }
-      });
-      return found;
-    };
-
-    // Check if a validated variable has been tainted in the function body
-    const isTainted = (varName: string, body: ts.Block): boolean => {
-      let tainted = false;
-
-      // First pass: collect aliases (variables that reference properties of varName)
-      // e.g., const addr = user.address; -> addr is an alias
-      const aliases = new Set<string>([varName]);
-
-      const collectAliases = (node: ts.Node): void => {
-        // Look for: const/let x = varName.property or const/let x = varName
-        if (ts.isVariableStatement(node)) {
-          for (const decl of node.declarationList.declarations) {
-            if (ts.isIdentifier(decl.name) && decl.initializer) {
-              // Check if initializer is rooted at our tracked variable or any existing alias
-              const initRoot = getRootIdentifier(decl.initializer);
-              if (initRoot && aliases.has(initRoot)) {
-                aliases.add(decl.name.text);
-              }
-            }
-          }
-        }
-        ts.forEachChild(node, collectAliases);
-      };
-      collectAliases(body);
-
-      // Helper to check if any alias is involved
-      const involvesTrackedVar = (expr: ts.Expression): boolean => {
-        const root = getRootIdentifier(expr);
-        return root !== undefined && aliases.has(root);
-      };
-
-      const checkTainting = (node: ts.Node): void => {
-        if (tainted) return; // Early exit if already tainted
-
-        // Reassignment: trackedVar = ...
-        if (ts.isBinaryExpression(node) &&
-            node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-            ts.isIdentifier(node.left) &&
-            aliases.has(node.left.text)) {
-          tainted = true;
-          return;
-        }
-
-        // Property assignment: trackedVar.x = ... or alias.x = ...
-        if (ts.isBinaryExpression(node) &&
-            node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-            ts.isPropertyAccessExpression(node.left) &&
-            involvesTrackedVar(node.left)) {
-          tainted = true;
-          return;
-        }
-
-        // Element assignment: trackedVar[x] = ... or alias[x] = ...
-        if (ts.isBinaryExpression(node) &&
-            node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-            ts.isElementAccessExpression(node.left) &&
-            involvesTrackedVar(node.left.expression)) {
-          tainted = true;
-          return;
-        }
-
-        // Passed as argument to a function: fn(trackedVar) or fn(alias)
-        if (ts.isCallExpression(node)) {
-          for (const arg of node.arguments) {
-            // Check if any tracked variable or alias appears in the argument
-            let hasTrackedRef = false;
-            const checkRef = (n: ts.Node): void => {
-              if (ts.isIdentifier(n) && aliases.has(n.text)) {
-                hasTrackedRef = true;
-              }
-              ts.forEachChild(n, checkRef);
-            };
-            checkRef(arg);
-            if (hasTrackedRef) {
-              tainted = true;
-              return;
-            }
-          }
-        }
-
-        // Method call on the variable: trackedVar.method() or alias.method()
-        if (ts.isCallExpression(node) &&
-            ts.isPropertyAccessExpression(node.expression) &&
-            involvesTrackedVar(node.expression.expression)) {
-          tainted = true;
-          return;
-        }
-
-        // Await expression (async boundary - external code could run)
-        if (ts.isAwaitExpression(node)) {
-          tainted = true;
-          return;
-        }
-
-        ts.forEachChild(node, checkTainting);
-      };
-
-      checkTainting(body);
-      return tainted;
-    };
-
     const transformFunction = (
       func: ts.FunctionDeclaration | ts.ArrowFunction | ts.MethodDeclaration
     ): ts.Node => {
@@ -806,8 +568,7 @@ export class TypicalTransformer {
       func.parameters.forEach((param) => {
         if (param.type) {
           // Skip 'any' and 'unknown' types - no point validating them
-          if (param.type.kind === ts.SyntaxKind.AnyKeyword ||
-              param.type.kind === ts.SyntaxKind.UnknownKeyword) {
+          if (this.isAnyOrUnknownType(param.type)) {
             return;
           }
 
@@ -870,8 +631,7 @@ export class TypicalTransformer {
             for (const decl of node.declarationList.declarations) {
               if (decl.type && ts.isIdentifier(decl.name)) {
                 // Skip any/unknown types
-                if (decl.type.kind !== ts.SyntaxKind.AnyKeyword &&
-                    decl.type.kind !== ts.SyntaxKind.UnknownKeyword) {
+                if (!this.isAnyOrUnknownType(decl.type)) {
                   const constType = typeChecker.getTypeFromTypeNode(decl.type);
                   validatedVariables.set(decl.name.text, constType);
                 }
@@ -940,12 +700,7 @@ export class TypicalTransformer {
       }
 
       // Skip 'any' and 'unknown' return types - no point validating them
-      const isAnyOrUnknownReturn = returnType && (
-        returnType.kind === ts.SyntaxKind.AnyKeyword ||
-        returnType.kind === ts.SyntaxKind.UnknownKeyword
-      );
-
-      if (returnType && returnTypeForString && !isAnyOrUnknownReturn) {
+      if (returnType && returnTypeForString && !this.isAnyOrUnknownType(returnType)) {
         const returnTransformer = (node: ts.Node): ts.Node => {
           if (ts.isReturnStatement(node) && node.expression) {
             // Skip return validation if the expression already contains a __typical _parse_* call
@@ -965,10 +720,10 @@ export class TypicalTransformer {
 
             // Flow analysis: Skip return validation if returning a validated variable
             // (or property of one) that hasn't been tainted
-            const rootVar = getRootIdentifier(node.expression);
+            const rootVar = this.getRootIdentifier(node.expression);
             if (rootVar && validatedVariables.has(rootVar)) {
               // Check if the variable has been tainted (mutated, passed to function, etc.)
-              if (!isTainted(rootVar, visitedBody)) {
+              if (!this.isTainted(rootVar, visitedBody)) {
                 // Return expression is rooted at a validated, untainted variable
                 // For direct returns (identifier) or property access, we can skip validation
                 if (ts.isIdentifier(node.expression) || ts.isPropertyAccessExpression(node.expression)) {
@@ -1120,6 +875,200 @@ export class TypicalTransformer {
     return shouldTransformFile(fileName, this.config);
   }
 
+  /**
+   * Check if a TypeNode represents any or unknown type.
+   * These types are intentional escape hatches and shouldn't be validated.
+   */
+  private isAnyOrUnknownType(typeNode: ts.TypeNode): boolean {
+    return typeNode.kind === this.ts.SyntaxKind.AnyKeyword ||
+           typeNode.kind === this.ts.SyntaxKind.UnknownKeyword;
+  }
+
+  /**
+   * Check if a Type has any or unknown flags.
+   */
+  private isAnyOrUnknownTypeFlags(type: ts.Type): boolean {
+    return (type.flags & this.ts.TypeFlags.Any) !== 0 ||
+           (type.flags & this.ts.TypeFlags.Unknown) !== 0;
+  }
+
+  /**
+   * Infer type information from a JSON.stringify argument for creating a reusable stringifier.
+   */
+  private inferStringifyType(
+    arg: ts.Expression,
+    typeChecker: ts.TypeChecker,
+    ctx: TransformContext
+  ): { typeText: string; typeNode: ts.TypeNode } {
+    const ts = this.ts;
+
+    // Type assertion: use the asserted type directly
+    if (ts.isAsExpression(arg)) {
+      const typeNode = arg.type;
+      const typeString = typeChecker.typeToString(typeChecker.getTypeFromTypeNode(typeNode));
+      return {
+        typeText: `Asserted_${typeString.replace(/[^a-zA-Z0-9_]/g, "_")}`,
+        typeNode,
+      };
+    }
+
+    // Object literal: use property names for the key
+    if (ts.isObjectLiteralExpression(arg)) {
+      const objectType = typeChecker.getTypeAtLocation(arg);
+      const typeNode = typeChecker.typeToTypeNode(objectType, arg, ts.NodeBuilderFlags.InTypeAlias);
+      if (!typeNode) {
+        throw new Error('unknown type node for object literal: ' + arg.getText());
+      }
+      const propNames = arg.properties
+        .map((prop) => {
+          if (ts.isShorthandPropertyAssignment(prop)) return prop.name.text;
+          if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) return prop.name.text;
+          return "unknown";
+        })
+        .sort()
+        .join("_");
+      return { typeText: `ObjectLiteral_${propNames}`, typeNode };
+    }
+
+    // Other expressions: infer from type checker
+    const argType = typeChecker.getTypeAtLocation(arg);
+    const typeNode = typeChecker.typeToTypeNode(argType, arg, ts.NodeBuilderFlags.InTypeAlias);
+    if (typeNode) {
+      const typeString = typeChecker.typeToString(argType);
+      return {
+        typeText: `Expression_${typeString.replace(/[^a-zA-Z0-9_]/g, "_")}`,
+        typeNode,
+      };
+    }
+
+    // Fallback to unknown
+    return {
+      typeText: "unknown",
+      typeNode: ctx.factory.createKeywordTypeNode(ctx.ts.SyntaxKind.UnknownKeyword),
+    };
+  }
+
+  // ============================================
+  // Flow Analysis Helpers
+  // ============================================
+
+  /**
+   * Gets the root identifier from an expression.
+   * e.g., `user.address.city` -> "user"
+   */
+  private getRootIdentifier(expr: ts.Expression): string | undefined {
+    if (this.ts.isIdentifier(expr)) {
+      return expr.text;
+    }
+    if (this.ts.isPropertyAccessExpression(expr)) {
+      return this.getRootIdentifier(expr.expression);
+    }
+    return undefined;
+  }
+
+  /**
+   * Check if a validated variable has been tainted (mutated) in the function body.
+   * A variable is tainted if it's reassigned, has properties modified, is passed
+   * to a function, has methods called on it, or if an await occurs.
+   */
+  private isTainted(varName: string, body: ts.Block): boolean {
+    let tainted = false;
+    const ts = this.ts;
+
+    // Collect aliases (variables that reference properties of varName)
+    // e.g., const addr = user.address; -> addr is an alias
+    const aliases = new Set<string>([varName]);
+
+    const collectAliases = (node: ts.Node): void => {
+      if (ts.isVariableStatement(node)) {
+        for (const decl of node.declarationList.declarations) {
+          if (ts.isIdentifier(decl.name) && decl.initializer) {
+            const initRoot = this.getRootIdentifier(decl.initializer);
+            if (initRoot && aliases.has(initRoot)) {
+              aliases.add(decl.name.text);
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, collectAliases);
+    };
+    collectAliases(body);
+
+    // Helper to check if any alias is involved
+    const involvesTrackedVar = (expr: ts.Expression): boolean => {
+      const root = this.getRootIdentifier(expr);
+      return root !== undefined && aliases.has(root);
+    };
+
+    const checkTainting = (node: ts.Node): void => {
+      if (tainted) return;
+
+      // Reassignment: trackedVar = ...
+      if (ts.isBinaryExpression(node) &&
+          node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          ts.isIdentifier(node.left) &&
+          aliases.has(node.left.text)) {
+        tainted = true;
+        return;
+      }
+
+      // Property assignment: trackedVar.x = ... or alias.x = ...
+      if (ts.isBinaryExpression(node) &&
+          node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          ts.isPropertyAccessExpression(node.left) &&
+          involvesTrackedVar(node.left)) {
+        tainted = true;
+        return;
+      }
+
+      // Element assignment: trackedVar[x] = ... or alias[x] = ...
+      if (ts.isBinaryExpression(node) &&
+          node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          ts.isElementAccessExpression(node.left) &&
+          involvesTrackedVar(node.left.expression)) {
+        tainted = true;
+        return;
+      }
+
+      // Passed as argument to a function: fn(trackedVar) or fn(alias)
+      if (ts.isCallExpression(node)) {
+        for (const arg of node.arguments) {
+          let hasTrackedRef = false;
+          const checkRef = (n: ts.Node): void => {
+            if (ts.isIdentifier(n) && aliases.has(n.text)) {
+              hasTrackedRef = true;
+            }
+            ts.forEachChild(n, checkRef);
+          };
+          checkRef(arg);
+          if (hasTrackedRef) {
+            tainted = true;
+            return;
+          }
+        }
+      }
+
+      // Method call on the variable: trackedVar.method() or alias.method()
+      if (ts.isCallExpression(node) &&
+          ts.isPropertyAccessExpression(node.expression) &&
+          involvesTrackedVar(node.expression.expression)) {
+        tainted = true;
+        return;
+      }
+
+      // Await expression (async boundary - external code could run)
+      if (ts.isAwaitExpression(node)) {
+        tainted = true;
+        return;
+      }
+
+      ts.forEachChild(node, checkTainting);
+    };
+
+    checkTainting(body);
+    return tainted;
+  }
+
   private addTypiaImport(
     sourceFile: ts.SourceFile,
     ctx: TransformContext
@@ -1216,150 +1165,95 @@ export class TypicalTransformer {
     return String(fallbackIndex);
   }
 
-  private getOrCreateValidator(
+  /**
+   * Generic method to get or create a typed function (validator, stringifier, or parser).
+   */
+  private getOrCreateTypedFunction(
+    kind: 'assert' | 'stringify' | 'parse',
     typeText: string,
     typeNode: ts.TypeNode
   ): string {
-    if (this.typeValidators.has(typeText)) {
-      return this.typeValidators.get(typeText)!.name;
+    const maps = {
+      assert: this.typeValidators,
+      stringify: this.typeStringifiers,
+      parse: this.typeParsers,
+    };
+    const prefixes = {
+      assert: '__typical_assert_',
+      stringify: '__typical_stringify_',
+      parse: '__typical_parse_',
+    };
+
+    const map = maps[kind];
+    const prefix = prefixes[kind];
+
+    if (map.has(typeText)) {
+      return map.get(typeText)!.name;
     }
 
-    const existingSuffixes = [...this.typeValidators.values()].map(v => v.name.replace('__typical_assert_', ''));
+    const existingSuffixes = [...map.values()].map(v => v.name.slice(prefix.length));
     const existingNames = new Set(existingSuffixes);
-    // Count only numeric suffixes for the fallback index
     const numericCount = existingSuffixes.filter(s => /^\d+$/.test(s)).length;
     const suffix = this.getTypeNameSuffix(typeText, existingNames, numericCount);
-    const validatorName = `__typical_assert_${suffix}`;
-    this.typeValidators.set(typeText, { name: validatorName, typeNode });
-    return validatorName;
+    const name = `${prefix}${suffix}`;
+    map.set(typeText, { name, typeNode });
+    return name;
   }
 
-  private getOrCreateStringifier(
-    typeText: string,
-    typeNode: ts.TypeNode
-  ): string {
-    if (this.typeStringifiers.has(typeText)) {
-      return this.typeStringifiers.get(typeText)!.name;
-    }
+  private getOrCreateValidator(typeText: string, typeNode: ts.TypeNode): string {
+    return this.getOrCreateTypedFunction('assert', typeText, typeNode);
+  }
 
-    const existingSuffixes = [...this.typeStringifiers.values()].map(v => v.name.replace('__typical_stringify_', ''));
-    const existingNames = new Set(existingSuffixes);
-    // Count only numeric suffixes for the fallback index
-    const numericCount = existingSuffixes.filter(s => /^\d+$/.test(s)).length;
-    const suffix = this.getTypeNameSuffix(typeText, existingNames, numericCount);
-    const stringifierName = `__typical_stringify_${suffix}`;
-    this.typeStringifiers.set(typeText, { name: stringifierName, typeNode });
-    return stringifierName;
+  private getOrCreateStringifier(typeText: string, typeNode: ts.TypeNode): string {
+    return this.getOrCreateTypedFunction('stringify', typeText, typeNode);
   }
 
   private getOrCreateParser(typeText: string, typeNode: ts.TypeNode): string {
-    if (this.typeParsers.has(typeText)) {
-      return this.typeParsers.get(typeText)!.name;
-    }
+    return this.getOrCreateTypedFunction('parse', typeText, typeNode);
+  }
 
-    const existingSuffixes = [...this.typeParsers.values()].map(v => v.name.replace('__typical_parse_', ''));
-    const existingNames = new Set(existingSuffixes);
-    // Count only numeric suffixes for the fallback index
-    const numericCount = existingSuffixes.filter(s => /^\d+$/.test(s)).length;
-    const suffix = this.getTypeNameSuffix(typeText, existingNames, numericCount);
-    const parserName = `__typical_parse_${suffix}`;
-    this.typeParsers.set(typeText, { name: parserName, typeNode });
-    return parserName;
+  /**
+   * Creates a nested property access expression from an array of identifiers.
+   * e.g., ['typia', 'json', 'createStringify'] -> typia.json.createStringify
+   */
+  private createPropertyAccessChain(factory: ts.NodeFactory, parts: string[]): ts.Expression {
+    let expr: ts.Expression = factory.createIdentifier(parts[0]);
+    for (let i = 1; i < parts.length; i++) {
+      expr = factory.createPropertyAccessExpression(expr, parts[i]);
+    }
+    return expr;
   }
 
   private createValidatorStatements(ctx: TransformContext): ts.Statement[] {
     const { factory } = ctx;
     const statements: ts.Statement[] = [];
 
-    // Create assert validators
-    for (const [, { name: validatorName, typeNode }] of this.typeValidators) {
-      const createAssertCall = factory.createCallExpression(
-        factory.createPropertyAccessExpression(
-          factory.createIdentifier("typia"),
-          "createAssert"
-        ),
-        [typeNode],
-        []
-      );
+    const configs: Array<{
+      map: Map<string, { name: string; typeNode: ts.TypeNode }>;
+      methodPath: string[];
+    }> = [
+      { map: this.typeValidators, methodPath: ['typia', 'createAssert'] },
+      { map: this.typeStringifiers, methodPath: ['typia', 'json', 'createStringify'] },
+      { map: this.typeParsers, methodPath: ['typia', 'json', 'createAssertParse'] },
+    ];
 
-      const validatorDeclaration = factory.createVariableStatement(
-        undefined,
-        factory.createVariableDeclarationList(
-          [
-            factory.createVariableDeclaration(
-              validatorName,
-              undefined,
-              undefined,
-              createAssertCall
-            ),
-          ],
-          ctx.ts.NodeFlags.Const
-        )
-      );
-      statements.push(validatorDeclaration);
-    }
+    for (const { map, methodPath } of configs) {
+      for (const [, { name, typeNode }] of map) {
+        const createCall = factory.createCallExpression(
+          this.createPropertyAccessChain(factory, methodPath),
+          [typeNode],
+          []
+        );
 
-    // Create stringifiers
-    for (const [, { name: stringifierName, typeNode }] of this
-      .typeStringifiers) {
-      const createStringifyCall = factory.createCallExpression(
-        factory.createPropertyAccessExpression(
-          factory.createPropertyAccessExpression(
-            factory.createIdentifier("typia"),
-            "json"
-          ),
-          "createStringify"
-        ),
-        [typeNode],
-        []
-      );
-
-      const stringifierDeclaration = factory.createVariableStatement(
-        undefined,
-        factory.createVariableDeclarationList(
-          [
-            factory.createVariableDeclaration(
-              stringifierName,
-              undefined,
-              undefined,
-              createStringifyCall
-            ),
-          ],
-          ctx.ts.NodeFlags.Const
-        )
-      );
-      statements.push(stringifierDeclaration);
-    }
-
-    // Create parsers
-    for (const [, { name: parserName, typeNode }] of this.typeParsers) {
-      const createParseCall = factory.createCallExpression(
-        factory.createPropertyAccessExpression(
-          factory.createPropertyAccessExpression(
-            factory.createIdentifier("typia"),
-            "json"
-          ),
-          "createAssertParse"
-        ),
-        [typeNode],
-        []
-      );
-
-      const parserDeclaration = factory.createVariableStatement(
-        undefined,
-        factory.createVariableDeclarationList(
-          [
-            factory.createVariableDeclaration(
-              parserName,
-              undefined,
-              undefined,
-              createParseCall
-            ),
-          ],
-          ctx.ts.NodeFlags.Const
-        )
-      );
-      statements.push(parserDeclaration);
+        const declaration = factory.createVariableStatement(
+          undefined,
+          factory.createVariableDeclarationList(
+            [factory.createVariableDeclaration(name, undefined, undefined, createCall)],
+            ctx.ts.NodeFlags.Const
+          )
+        );
+        statements.push(declaration);
+      }
     }
 
     return statements;
