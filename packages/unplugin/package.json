@@ -1,0 +1,74 @@
+{
+  "name": "@elliots/unplugin-typical",
+  "type": "module",
+  "version": "0.1.5",
+  "description": "Unplugin for typical - runtime safe TypeScript transformer",
+  "author": "Elliot Shepherd <elliot@jarofworms.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/elliots/typical#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/elliots/typical.git",
+    "directory": "packages/unplugin"
+  },
+  "bugs": {
+    "url": "https://github.com/elliots/typical/issues"
+  },
+  "keywords": [
+    "unplugin",
+    "vite",
+    "webpack",
+    "rspack",
+    "rollup",
+    "rolldown",
+    "esbuild",
+    "farm",
+    "typescript",
+    "runtime",
+    "validation",
+    "typical"
+  ],
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./esbuild": "./dist/esbuild.mjs",
+    "./farm": "./dist/farm.mjs",
+    "./rolldown": "./dist/rolldown.mjs",
+    "./rollup": "./dist/rollup.mjs",
+    "./rspack": "./dist/rspack.mjs",
+    "./vite": "./dist/vite.mjs",
+    "./webpack": "./dist/webpack.mjs",
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "typesVersions": {
+    "*": {
+      "*": [
+        "./dist/*.d.mts",
+        "./*"
+      ]
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@elliots/typical": "workspace:*",
+    "unplugin": "^2.3.11"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsdown": "^0.18.3",
+    "typescript": "^5.0.0"
+  }
+}

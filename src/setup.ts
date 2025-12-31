@@ -11,6 +11,10 @@ export function setupTsProgram(tsInstance: typeof ts): ts.Program {
     throw new Error("Could not find tsconfig.json");
   }
 
+  if (process.env.DEBUG) {
+    console.log(`SETUP: Using tsconfig at ${tsConfigPath}`);
+  }
+
   // Load and parse tsconfig.json
   const configFile = tsInstance.readConfigFile(tsConfigPath, tsInstance.sys.readFile);
   const parsedConfig = tsInstance.parseJsonConfigFileContent(
@@ -18,6 +22,12 @@ export function setupTsProgram(tsInstance: typeof ts): ts.Program {
     tsInstance.sys,
     process.cwd()
   );
+
+  if (process.env.DEBUG) {
+    console.log(
+      `SETUP: Parsed tsconfig with ${parsedConfig.fileNames.length} files`
+    );
+  }
 
   // Create the TypeScript program with all project files
   const tsProgram = tsInstance.createProgram(
