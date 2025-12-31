@@ -7,6 +7,7 @@ export interface TypicalConfig {
   exclude?: string[];
   reusableValidators?: boolean;
   validateCasts?: boolean;
+  hoistRegex?: boolean;
   debug?: TypicalDebugConfig;
 }
 
@@ -15,6 +16,7 @@ export const defaultConfig: TypicalConfig = {
   exclude: ["node_modules/**", "**/*.d.ts", "dist/**", "build/**"],
   reusableValidators: true,
   validateCasts: false,
+  hoistRegex: true,
   debug: {
     writeIntermediateFiles: false,
   },

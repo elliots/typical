@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { loadConfig, TypicalConfig } from "./config.js";
 import { shouldTransformFile } from "./file-filter.js";
+import { hoistRegexConstructors } from "./regex-hoister.js";
 
 import { transform as typiaTransform } from "typia/lib/transform.js";
 import { setupTsProgram } from "./setup.js";
@@ -247,6 +248,15 @@ export class TypicalTransformer {
               typiaTransformed.hasNoDefaultLib,
               typiaTransformed.libReferenceDirectives
             );
+
+            // Hoist RegExp constructors to top-level constants for performance
+            if (this.config.hoistRegex !== false) {
+              transformedSourceFile = hoistRegexConstructors(
+                transformedSourceFile,
+                this.ts,
+                factory
+              );
+            }
           } catch (error) {
             console.warn("Failed to apply typia transformer:", sourceFile.fileName, error);
           }
