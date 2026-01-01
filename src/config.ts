@@ -21,6 +21,12 @@ export interface TypicalConfig {
    * Default: true
    */
   ignoreDOMTypes?: boolean;
+  /**
+   * Validate function parameters and return types at runtime.
+   * When enabled, typed function parameters get runtime validation calls injected.
+   * Default: true
+   */
+  validateFunctions?: boolean;
 }
 
 export const defaultConfig: TypicalConfig = {
@@ -28,6 +34,7 @@ export const defaultConfig: TypicalConfig = {
   exclude: ["node_modules/**", "**/*.d.ts", "dist/**", "build/**"],
   reusableValidators: true,
   validateCasts: false,
+  validateFunctions: true,
   hoistRegex: true,
   ignoreDOMTypes: true,
   debug: {

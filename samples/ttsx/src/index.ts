@@ -1,3 +1,9 @@
+import { TypicalConfig } from "@elliots/typical";
+
+function checkConfig(config: TypicalConfig) {
+  console.log("Typical Config:", config);
+}
+
 interface User {
   name: string;
   age: number;
@@ -31,8 +37,7 @@ class UserService {
   }
 }
 
-// Test the ESM loader
-console.log("Testing Typical ESM loader...");
+console.log("Testing Typical");
 
 const user = createUser("Alice", 30, "alice@example.com");
 console.log("Created user:", user);
@@ -48,11 +53,24 @@ const loadedUser = service.loadUser(jsonData);
 console.log("Loaded user:", loadedUser);
 
 try {
-  service.loadUser('{"name":"Charlie","age":"22","email":"charlie at example.com"}');
+  service.loadUser(
+    '{"name":"Charlie","age":"22","email":"charlie at example.com"}'
+  );
   console.error("❌ Invalid user data was accepted!");
   process.exit(1);
 } catch (e) {
   console.error("Caught error as expected for invalid user data:");
+}
+
+try {
+  // check config
+  checkConfig({
+    reusableValidators: 'nope',
+  } as any as TypicalConfig);
+  console.error("❌ Invalid config was accepted!");
+  process.exit(1);
+} catch (e) {
+  console.error("Caught error as expected for invalid config:");
 }
 
 console.log("✅ All tests passed!");

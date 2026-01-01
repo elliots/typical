@@ -849,7 +849,8 @@ export class TypicalTransformer {
                 );
               }
 
-              if (innerTypeNode && !this.isAnyOrUnknownType(innerTypeNode)) {
+              // Only add validation if validateFunctions is enabled
+              if (this.config.validateFunctions !== false && innerTypeNode && !this.isAnyOrUnknownType(innerTypeNode)) {
                 const innerTypeText = this.getTypeKey(innerTypeNode, typeChecker, innerType);
                 if (!this.isIgnoredType(innerTypeText, typeChecker, innerType) && !shouldSkipType(innerTypeText)) {
                   // Wrap expression with .then(validator)
@@ -893,11 +894,14 @@ export class TypicalTransformer {
       // Track validated variables (params and consts with type annotations)
       const validatedVariables = new Map<string, ts.Type>();
 
-      // Add parameter validation
+      // Add parameter validation (only if validateFunctions is enabled)
       const validationStatements: ts.Statement[] = [];
 
+      // Skip parameter validation if validateFunctions is disabled
+      const shouldValidateFunctions = this.config.validateFunctions !== false;
+
       func.parameters.forEach((param) => {
-        if (param.type) {
+        if (shouldValidateFunctions && param.type) {
           // Skip 'any' and 'unknown' types - no point validating them
           if (this.isAnyOrUnknownType(param.type)) {
             return;
@@ -1092,7 +1096,7 @@ export class TypicalTransformer {
       if (isSkippedReturnType && process.env.DEBUG) {
         console.log(`TYPICAL: Skipping previously failed type for return: ${returnTypeText}`);
       }
-      if (returnType && returnTypeForString && !this.isAnyOrUnknownType(returnType) && !isIgnoredReturnType && !shouldSkipReturnType && !isSkippedReturnType) {
+      if (shouldValidateFunctions && returnType && returnTypeForString && !this.isAnyOrUnknownType(returnType) && !isIgnoredReturnType && !shouldSkipReturnType && !isSkippedReturnType) {
         const returnTransformer = (node: ts.Node): ts.Node => {
           // Don't recurse into nested functions - they have their own return types
           if (ts.isFunctionDeclaration(node) || ts.isArrowFunction(node) ||
