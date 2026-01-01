@@ -8,7 +8,7 @@ export default defineConfig({
       typical: {
         "reusableValidators": true,
         "validateCasts": true,
-        "ignoreTypes": ["React.*"],
+        "ignoreTypes": ["React.FormEvent"],
         debug: {
           writeIntermediateFiles: false
         }

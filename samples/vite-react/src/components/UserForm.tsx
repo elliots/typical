@@ -1,6 +1,4 @@
-import { useState } from 'react'
-
-import React from 'react'
+import React, { useState } from 'react'
 
 // Email type using template literal - requires @ and . symbols
 type Email = `${string}@${string}.${string}`
@@ -26,7 +24,7 @@ export function UserForm() {
   const [result, setResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
   // Use 'any' for event handlers - React already validates these
-  const handleSubmit = (e: React.FormEvent<HTMLElement>) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     setResult(null)
 

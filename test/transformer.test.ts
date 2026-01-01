@@ -438,6 +438,128 @@ const fn = (s: string): User => JSON.parse(s);`,
       ],
       notExpectedPatterns: [`JSON.parse`],
     },
+    // Non-async function returning Promise tests
+    {
+      name: "non-async function returning Promise uses .then() for validation",
+      input: `
+interface User {
+  id: number;
+  name: string;
+}
+declare function fetchUser(id: number): Promise<User>;
+function getUser(id: number): Promise<User> {
+  return fetchUser(id);
+}`,
+      expectedPatterns: [
+        `import typia from "typia"`,
+        `typia.createAssert<User>()`,
+        `return fetchUser(id).then(__typical_assert_User)`, // Should use .then() not await
+      ],
+      notExpectedPatterns: [
+        `await fetchUser`, // Should NOT use await (not async function)
+        `createAssert<Promise<User>>`, // Should NOT validate Promise<User>
+      ],
+    },
+    {
+      name: "non-async arrow function returning Promise in .map() uses .then()",
+      input: `
+interface Product {
+  id: number;
+  name: string;
+}
+declare function getProducts(id: string): Promise<{ items: Product[] }>;
+function queryProducts(sourceIds: string[]): Promise<{ items: Product[] }>[] {
+  return sourceIds.map(sourceId => {
+    return getProducts(sourceId);
+  });
+}`,
+      expectedPatterns: [
+        `import typia from "typia"`,
+        `typia.createAssert<{`,
+        `.then(__typical_assert_`, // Should use .then() for validation
+      ],
+      notExpectedPatterns: [
+        `await getProducts`, // Should NOT use await (not async)
+        `__typical_assert_void`, // Should NOT be void type
+      ],
+    },
+    {
+      name: "non-async arrow function with inferred Promise return uses .then()",
+      input: `
+interface Data {
+  value: number;
+}
+declare function fetchData(): Promise<Data>;
+const getData = (): Promise<Data> => fetchData();`,
+      expectedPatterns: [
+        `typia.createAssert<Data>()`,
+        `.then(__typical_assert_Data)`,
+      ],
+      notExpectedPatterns: [
+        `await fetchData`,
+      ],
+    },
+    // Complex type handling tests
+    {
+      name: "truncated types use hash-based keys",
+      input: `
+interface VeryLongTypeName {
+  field1: string;
+  field2: number;
+  field3: boolean;
+  field4: string[];
+  field5: { nested: { deep: { value: string } } };
+}
+function process(data: VeryLongTypeName): VeryLongTypeName {
+  return data;
+}`,
+      expectedPatterns: [
+        `typia.createAssert<VeryLongTypeName>()`,
+      ],
+      notExpectedPatterns: [
+        `...more`, // Should not have truncation in output
+      ],
+    },
+    {
+      name: "complex object literal types use numeric suffixes",
+      input: `
+function getInfo() {
+  const data = { x: "a", y: 1 };
+  return JSON.stringify(data);
+}`,
+      expectedPatterns: [
+        // Should use numeric suffix for complex inline object types, not encode the whole type
+        /__typical_stringify_\d+\(data\)/,
+      ],
+      notExpectedPatterns: [
+        // Should NOT have ugly encoded type names
+        `__typical_stringify___x__string`,
+        `__typical_stringify____x`,
+        `ObjectLiteral_`,
+        `Expression_`,
+      ],
+    },
+    // Nested function tests - outer function shouldn't transform inner function's returns
+    {
+      name: "nested arrow function in .map() has separate return type handling",
+      input: `
+interface Item { id: number; }
+declare function fetchItems(): Item[];
+function getIds(): number[] {
+  return fetchItems().map(item => {
+    return item.id;
+  });
+}`,
+      expectedPatterns: [
+        // The outer function returns number[] which should be validated
+        `__typical_assert_`,
+        `fetchItems().map`,
+      ],
+      notExpectedPatterns: [
+        // Inner arrow function should NOT have its return wrapped by outer's validator
+        `__typical_assert_void`,
+      ],
+    },
   ];
 
   testCases.forEach(

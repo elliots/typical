@@ -1,12 +1,15 @@
 import ts from "typescript";
 import fs from "fs";
 import path from "path";
-import { loadConfig, TypicalConfig } from "./config.js";
+import { loadConfig, TypicalConfig, DOM_TYPES_TO_IGNORE } from "./config.js";
 import { shouldTransformFile } from "./file-filter.js";
 import { hoistRegexConstructors } from "./regex-hoister.js";
 
 import { transform as typiaTransform } from "typia/lib/transform.js";
 import { setupTsProgram } from "./setup.js";
+
+// Flags for typeToTypeNode to prefer type aliases over import() syntax
+const TYPE_NODE_FLAGS = ts.NodeBuilderFlags.NoTruncation | ts.NodeBuilderFlags.UseAliasDefinedOutsideCurrentScope;
 
 export interface TransformContext {
   ts: typeof ts;
@@ -52,7 +55,8 @@ export class TypicalTransformer {
 
   public transform(
     sourceFile: ts.SourceFile | string,
-    mode: "basic" | "typia" | "js"
+    mode: "basic" | "typia" | "js",
+    skippedTypes: Set<string> = new Set()
   ): string {
     if (typeof sourceFile === "string") {
       const file = this.program.getSourceFile(sourceFile);
@@ -62,16 +66,38 @@ export class TypicalTransformer {
       sourceFile = file;
     }
 
-    const transformer = this.getTransformer(mode !== "basic");
-    const result = this.ts.transform(sourceFile, [transformer]);
     const printer = this.ts.createPrinter();
-    const transformedCode = printer.printFile(result.transformed[0]);
-    result.dispose();
 
-    if (mode === "typia" || mode === 'basic') {
+    // Phase 1: typical's own transformations only (no typia)
+    const typicalTransformer = this.getTypicalOnlyTransformer(skippedTypes);
+    const phase1Result = this.ts.transform(sourceFile, [typicalTransformer]);
+    let transformedCode = printer.printFile(phase1Result.transformed[0]);
+    phase1Result.dispose();
+
+    if (mode === "basic") {
       return transformedCode;
     }
 
+    // Phase 2: if code has typia calls, run typia transformer in its own context
+    if (transformedCode.includes("typia.")) {
+      const result = this.applyTypiaTransform(sourceFile.fileName, transformedCode, printer);
+      if (typeof result === 'object' && result.retry) {
+        // Typia failed on a type - add to skipped and retry the whole transform
+        skippedTypes.add(result.failedType);
+        // Clear validator caches since we're retrying
+        this.typeValidators.clear();
+        this.typeStringifiers.clear();
+        this.typeParsers.clear();
+        return this.transform(sourceFile, mode, skippedTypes);
+      }
+      transformedCode = result as string;
+    }
+
+    if (mode === "typia") {
+      return transformedCode;
+    }
+
+    // Mode "js" - transpile to JavaScript
     const compileResult = ts.transpileModule(transformedCode, {
       compilerOptions: this.program.getCompilerOptions(),
     });
@@ -79,9 +105,203 @@ export class TypicalTransformer {
     return compileResult.outputText;
   }
 
-  public getTransformer(
-    withTypia: boolean
-  ): ts.TransformerFactory<ts.SourceFile> {
+  /**
+   * Apply typia transformation in a separate ts.transform() context.
+   * This avoids mixing program contexts and eliminates the need for import recreation.
+   * Returns either the transformed code string, or a retry signal with the failed type.
+   */
+  private applyTypiaTransform(fileName: string, code: string, printer: ts.Printer): string | { retry: true; failedType: string } {
+    // Write intermediate file if debug option is enabled
+    if (this.config.debug?.writeIntermediateFiles) {
+      const compilerOptions = this.program.getCompilerOptions();
+      const outDir = compilerOptions.outDir || ".";
+      const rootDir = compilerOptions.rootDir || ".";
+
+      const relativePath = path.relative(rootDir, fileName);
+      const intermediateFileName = relativePath.replace(/\.(tsx?)$/, ".typical.$1");
+      const intermediateFilePath = path.join(outDir, intermediateFileName);
+
+      const dir = path.dirname(intermediateFilePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      fs.writeFileSync(intermediateFilePath, code);
+      console.log(`TYPICAL: Wrote intermediate file: ${intermediateFilePath}`);
+    }
+
+    if (process.env.DEBUG) {
+      console.log("TYPICAL: Before typia transform (first 500 chars):", code.substring(0, 500));
+    }
+
+    // Create a new source file from the transformed code
+    const newSourceFile = this.ts.createSourceFile(
+      fileName,
+      code,
+      this.ts.ScriptTarget.ES2020,
+      true
+    );
+
+    // Create a new program with the transformed source file so typia can resolve types.
+    // Pass oldProgram to reuse parsed/bound data from unchanged dependency files.
+    const compilerOptions = this.program.getCompilerOptions();
+    const originalSourceFiles = new Map<string, ts.SourceFile>();
+    for (const sf of this.program.getSourceFiles()) {
+      originalSourceFiles.set(sf.fileName, sf);
+    }
+    // Replace the original source file with our transformed one
+    originalSourceFiles.set(fileName, newSourceFile);
+
+    const customHost: ts.CompilerHost = {
+      getSourceFile: (hostFileName, languageVersion) => {
+        if (originalSourceFiles.has(hostFileName)) {
+          return originalSourceFiles.get(hostFileName);
+        }
+        return this.ts.createSourceFile(
+          hostFileName,
+          this.ts.sys.readFile(hostFileName) || "",
+          languageVersion,
+          true
+        );
+      },
+      getDefaultLibFileName: (opts) => this.ts.getDefaultLibFilePath(opts),
+      writeFile: () => {},
+      getCurrentDirectory: () => this.ts.sys.getCurrentDirectory(),
+      getCanonicalFileName: (fn) =>
+        this.ts.sys.useCaseSensitiveFileNames ? fn : fn.toLowerCase(),
+      useCaseSensitiveFileNames: () => this.ts.sys.useCaseSensitiveFileNames,
+      getNewLine: () => this.ts.sys.newLine,
+      fileExists: (fn) => originalSourceFiles.has(fn) || this.ts.sys.fileExists(fn),
+      readFile: (fn) => this.ts.sys.readFile(fn),
+    };
+
+    // Create new program, passing oldProgram to reuse dependency context
+    const newProgram = this.ts.createProgram(
+      Array.from(originalSourceFiles.keys()),
+      compilerOptions,
+      customHost,
+      this.program // Reuse old program's structure for unchanged files
+    );
+
+    // Get the bound source file from the new program (has proper symbol tables)
+    const boundSourceFile = newProgram.getSourceFile(fileName);
+    if (!boundSourceFile) {
+      throw new Error(`Failed to get bound source file: ${fileName}`);
+    }
+
+    // Collect typia diagnostics to detect transformation failures
+    const diagnostics: ts.Diagnostic[] = [];
+
+    // Create typia transformer with the new program
+    const typiaTransformerFactory = typiaTransform(
+      newProgram,
+      {},
+      {
+        addDiagnostic(diag: ts.Diagnostic) {
+          diagnostics.push(diag);
+          if (process.env.DEBUG) {
+            console.warn("Typia diagnostic:", diag);
+          }
+          return diagnostics.length - 1;
+        },
+      }
+    );
+
+    // Run typia's transformer in its own ts.transform() call
+    const typiaResult = this.ts.transform(boundSourceFile, [typiaTransformerFactory]);
+    let typiaTransformed = typiaResult.transformed[0];
+    typiaResult.dispose();
+
+    if (process.env.DEBUG) {
+      const afterTypia = printer.printFile(typiaTransformed);
+      console.log("TYPICAL: After typia transform (first 500 chars):", afterTypia.substring(0, 500));
+    }
+
+    // Check for typia errors via diagnostics
+    const errors = diagnostics.filter(d => d.category === this.ts.DiagnosticCategory.Error);
+    if (errors.length > 0) {
+      // Check if any error is due to Window/globalThis intersection (DOM types)
+      for (const d of errors) {
+        const fullMessage = typeof d.messageText === 'string' ? d.messageText : d.messageText.messageText;
+        if (fullMessage.includes('Window & typeof globalThis') || fullMessage.includes('typeof globalThis')) {
+          // Find the validator that failed - look for the type in the error
+          // Error format: "Code: typia.createAssert<{ value: number; table: Table; }>()"
+          if (d.file && d.start !== undefined && d.length !== undefined) {
+            const sourceSnippet = d.file.text.substring(d.start, d.start + d.length);
+            // Extract the type from typia.createAssert<TYPE>()
+            const typeMatch = sourceSnippet.match(/typia\.\w+<([^>]+(?:<[^>]*>)*)>\(\)/);
+            if (typeMatch) {
+              const failedType = typeMatch[1].trim();
+              console.warn(`TYPICAL: Skipping validation for type due to Window/globalThis (typia cannot process DOM types): ${failedType.substring(0, 100)}...`);
+
+              // Add to ignored types and signal retry needed
+              return { retry: true, failedType };
+            }
+          }
+        }
+      }
+
+      // No retryable errors, throw the original error
+      const errorMessages = errors.map(d => {
+        const fullMessage = typeof d.messageText === 'string' ? d.messageText : d.messageText.messageText;
+
+        if (d.file && d.start !== undefined && d.length !== undefined) {
+          const { line, character } = d.file.getLineAndCharacterOfPosition(d.start);
+          // Extract the actual source code that caused the error
+          const sourceSnippet = d.file.text.substring(d.start, d.start + d.length);
+          // Truncate long snippets
+          const snippet = sourceSnippet.length > 100
+            ? sourceSnippet.substring(0, 100) + '...'
+            : sourceSnippet;
+
+          // Format the error message - extract type issues from typia's verbose output
+          const formattedIssues = this.formatTypiaError(fullMessage);
+
+          return `${d.file.fileName}:${line + 1}:${character + 1}\n` +
+            `  Code: ${snippet}\n` +
+            formattedIssues;
+        }
+        return this.formatTypiaError(fullMessage);
+      });
+      throw new Error(
+        `TYPICAL: Typia transformation failed:\n\n${errorMessages.join('\n\n')}`
+      );
+    }
+
+    // Hoist RegExp constructors to top-level constants for performance
+    if (this.config.hoistRegex !== false) {
+      // Need to run hoisting in a transform context
+      const hoistResult = this.ts.transform(typiaTransformed, [
+        (context) => (sf) => hoistRegexConstructors(sf, this.ts, context.factory)
+      ]);
+      typiaTransformed = hoistResult.transformed[0];
+      hoistResult.dispose();
+    }
+
+    const finalCode = printer.printFile(typiaTransformed);
+
+    // Also check for untransformed typia calls as a fallback
+    // (in case typia silently fails without reporting a diagnostic)
+    const untransformedCalls = this.findUntransformedTypiaCalls(finalCode);
+    if (untransformedCalls.length > 0) {
+      const failedTypes = untransformedCalls.map(c => c.type).filter((v, i, a) => a.indexOf(v) === i);
+      throw new Error(
+        `TYPICAL: Failed to transform the following types (typia cannot process them):\n` +
+        failedTypes.map(t => `  - ${t}`).join('\n') +
+        `\n\nTo skip validation for these types, add to ignoreTypes in typical.json:\n` +
+        `  "ignoreTypes": [${failedTypes.map(t => `"${t}"`).join(', ')}]` +
+        `\n\nFile: ${fileName}`
+      );
+    }
+
+    return finalCode;
+  }
+
+  /**
+   * Get a transformer that only applies typical's transformations (no typia).
+   * @param skippedTypes Set of type strings to skip validation for (used for retry after typia errors)
+   */
+  private getTypicalOnlyTransformer(skippedTypes: Set<string> = new Set()): ts.TransformerFactory<ts.SourceFile> {
     return (context: ts.TransformationContext) => {
       const factory = context.factory;
       const typeChecker = this.program.getTypeChecker();
@@ -94,13 +314,46 @@ export class TypicalTransformer {
       return (sourceFile: ts.SourceFile) => {
         // Check if this file should be transformed based on include/exclude patterns
         if (!this.shouldTransformFile(sourceFile.fileName)) {
-          return sourceFile; // Return unchanged for excluded files
+          return sourceFile;
         }
 
         if (process.env.DEBUG) {
           console.log("TYPICAL: processing ", sourceFile.fileName);
         }
-        // First apply our transformation
+
+        return this.transformSourceFile(sourceFile, transformContext, typeChecker, skippedTypes);
+      };
+    };
+  }
+
+  /**
+   * Get a combined transformer for use with ts-patch/ttsc.
+   * This is used by the TSC plugin where we need a single transformer factory.
+   *
+   * Note: Even for ts-patch, we need to create a new program with the transformed
+   * source so typia can resolve the types from our generated typia.createAssert<T>() calls.
+   */
+  public getTransformer(withTypia: boolean): ts.TransformerFactory<ts.SourceFile> {
+    return (context: ts.TransformationContext) => {
+      const factory = context.factory;
+      const typeChecker = this.program.getTypeChecker();
+      const transformContext: TransformContext = {
+        ts: this.ts,
+        factory,
+        context,
+      };
+
+      return (sourceFile: ts.SourceFile) => {
+        // Check if this file should be transformed based on include/exclude patterns
+        if (!this.shouldTransformFile(sourceFile.fileName)) {
+          return sourceFile;
+        }
+
+        if (process.env.DEBUG) {
+          console.log("TYPICAL: processing ", sourceFile.fileName);
+        }
+
+        // Apply typical's transformations
         let transformedSourceFile = this.transformSourceFile(
           sourceFile,
           transformContext,
@@ -111,12 +364,12 @@ export class TypicalTransformer {
           return transformedSourceFile;
         }
 
-        // Apply typia transformation
+        // Print the transformed code to check for typia calls
         const printer = this.ts.createPrinter();
         const transformedCode = printer.printFile(transformedSourceFile);
 
-        if (process.env.DEBUG) {
-          console.log("TYPICAL: Before typia transform (first 500 chars):", transformedCode.substring(0, 500));
+        if (!transformedCode.includes("typia.")) {
+          return transformedSourceFile;
         }
 
         // Write intermediate file if debug option is enabled
@@ -124,160 +377,153 @@ export class TypicalTransformer {
           const compilerOptions = this.program.getCompilerOptions();
           const outDir = compilerOptions.outDir || ".";
           const rootDir = compilerOptions.rootDir || ".";
-
-          // Calculate the relative path from rootDir
           const relativePath = path.relative(rootDir, sourceFile.fileName);
-          // Change extension to .typical.ts(x) to indicate intermediate state, preserving tsx
           const intermediateFileName = relativePath.replace(/\.(tsx?)$/, ".typical.$1");
           const intermediateFilePath = path.join(outDir, intermediateFileName);
-
-          // Ensure directory exists
           const dir = path.dirname(intermediateFilePath);
           if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
           }
-
           fs.writeFileSync(intermediateFilePath, transformedCode);
           console.log(`TYPICAL: Wrote intermediate file: ${intermediateFilePath}`);
         }
 
-        if (transformedCode.includes("typia.")) {
-          try {
-            // Create a new source file from our transformed code
-            const newSourceFile = this.ts.createSourceFile(
-              sourceFile.fileName,
-              transformedCode,
-              sourceFile.languageVersion,
+        if (process.env.DEBUG) {
+          console.log("TYPICAL: Before typia transform (first 500 chars):", transformedCode.substring(0, 500));
+        }
+
+        // Create a new source file from the transformed code
+        const newSourceFile = this.ts.createSourceFile(
+          sourceFile.fileName,
+          transformedCode,
+          sourceFile.languageVersion,
+          true
+        );
+
+        // Create a new program with the transformed source file so typia can resolve types.
+        // Pass oldProgram to reuse parsed/bound data from unchanged dependency files.
+        const compilerOptions = this.program.getCompilerOptions();
+        const originalSourceFiles = new Map<string, ts.SourceFile>();
+        for (const sf of this.program.getSourceFiles()) {
+          originalSourceFiles.set(sf.fileName, sf);
+        }
+        // Replace the original source file with our transformed one
+        originalSourceFiles.set(sourceFile.fileName, newSourceFile);
+
+        const customHost: ts.CompilerHost = {
+          getSourceFile: (hostFileName, languageVersion) => {
+            if (originalSourceFiles.has(hostFileName)) {
+              return originalSourceFiles.get(hostFileName);
+            }
+            return this.ts.createSourceFile(
+              hostFileName,
+              this.ts.sys.readFile(hostFileName) || "",
+              languageVersion,
               true
             );
+          },
+          getDefaultLibFileName: (opts) => this.ts.getDefaultLibFilePath(opts),
+          writeFile: () => {},
+          getCurrentDirectory: () => this.ts.sys.getCurrentDirectory(),
+          getCanonicalFileName: (fn) =>
+            this.ts.sys.useCaseSensitiveFileNames ? fn : fn.toLowerCase(),
+          useCaseSensitiveFileNames: () => this.ts.sys.useCaseSensitiveFileNames,
+          getNewLine: () => this.ts.sys.newLine,
+          fileExists: (fn) => originalSourceFiles.has(fn) || this.ts.sys.fileExists(fn),
+          readFile: (fn) => this.ts.sys.readFile(fn),
+        };
 
-            // Create a new program with the transformed source file so typia can resolve types
-            const compilerOptions = this.program.getCompilerOptions();
-            const originalSourceFiles = new Map<string, ts.SourceFile>();
-            for (const sf of this.program.getSourceFiles()) {
-              originalSourceFiles.set(sf.fileName, sf);
-            }
-            // Replace the original source file with our transformed one
-            originalSourceFiles.set(sourceFile.fileName, newSourceFile);
+        // Create new program, passing oldProgram to reuse dependency context
+        const newProgram = this.ts.createProgram(
+          Array.from(originalSourceFiles.keys()),
+          compilerOptions,
+          customHost,
+          this.program // Reuse old program's structure for unchanged files
+        );
 
-            const customHost: ts.CompilerHost = {
-              getSourceFile: (fileName, languageVersion) => {
-                if (originalSourceFiles.has(fileName)) {
-                  return originalSourceFiles.get(fileName);
-                }
-                return this.ts.createSourceFile(
-                  fileName,
-                  this.ts.sys.readFile(fileName) || "",
-                  languageVersion,
-                  true
-                );
-              },
-              getDefaultLibFileName: (opts) => this.ts.getDefaultLibFilePath(opts),
-              writeFile: () => {},
-              getCurrentDirectory: () => this.ts.sys.getCurrentDirectory(),
-              getCanonicalFileName: (fileName) =>
-                this.ts.sys.useCaseSensitiveFileNames ? fileName : fileName.toLowerCase(),
-              useCaseSensitiveFileNames: () => this.ts.sys.useCaseSensitiveFileNames,
-              getNewLine: () => this.ts.sys.newLine,
-              fileExists: (fileName) => originalSourceFiles.has(fileName) || this.ts.sys.fileExists(fileName),
-              readFile: (fileName) => this.ts.sys.readFile(fileName),
-            };
+        // Get the bound source file from the new program (has proper symbol tables)
+        const boundSourceFile = newProgram.getSourceFile(sourceFile.fileName);
+        if (!boundSourceFile) {
+          throw new Error(`Failed to get bound source file: ${sourceFile.fileName}`);
+        }
 
-            const newProgram = this.ts.createProgram(
-              Array.from(originalSourceFiles.keys()),
-              compilerOptions,
-              customHost
-            );
+        // Collect typia diagnostics to detect transformation failures
+        const diagnostics: ts.Diagnostic[] = [];
 
-            // Get the bound source file from the new program (has proper symbol tables)
-            const boundSourceFile = newProgram.getSourceFile(sourceFile.fileName);
-            if (!boundSourceFile) {
-              throw new Error(`Failed to get bound source file: ${sourceFile.fileName}`);
-            }
-
-            // Create typia transformer with the NEW program that has our transformed source
-            const typiaTransformerFactory = typiaTransform(
-              newProgram,
-              {},
-              {
-                addDiagnostic(diag: ts.Diagnostic) {
-                  if (process.env.DEBUG) {
-                    console.warn("Typia diagnostic:", diag);
-                  }
-                  return 0;
-                },
+        // Create typia transformer with the new program
+        const typiaTransformerFactory = typiaTransform(
+          newProgram,
+          {},
+          {
+            addDiagnostic(diag: ts.Diagnostic) {
+              diagnostics.push(diag);
+              if (process.env.DEBUG) {
+                console.warn("Typia diagnostic:", diag);
               }
-            );
-
-            // Apply typia's transformer to the bound source file
-            const typiaNodeTransformer = typiaTransformerFactory(context);
-            const typiaTransformed = typiaNodeTransformer(boundSourceFile);
-
-            if (process.env.DEBUG) {
-              const afterTypia = printer.printFile(typiaTransformed);
-              console.log("TYPICAL: After typia transform (first 500 chars):", afterTypia.substring(0, 500));
-            }
-
-            // Return the typia-transformed source file.
-            // We need to recreate imports as synthetic nodes to prevent import elision,
-            // since the imports come from a different program context.
-            // Skip type-only imports as they shouldn't appear in JS output.
-            const syntheticStatements: ts.Statement[] = [];
-            for (const stmt of typiaTransformed.statements) {
-              if (this.ts.isImportDeclaration(stmt)) {
-                // Skip type-only imports (import type X from "y")
-                if (stmt.importClause?.isTypeOnly) {
-                  continue;
-                }
-                const recreated = this.recreateImportDeclaration(stmt, factory, newProgram.getTypeChecker());
-                if (recreated) {
-                  syntheticStatements.push(recreated);
-                }
-              } else {
-                syntheticStatements.push(stmt);
-              }
-            }
-
-            // Update the source file with synthetic imports
-            transformedSourceFile = factory.updateSourceFile(
-              typiaTransformed,
-              syntheticStatements,
-              typiaTransformed.isDeclarationFile,
-              typiaTransformed.referencedFiles,
-              typiaTransformed.typeReferenceDirectives,
-              typiaTransformed.hasNoDefaultLib,
-              typiaTransformed.libReferenceDirectives
-            );
-
-            // Hoist RegExp constructors to top-level constants for performance
-            if (this.config.hoistRegex !== false) {
-              transformedSourceFile = hoistRegexConstructors(
-                transformedSourceFile,
-                this.ts,
-                factory
-              );
-            }
-
-            // Check for untransformed typia calls - these indicate types typia couldn't process
-            const finalCode = printer.printFile(transformedSourceFile);
-            const untransformedCalls = this.findUntransformedTypiaCalls(finalCode);
-            if (untransformedCalls.length > 0) {
-              const failedTypes = untransformedCalls.map(c => c.type).filter((v, i, a) => a.indexOf(v) === i);
-              throw new Error(
-                `TYPICAL: Failed to transform the following types (typia cannot process them):\n` +
-                failedTypes.map(t => `  - ${t}`).join('\n') +
-                `\n\nTo skip validation for these types, add to ignoreTypes in typical.json:\n` +
-                `  "ignoreTypes": [${failedTypes.map(t => `"${t}"`).join(', ')}]` +
-                `\n\nFile: ${sourceFile.fileName}`
-              );
-            }
-          } catch (error) {
-            // Re-throw our own errors, only catch typia transform failures
-            if (error instanceof Error && error.message.startsWith('TYPICAL:')) {
-              throw error;
-            }
-            console.warn("Failed to apply typia transformer:", sourceFile.fileName, error);
+              return diagnostics.length - 1;
+            },
           }
+        );
+
+        // Apply typia's transformer to the bound source file
+        const typiaNodeTransformer = typiaTransformerFactory(context);
+        transformedSourceFile = typiaNodeTransformer(boundSourceFile);
+
+        if (process.env.DEBUG) {
+          const afterTypia = printer.printFile(transformedSourceFile);
+          console.log("TYPICAL: After typia transform (first 500 chars):", afterTypia.substring(0, 500));
+        }
+
+        // Check for typia errors via diagnostics
+        const errors = diagnostics.filter(d => d.category === this.ts.DiagnosticCategory.Error);
+        if (errors.length > 0) {
+          const errorMessages = errors.map(d => {
+            const fullMessage = typeof d.messageText === 'string' ? d.messageText : d.messageText.messageText;
+
+            if (d.file && d.start !== undefined && d.length !== undefined) {
+              const { line, character } = d.file.getLineAndCharacterOfPosition(d.start);
+              // Extract the actual source code that caused the error
+              const sourceSnippet = d.file.text.substring(d.start, d.start + d.length);
+              // Truncate long snippets
+              const snippet = sourceSnippet.length > 100
+                ? sourceSnippet.substring(0, 100) + '...'
+                : sourceSnippet;
+
+              // Format the error message - extract type issues from typia's verbose output
+              const formattedIssues = this.formatTypiaError(fullMessage);
+
+              return `${d.file.fileName}:${line + 1}:${character + 1}\n` +
+                `  Code: ${snippet}\n` +
+                formattedIssues;
+            }
+            return this.formatTypiaError(fullMessage);
+          });
+          throw new Error(
+            `TYPICAL: Typia transformation failed:\n\n${errorMessages.join('\n\n')}`
+          );
+        }
+
+        // Hoist RegExp constructors to top-level constants for performance
+        if (this.config.hoistRegex !== false) {
+          transformedSourceFile = hoistRegexConstructors(
+            transformedSourceFile,
+            this.ts,
+            factory
+          );
+        }
+
+        // Also check for untransformed typia calls as a fallback
+        const finalCode = printer.printFile(transformedSourceFile);
+        const untransformedCalls = this.findUntransformedTypiaCalls(finalCode);
+        if (untransformedCalls.length > 0) {
+          const failedTypes = untransformedCalls.map(c => c.type).filter((v, i, a) => a.indexOf(v) === i);
+          throw new Error(
+            `TYPICAL: Failed to transform the following types (typia cannot process them):\n` +
+            failedTypes.map(t => `  - ${t}`).join('\n') +
+            `\n\nTo skip validation for these types, add to ignoreTypes in typical.json:\n` +
+            `  "ignoreTypes": [${failedTypes.map(t => `"${t}"`).join(', ')}]` +
+            `\n\nFile: ${sourceFile.fileName}`
+          );
         }
 
         return transformedSourceFile;
@@ -286,102 +532,33 @@ export class TypicalTransformer {
   }
 
   /**
-   * Re-create an import declaration as a fully synthetic node.
-   * This prevents TypeScript from trying to look up symbol bindings
-   * and eliding the import as "unused".
-   */
-  private recreateImportDeclaration(
-    importDecl: ts.ImportDeclaration,
-    factory: ts.NodeFactory,
-    typeChecker: ts.TypeChecker
-  ): ts.ImportDeclaration | undefined {
-    let importClause: ts.ImportClause | undefined;
-
-    if (importDecl.importClause) {
-      const clause = importDecl.importClause;
-      let namedBindings: ts.NamedImportBindings | undefined;
-
-      if (clause.namedBindings) {
-        if (this.ts.isNamespaceImport(clause.namedBindings)) {
-          // import * as foo from "bar"
-          namedBindings = factory.createNamespaceImport(
-            factory.createIdentifier(clause.namedBindings.name.text)
-          );
-        } else if (this.ts.isNamedImports(clause.namedBindings)) {
-          // import { foo, bar } from "baz"
-          // Filter out type-only imports (explicit or inferred from symbol)
-          const elements = clause.namedBindings.elements
-            .filter((el) => {
-              // Skip explicit type-only specifiers
-              if (el.isTypeOnly) return false;
-              // Check if the symbol is type-only (interface, type alias, etc.)
-              let symbol = typeChecker.getSymbolAtLocation(el.name);
-              // Follow alias to get the actual exported symbol
-              if (symbol && symbol.flags & this.ts.SymbolFlags.Alias) {
-                symbol = typeChecker.getAliasedSymbol(symbol);
-              }
-              if (symbol) {
-                const declarations = symbol.getDeclarations();
-                if (declarations && declarations.length > 0) {
-                  // If all declarations are type-only, skip this import
-                  const allTypeOnly = declarations.every((decl) =>
-                    this.ts.isInterfaceDeclaration(decl) ||
-                    this.ts.isTypeAliasDeclaration(decl) ||
-                    this.ts.isTypeLiteralNode(decl)
-                  );
-                  if (allTypeOnly) return false;
-                }
-              }
-              return true;
-            })
-            .map((el) =>
-              factory.createImportSpecifier(
-                false,
-                el.propertyName ? factory.createIdentifier(el.propertyName.text) : undefined,
-                factory.createIdentifier(el.name.text)
-              )
-            );
-          // Only create named imports if there are non-type specifiers
-          if (elements.length > 0) {
-            namedBindings = factory.createNamedImports(elements);
-          }
-        }
-      }
-
-      // Skip import entirely if no default import and no named bindings remain
-      const defaultName = clause.name ? factory.createIdentifier(clause.name.text) : undefined;
-      if (!defaultName && !namedBindings) {
-        return undefined;
-      }
-
-      importClause = factory.createImportClause(
-        clause.isTypeOnly,
-        defaultName,
-        namedBindings
-      );
-    }
-
-    const moduleSpecifier = this.ts.isStringLiteral(importDecl.moduleSpecifier)
-      ? factory.createStringLiteral(importDecl.moduleSpecifier.text)
-      : importDecl.moduleSpecifier;
-
-    return factory.createImportDeclaration(
-      importDecl.modifiers,
-      importClause,
-      moduleSpecifier,
-      importDecl.attributes
-    );
-  }
-
-  /**
    * Transform a single source file with TypeScript AST
    */
   private transformSourceFile(
     sourceFile: ts.SourceFile,
     ctx: TransformContext,
-    typeChecker: ts.TypeChecker
+    typeChecker: ts.TypeChecker,
+    skippedTypes: Set<string> = new Set()
   ): ts.SourceFile {
     const { ts } = ctx;
+
+    // Helper to check if a type should be skipped (failed in typia on previous attempt)
+    const shouldSkipType = (typeText: string): boolean => {
+      if (skippedTypes.size === 0) return false;
+      // Normalize: remove all whitespace and semicolons for comparison
+      const normalize = (s: string) => s.replace(/[\s;]+/g, '').toLowerCase();
+      const normalized = normalize(typeText);
+      for (const skipped of skippedTypes) {
+        const skippedNormalized = normalize(skipped);
+        if (normalized === skippedNormalized || normalized.includes(skippedNormalized) || skippedNormalized.includes(normalized)) {
+          if (process.env.DEBUG) {
+            console.log(`TYPICAL: Matched skipped type: "${typeText.substring(0, 50)}..." matches "${skipped.substring(0, 50)}..."`);
+          }
+          return true;
+        }
+      }
+      return false;
+    };
 
     if (!sourceFile.fileName.includes('transformer.test.ts')) {  
       // Check if this file has already been transformed by us
@@ -550,6 +727,24 @@ export class TypicalTransformer {
           return ctx.ts.visitEachChild(node, visit, ctx.context);
         }
 
+        // Skip types matching ignoreTypes patterns (including classes extending DOM types)
+        const typeText = this.getTypeKey(targetType, typeChecker);
+        const targetTypeObj = typeChecker.getTypeFromTypeNode(targetType);
+        if (this.isIgnoredType(typeText, typeChecker, targetTypeObj)) {
+          if (process.env.DEBUG) {
+            console.log(`TYPICAL: Skipping ignored type for cast: ${typeText}`);
+          }
+          return ctx.ts.visitEachChild(node, visit, ctx.context);
+        }
+
+        // Skip types that failed in typia (retry mechanism)
+        if (shouldSkipType(typeText)) {
+          if (process.env.DEBUG) {
+            console.log(`TYPICAL: Skipping previously failed type for cast: ${typeText}`);
+          }
+          return ctx.ts.visitEachChild(node, visit, ctx.context);
+        }
+
         needsTypiaImport = true;
 
         // Visit the expression first to transform any nested casts
@@ -607,8 +802,78 @@ export class TypicalTransformer {
 
       // For arrow functions with expression bodies (not blocks),
       // still visit the expression to transform JSON calls etc.
+      // Also handle Promise return types with .then() validation
       if (body && !ts.isBlock(body) && ts.isArrowFunction(func)) {
-        const visitedBody = ctx.ts.visitNode(body, visit) as ts.Expression;
+        let visitedBody = ctx.ts.visitNode(body, visit) as ts.Expression;
+
+        // Check if this is a non-async function with Promise return type
+        let returnType = func.type;
+        let returnTypeForString: ts.Type | undefined;
+
+        if (returnType) {
+          returnTypeForString = typeChecker.getTypeFromTypeNode(returnType);
+        } else {
+          // Try to infer the return type from the signature
+          try {
+            const signature = typeChecker.getSignatureFromDeclaration(func);
+            if (signature) {
+              const inferredReturnType = typeChecker.getReturnTypeOfSignature(signature);
+              returnType = typeChecker.typeToTypeNode(
+                inferredReturnType,
+                func,
+                TYPE_NODE_FLAGS
+              );
+              returnTypeForString = inferredReturnType;
+            }
+          } catch {
+            // Skip inference
+          }
+        }
+
+        // Check for Promise<T> return type
+        if (returnType && returnTypeForString) {
+          const promiseSymbol = returnTypeForString.getSymbol();
+          if (promiseSymbol && promiseSymbol.getName() === "Promise") {
+            const typeArgs = (returnTypeForString as ts.TypeReference).typeArguments;
+            if (typeArgs && typeArgs.length > 0) {
+              const innerType = typeArgs[0];
+              let innerTypeNode: ts.TypeNode | undefined;
+
+              if (ts.isTypeReferenceNode(returnType) && returnType.typeArguments && returnType.typeArguments.length > 0) {
+                innerTypeNode = returnType.typeArguments[0];
+              } else {
+                innerTypeNode = typeChecker.typeToTypeNode(
+                  innerType,
+                  func,
+                  TYPE_NODE_FLAGS
+                );
+              }
+
+              if (innerTypeNode && !this.isAnyOrUnknownType(innerTypeNode)) {
+                const innerTypeText = this.getTypeKey(innerTypeNode, typeChecker, innerType);
+                if (!this.isIgnoredType(innerTypeText, typeChecker, innerType) && !shouldSkipType(innerTypeText)) {
+                  // Wrap expression with .then(validator)
+                  const validatorName = this.config.reusableValidators
+                    ? this.getOrCreateValidator(innerTypeText, innerTypeNode)
+                    : null;
+
+                  if (validatorName) {
+                    needsTypiaImport = true;
+                    visitedBody = ctx.factory.createCallExpression(
+                      ctx.factory.createPropertyAccessExpression(
+                        visitedBody,
+                        ctx.factory.createIdentifier("then")
+                      ),
+                      undefined,
+                      [ctx.factory.createIdentifier(validatorName)]
+                    );
+                  }
+                }
+              }
+            }
+          }
+        }
+
         if (visitedBody !== body) {
           return ctx.factory.updateArrowFunction(
             func,
@@ -638,14 +903,32 @@ export class TypicalTransformer {
             return;
           }
 
-          // Skip types matching ignoreTypes patterns
+          // Skip types matching ignoreTypes patterns (including classes extending DOM types)
           const typeText = this.getTypeKey(param.type, typeChecker);
+          const paramType = typeChecker.getTypeFromTypeNode(param.type);
+
+          // Skip type parameters (generics) - can't be validated at runtime
+          if (this.isAnyOrUnknownTypeFlags(paramType)) {
+            if (process.env.DEBUG) {
+              console.log(`TYPICAL: Skipping type parameter/any for parameter: ${typeText}`);
+            }
+            return;
+          }
+
           if (process.env.DEBUG) {
             console.log(`TYPICAL: Processing parameter type: ${typeText}`);
           }
-          if (this.isIgnoredType(typeText)) {
+          if (this.isIgnoredType(typeText, typeChecker, paramType)) {
             if (process.env.DEBUG) {
               console.log(`TYPICAL: Skipping ignored type for parameter: ${typeText}`);
+            }
+            return;
+          }
+
+          // Skip types that failed in typia (retry mechanism)
+          if (shouldSkipType(typeText)) {
+            if (process.env.DEBUG) {
+              console.log(`TYPICAL: Skipping previously failed type for parameter: ${typeText}`);
             }
             return;
           }
@@ -656,7 +939,6 @@ export class TypicalTransformer {
           const paramIdentifier = ctx.factory.createIdentifier(paramName);
 
           // Track this parameter as validated for flow analysis
-          const paramType = typeChecker.getTypeFromTypeNode(param.type);
           validatedVariables.set(paramName, paramType);
 
           if (this.config.reusableValidators) {
@@ -739,7 +1021,7 @@ export class TypicalTransformer {
             returnType = typeChecker.typeToTypeNode(
               inferredReturnType,
               func,
-              ts.NodeBuilderFlags.InTypeAlias
+              TYPE_NODE_FLAGS
             );
             returnTypeForString = inferredReturnType;
           }
@@ -752,12 +1034,14 @@ export class TypicalTransformer {
         returnTypeForString = typeChecker.getTypeFromTypeNode(returnType);
       }
 
-      // For async functions, unwrap Promise<T> to get T
-      // The return statement in an async function returns T, not Promise<T>
-      if (isAsync && returnType && returnTypeForString) {
+      // Handle Promise return types
+      // Track whether this is a non-async function returning Promise (needs .then() wrapper)
+      let isNonAsyncPromiseReturn = false;
+
+      if (returnType && returnTypeForString) {
         const promiseSymbol = returnTypeForString.getSymbol();
         if (promiseSymbol && promiseSymbol.getName() === "Promise") {
-          // Get the type argument of Promise<T>
+          // Unwrap Promise<T> to get T for validation
           const typeArgs = (returnTypeForString as ts.TypeReference).typeArguments;
           if (typeArgs && typeArgs.length > 0) {
             returnTypeForString = typeArgs[0];
@@ -769,24 +1053,53 @@ export class TypicalTransformer {
               returnType = typeChecker.typeToTypeNode(
                 returnTypeForString,
                 func,
-                ts.NodeBuilderFlags.InTypeAlias
+                TYPE_NODE_FLAGS
               );
+            }
+
+            if (!isAsync) {
+              // For non-async functions returning Promise, we'll use .then(validator)
+              isNonAsyncPromiseReturn = true;
+              if (process.env.DEBUG) {
+                console.log(`TYPICAL: Non-async Promise return type - will use .then() for validation`);
+              }
             }
           }
         }
       }
 
       // Skip 'any' and 'unknown' return types - no point validating them
-      // Also skip types matching ignoreTypes patterns
+      // Also skip types matching ignoreTypes patterns (including classes extending DOM types)
+      // Also skip types containing type parameters or constructor types
       const returnTypeText = returnType && returnTypeForString
         ? this.getTypeKey(returnType, typeChecker, returnTypeForString)
         : null;
-      const isIgnoredReturnType = returnTypeText && this.isIgnoredType(returnTypeText);
+      if (process.env.DEBUG && returnTypeText) {
+        console.log(`TYPICAL: Checking return type: "${returnTypeText}" (isAsync: ${isAsync})`);
+      }
+
+      // Skip if return type contains type parameters, constructor types, or is otherwise unvalidatable
+      const shouldSkipReturnType = returnTypeForString && this.containsUnvalidatableType(returnTypeForString);
+      if (shouldSkipReturnType && process.env.DEBUG) {
+        console.log(`TYPICAL: Skipping unvalidatable return type: ${returnTypeText}`);
+      }
+
+      const isIgnoredReturnType = returnTypeText && this.isIgnoredType(returnTypeText, typeChecker, returnTypeForString);
       if (isIgnoredReturnType && process.env.DEBUG) {
         console.log(`TYPICAL: Skipping ignored type for return: ${returnTypeText}`);
       }
-      if (returnType && returnTypeForString && !this.isAnyOrUnknownType(returnType) && !isIgnoredReturnType) {
+      const isSkippedReturnType = returnTypeText && shouldSkipType(returnTypeText);
+      if (isSkippedReturnType && process.env.DEBUG) {
+        console.log(`TYPICAL: Skipping previously failed type for return: ${returnTypeText}`);
+      }
+      if (returnType && returnTypeForString && !this.isAnyOrUnknownType(returnType) && !isIgnoredReturnType && !shouldSkipReturnType && !isSkippedReturnType) {
         const returnTransformer = (node: ts.Node): ts.Node => {
+          // Don't recurse into nested functions - they have their own return types
+          if (ts.isFunctionDeclaration(node) || ts.isArrowFunction(node) ||
+              ts.isFunctionExpression(node) || ts.isMethodDeclaration(node)) {
+            return node;
+          }
+
           if (ts.isReturnStatement(node) && node.expression) {
             // Skip return validation if the expression already contains a __typical _parse_* call
             // since typia.assertParse already validates the parsed data
@@ -815,6 +1128,44 @@ export class TypicalTransformer {
                   return node; // Skip validation - already validated and untainted
                 }
               }
+            }
+
+            // For non-async functions returning Promise, use .then(validator)
+            // For async functions, await the expression before validating
+            if (isNonAsyncPromiseReturn) {
+              // return expr.then(validator)
+              const returnTypeText = this.getTypeKey(returnType, typeChecker, returnTypeForString);
+              const validatorName = this.config.reusableValidators
+                ? this.getOrCreateValidator(returnTypeText, returnType)
+                : null;
+
+              // Create the validator reference (either reusable or inline)
+              let validatorExpr: ts.Expression;
+              if (validatorName) {
+                validatorExpr = ctx.factory.createIdentifier(validatorName);
+              } else {
+                // Inline: typia.assert<T>
+                validatorExpr = ctx.factory.createPropertyAccessExpression(
+                  ctx.factory.createIdentifier("typia"),
+                  ctx.factory.createIdentifier("assert")
+                );
+                // Note: For inline mode, we'd need to create a wrapper arrow function
+                // to pass the type argument. For simplicity, just use the property access
+                // and let typia handle it (though this won't work without type args)
+                // In practice, reusableValidators should be true for this to work well
+              }
+
+              // expr.then(validator)
+              const thenCall = ctx.factory.createCallExpression(
+                ctx.factory.createPropertyAccessExpression(
+                  node.expression,
+                  ctx.factory.createIdentifier("then")
+                ),
+                undefined,
+                [validatorExpr]
+              );
+
+              return ctx.factory.updateReturnStatement(node, thenCall);
             }
 
             // For async functions, we need to await the expression before validating
@@ -961,30 +1312,219 @@ export class TypicalTransformer {
   }
 
   /**
-   * Check if a TypeNode represents any or unknown type.
-   * These types are intentional escape hatches and shouldn't be validated.
+   * Check if a TypeNode represents a type that shouldn't be validated.
+   * This includes:
+   * - any/unknown (intentional escape hatches)
+   * - Type parameters (generics like T)
+   * - Constructor types (new (...args: any[]) => T)
+   * - Function types ((...args) => T)
    */
   private isAnyOrUnknownType(typeNode: ts.TypeNode): boolean {
-    return typeNode.kind === this.ts.SyntaxKind.AnyKeyword ||
-           typeNode.kind === this.ts.SyntaxKind.UnknownKeyword;
+    // any/unknown are escape hatches
+    if (typeNode.kind === this.ts.SyntaxKind.AnyKeyword ||
+        typeNode.kind === this.ts.SyntaxKind.UnknownKeyword) {
+      return true;
+    }
+    // Type parameters (generics) can't be validated at runtime
+    if (typeNode.kind === this.ts.SyntaxKind.TypeReference) {
+      const typeRef = typeNode as ts.TypeReferenceNode;
+      // Single identifier that's a type parameter
+      if (ts.isIdentifier(typeRef.typeName)) {
+        // Check if it's a type parameter by looking for it in enclosing type parameter lists
+        // For now, we'll check if it's a single uppercase letter or common generic names
+        const name = typeRef.typeName.text;
+        // Common type parameter names - single letters or common conventions
+        if (/^[A-Z]$/.test(name) || /^T[A-Z]?[a-z]*$/.test(name)) {
+          return true;
+        }
+      }
+    }
+    // Constructor types can't be validated by typia
+    if (typeNode.kind === this.ts.SyntaxKind.ConstructorType) {
+      return true;
+    }
+    // Function types generally shouldn't be validated
+    if (typeNode.kind === this.ts.SyntaxKind.FunctionType) {
+      return true;
+    }
+    return false;
   }
 
   /**
-   * Check if a Type has any or unknown flags.
+   * Check if a type contains any unvalidatable parts (type parameters, constructor types, etc.)
+   * This recursively checks intersection and union types.
+   */
+  private containsUnvalidatableType(type: ts.Type): boolean {
+    // Type parameters can't be validated at runtime
+    if ((type.flags & this.ts.TypeFlags.TypeParameter) !== 0) {
+      return true;
+    }
+
+    // Check intersection types - if any part is unvalidatable, the whole thing is
+    if (type.isIntersection()) {
+      return type.types.some(t => this.containsUnvalidatableType(t));
+    }
+
+    // Check union types
+    if (type.isUnion()) {
+      return type.types.some(t => this.containsUnvalidatableType(t));
+    }
+
+    // Check for constructor signatures (like `new (...args) => T`)
+    const callSignatures = type.getConstructSignatures?.() ?? [];
+    if (callSignatures.length > 0) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if a Type has any or unknown flags, or is a type parameter or function/constructor.
    */
   private isAnyOrUnknownTypeFlags(type: ts.Type): boolean {
-    return (type.flags & this.ts.TypeFlags.Any) !== 0 ||
-           (type.flags & this.ts.TypeFlags.Unknown) !== 0;
+    // any/unknown
+    if ((type.flags & this.ts.TypeFlags.Any) !== 0 ||
+        (type.flags & this.ts.TypeFlags.Unknown) !== 0) {
+      return true;
+    }
+    // Type parameters (generics) - can't be validated at runtime
+    if ((type.flags & this.ts.TypeFlags.TypeParameter) !== 0) {
+      return true;
+    }
+    return false;
   }
 
   /**
    * Check if a type name matches any of the ignoreTypes patterns.
    * Supports wildcards: "React.*" matches "React.FormEvent", "React.ChangeEvent", etc.
+   * Also handles union types: "Document | Element" is ignored if "Document" or "Element" is in ignoreTypes.
    */
-  private isIgnoredType(typeName: string): boolean {
-    const patterns = this.config.ignoreTypes ?? [];
+  private isIgnoredType(typeName: string, typeChecker?: ts.TypeChecker, type?: ts.Type): boolean {
+    // Combine user patterns with DOM types if ignoreDOMTypes is enabled (default: true)
+    const userPatterns = this.config.ignoreTypes ?? [];
+    const domPatterns = this.config.ignoreDOMTypes !== false ? DOM_TYPES_TO_IGNORE : [];
+    const patterns = [...userPatterns, ...domPatterns];
+
     if (patterns.length === 0) return false;
 
+    // For union types, check each constituent
+    if (type && type.isUnion()) {
+      const nonNullTypes = type.types.filter(t =>
+        !(t.flags & this.ts.TypeFlags.Null) && !(t.flags & this.ts.TypeFlags.Undefined)
+      );
+      if (nonNullTypes.length === 0) return false;
+      // All non-null types must be ignored
+      return nonNullTypes.every(t => this.isIgnoredSingleType(t, patterns, typeChecker));
+    }
+
+    // For non-union types, check directly
+    if (type && typeChecker) {
+      return this.isIgnoredSingleType(type, patterns, typeChecker);
+    }
+
+    // Fallback: string-based matching for union types like "Document | Element | null"
+    const typeParts = typeName.split(' | ').map(t => t.trim());
+    const nonNullParts = typeParts.filter(t => t !== 'null' && t !== 'undefined');
+    if (nonNullParts.length === 0) return false;
+
+    return nonNullParts.every(part => this.matchesIgnorePattern(part, patterns));
+  }
+
+  /**
+   * Check if a single type (not a union) should be ignored.
+   * Checks both the type name and its base classes.
+   */
+  private isIgnoredSingleType(type: ts.Type, patterns: string[], typeChecker?: ts.TypeChecker, depth = 0): boolean {
+    // Prevent infinite recursion
+    if (depth > 20) return false;
+
+    const typeName = type.symbol?.name || '';
+
+    if (process.env.DEBUG) {
+      console.log(`TYPICAL: isIgnoredSingleType checking type: "${typeName}" (depth: ${depth})`);
+    }
+
+    // Check direct name match
+    if (this.matchesIgnorePattern(typeName, patterns)) {
+      if (process.env.DEBUG) {
+        console.log(`TYPICAL: Type "${typeName}" matched ignore pattern directly`);
+      }
+      return true;
+    }
+
+    // Check base classes (for classes extending DOM types like HTMLElement)
+    // This works for class types that have getBaseTypes available
+    const baseTypes = type.getBaseTypes?.() ?? [];
+    if (process.env.DEBUG && baseTypes.length > 0) {
+      console.log(`TYPICAL: Type "${typeName}" has ${baseTypes.length} base types: ${baseTypes.map(t => t.symbol?.name || '?').join(', ')}`);
+    }
+    for (const baseType of baseTypes) {
+      if (this.isIgnoredSingleType(baseType, patterns, typeChecker, depth + 1)) {
+        if (process.env.DEBUG) {
+          console.log(`TYPICAL: Type "${typeName}" ignored because base type "${baseType.symbol?.name}" is ignored`);
+        }
+        return true;
+      }
+    }
+
+    // Also check the declared type's symbol for heritage clauses (alternative approach)
+    // This handles cases where getBaseTypes doesn't return what we expect
+    if (type.symbol?.declarations) {
+      for (const decl of type.symbol.declarations) {
+        if (this.ts.isClassDeclaration(decl) && decl.heritageClauses) {
+          for (const heritage of decl.heritageClauses) {
+            if (heritage.token === this.ts.SyntaxKind.ExtendsKeyword) {
+              for (const heritageType of heritage.types) {
+                const baseTypeName = heritageType.expression.getText();
+                if (process.env.DEBUG) {
+                  console.log(`TYPICAL: Type "${typeName}" extends "${baseTypeName}" (from heritage clause)`);
+                }
+                if (this.matchesIgnorePattern(baseTypeName, patterns)) {
+                  if (process.env.DEBUG) {
+                    console.log(`TYPICAL: Type "${typeName}" ignored because it extends "${baseTypeName}"`);
+                  }
+                  return true;
+                }
+                // Recursively check the heritage type
+                if (typeChecker) {
+                  const heritageTypeObj = typeChecker.getTypeAtLocation(heritageType);
+                  if (this.isIgnoredSingleType(heritageTypeObj, patterns, typeChecker, depth + 1)) {
+                    return true;
+                  }
+
+                  // For mixin patterns like `extends VueWatcher(BaseElement)`, the expression is a CallExpression.
+                  // We need to check the return type of the mixin function AND the arguments passed to it.
+                  if (this.ts.isCallExpression(heritageType.expression)) {
+                    // Check arguments to the mixin (e.g., BaseElement in VueWatcher(BaseElement))
+                    for (const arg of heritageType.expression.arguments) {
+                      const argType = typeChecker.getTypeAtLocation(arg);
+                      if (process.env.DEBUG) {
+                        console.log(`TYPICAL: Type "${typeName}" mixin arg: "${argType.symbol?.name}" (from call expression)`);
+                      }
+                      if (this.isIgnoredSingleType(argType, patterns, typeChecker, depth + 1)) {
+                        if (process.env.DEBUG) {
+                          console.log(`TYPICAL: Type "${typeName}" ignored because mixin argument "${argType.symbol?.name}" is ignored`);
+                        }
+                        return true;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if a single type name matches any ignore pattern.
+   */
+  private matchesIgnorePattern(typeName: string, patterns: string[]): boolean {
     return patterns.some(pattern => {
       // Convert glob pattern to regex: "React.*" -> /^React\..*$/
       const regexStr = '^' + pattern
@@ -1036,40 +1576,27 @@ export class TypicalTransformer {
     // Type assertion: use the asserted type directly
     if (ts.isAsExpression(arg)) {
       const typeNode = arg.type;
-      const typeString = typeChecker.typeToString(typeChecker.getTypeFromTypeNode(typeNode));
-      return {
-        typeText: `Asserted_${typeString.replace(/[^a-zA-Z0-9_]/g, "_")}`,
-        typeNode,
-      };
+      const typeKey = this.getTypeKey(typeNode, typeChecker);
+      return { typeText: typeKey, typeNode };
     }
 
-    // Object literal: use property names for the key
+    // Object literal: infer type from type checker
     if (ts.isObjectLiteralExpression(arg)) {
       const objectType = typeChecker.getTypeAtLocation(arg);
-      const typeNode = typeChecker.typeToTypeNode(objectType, arg, ts.NodeBuilderFlags.InTypeAlias);
+      const typeNode = typeChecker.typeToTypeNode(objectType, arg, TYPE_NODE_FLAGS);
       if (!typeNode) {
         throw new Error('unknown type node for object literal: ' + arg.getText());
       }
-      const propNames = arg.properties
-        .map((prop) => {
-          if (ts.isShorthandPropertyAssignment(prop)) return prop.name.text;
-          if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) return prop.name.text;
-          return "unknown";
-        })
-        .sort()
-        .join("_");
-      return { typeText: `ObjectLiteral_${propNames}`, typeNode };
+      const typeKey = this.getTypeKey(typeNode, typeChecker, objectType);
+      return { typeText: typeKey, typeNode };
     }
 
     // Other expressions: infer from type checker
     const argType = typeChecker.getTypeAtLocation(arg);
-    const typeNode = typeChecker.typeToTypeNode(argType, arg, ts.NodeBuilderFlags.InTypeAlias);
+    const typeNode = typeChecker.typeToTypeNode(argType, arg, TYPE_NODE_FLAGS);
     if (typeNode) {
-      const typeString = typeChecker.typeToString(argType);
-      return {
-        typeText: `Expression_${typeString.replace(/[^a-zA-Z0-9_]/g, "_")}`,
-        typeNode,
-      };
+      const typeKey = this.getTypeKey(typeNode, typeChecker, argType);
+      return { typeText: typeKey, typeNode };
     }
 
     // Fallback to unknown
@@ -1252,7 +1779,11 @@ export class TypicalTransformer {
     // Check if node has a real position (not synthesized)
     if (typeNode.pos >= 0 && typeNode.end > typeNode.pos) {
       try {
-        return typeNode.getText();
+        const text = typeNode.getText();
+        // Check for truncation patterns in source text (shouldn't happen but be safe)
+        if (!text.includes('...') || !text.match(/\.\.\.\d+\s+more/)) {
+          return text;
+        }
       } catch {
         // Fall through to typeToString
       }
@@ -1260,8 +1791,80 @@ export class TypicalTransformer {
     // Fallback for synthesized nodes - use the provided Type object if available,
     // otherwise try to get it from the node (which may not work correctly)
     const type = typeObj ?? typeChecker.getTypeFromTypeNode(typeNode);
-    return typeChecker.typeToString(type, undefined, ts.TypeFormatFlags.NoTruncation);
+    const typeString = typeChecker.typeToString(type, undefined, this.ts.TypeFormatFlags.NoTruncation);
+
+    // TypeScript may still truncate very large types even with NoTruncation flag.
+    // Detect truncation patterns like "...19 more..." and use a hash-based key instead.
+    if (typeString.match(/\.\.\.\d+\s+more/)) {
+      const hash = this.hashString(typeString);
+      return `__complex_type_${hash}`;
+    }
+
+    return typeString;
   }
+
+  /**
+   * Simple string hash for creating unique identifiers from type strings.
+   */
+  private hashString(str: string): string {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return Math.abs(hash).toString(36);
+  }
+
+  /**
+   * Format typia's error message into a cleaner list format.
+   * Typia outputs verbose messages like:
+   *   "unsupported type detected\n\n- Window.ondevicemotion: unknown\n  - nonsensible intersection\n\n- Window.ondeviceorientation..."
+   * We want to extract just the problematic types and their issues.
+   */
+  private formatTypiaError(message: string): string {
+    const lines = message.split('\n');
+    const firstLine = lines[0]; // e.g., "unsupported type detected"
+
+    // Parse the error entries - each starts with "- " at the beginning of a line
+    const issues: { type: string; reasons: string[] }[] = [];
+    let currentIssue: { type: string; reasons: string[] } | null = null;
+
+    for (const line of lines.slice(1)) {
+      if (line.startsWith('- ')) {
+        // New type entry
+        if (currentIssue) {
+          issues.push(currentIssue);
+        }
+        currentIssue = { type: line.slice(2), reasons: [] };
+      } else if (line.startsWith('  - ') && currentIssue) {
+        // Reason for current type
+        currentIssue.reasons.push(line.slice(4));
+      }
+    }
+    if (currentIssue) {
+      issues.push(currentIssue);
+    }
+
+    if (issues.length === 0) {
+      return `  ${firstLine}`;
+    }
+
+    // Limit to 5 issues, show count of remaining
+    const maxIssues = 5;
+    const displayIssues = issues.slice(0, maxIssues);
+    const remainingCount = issues.length - maxIssues;
+
+    const formatted = displayIssues.map(issue => {
+      const reasons = issue.reasons.map(r => `      - ${r}`).join('\n');
+      return `    - ${issue.type}\n${reasons}`;
+    }).join('\n');
+
+    const suffix = remainingCount > 0 ? `\n    (and ${remainingCount} more errors)` : '';
+
+    return `  ${firstLine}\n${formatted}${suffix}`;
+  }
+
 
   /**
    * Creates a readable name suffix from a type string.
@@ -1269,26 +1872,22 @@ export class TypicalTransformer {
    * For complex types, returns a numeric index.
    */
   private getTypeNameSuffix(typeText: string, existingNames: Set<string>, fallbackIndex: number): string {
-    // Strip known prefixes that wrap the actual type name
-    let normalizedTypeText = typeText;
-    if (typeText.startsWith('Expression_')) {
-      normalizedTypeText = typeText.slice('Expression_'.length);
-    } else if (typeText.startsWith('ObjectLiteral_')) {
-      // Object literals use property names, fall back to numeric
+    // Complex types from getTypeKey() - use numeric index
+    if (typeText.startsWith('__complex_type_')) {
       return String(fallbackIndex);
     }
 
     // Check if it's a simple identifier (letters, numbers, underscore, starting with letter/underscore)
-    if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(normalizedTypeText)) {
+    if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(typeText)) {
       // It's a simple type name like "User", "string", "MyType"
-      let name = normalizedTypeText;
+      let name = typeText;
       // Handle collisions by appending a number
       if (existingNames.has(name)) {
         let i = 2;
-        while (existingNames.has(`${normalizedTypeText}${i}`)) {
+        while (existingNames.has(`${typeText}${i}`)) {
           i++;
         }
-        name = `${normalizedTypeText}${i}`;
+        name = `${typeText}${i}`;
       }
       return name;
     }
