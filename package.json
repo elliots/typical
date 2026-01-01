@@ -1,6 +1,6 @@
 {
   "name": "@elliots/typical",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Runtime safe TypeScript transformer using typia",
   "main": "dist/src/index.js",
   "type": "module",
