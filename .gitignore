@@ -2,3 +2,4 @@ dist
 *transformed.ts
 node_modules
 *.temp.ts
+**/*.typical.ts*

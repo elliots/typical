@@ -6,8 +6,11 @@ export default defineConfig({
   plugins: [
     Typical({
       typical: {
+        "reusableValidators": true,
+        "validateCasts": true,
+        "ignoreTypes": ["React.*"],
         debug: {
-          writeIntermediateFiles: true
+          writeIntermediateFiles: false
         }
       }
     }),

@@ -31,7 +31,8 @@
     "sample:ttsx": "cd samples/ttsx && npm install && npm run start",
     "sample:tsc": "cd samples/tsc && npm install && npm run build && npm run start",
     "sample:ttsc": "cd samples/ttsc && npm install && npm run build && npm run start",
-    "samples": "npm run sample:esm && npm run sample:ttsx && npm run sample:tsc && npm run sample:ttsc",
+    "sample:vite-react": "cd samples/vite-react && pnpm install && pnpm run test",
+    "samples": "npm run sample:esm && npm run sample:ttsx && npm run sample:tsc && npm run sample:ttsc && npm run sample:vite-react",
     "publish:all": "node scripts/publish.js"
   },
   "repository": {
