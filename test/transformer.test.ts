@@ -2,7 +2,6 @@ import { test, describe } from "node:test";
 import assert from "node:assert";
 import ts from "typescript";
 import { TypicalTransformer } from "../src/transformer.js";
-import { assertEquals } from "typia";
 import { writeFileSync } from "node:fs";
 
 interface TestCase {
@@ -558,6 +557,227 @@ function getIds(): number[] {
       notExpectedPatterns: [
         // Inner arrow function should NOT have its return wrapped by outer's validator
         `__typical_assert_void`,
+      ],
+    },
+    // Generic type tests - type parameters cannot be validated at runtime
+    {
+      name: "generic: skips validation for type parameter T",
+      input: `
+function identity<T>(value: T): T {
+  return value;
+}`,
+      notExpectedPatterns: [
+        `typia.createAssert`, // Should NOT create any validators for generic T
+        `__typical_assert_`,
+      ],
+    },
+    {
+      name: "generic: validates concrete types in generic function",
+      input: `
+interface User { name: string; }
+function processUser<T>(value: T, user: User): User {
+  return user;
+}`,
+      expectedPatterns: [
+        `typia.createAssert<User>()`, // Should validate User parameter
+        `__typical_assert_User(user)`, // Parameter validation
+      ],
+      notExpectedPatterns: [
+        `createAssert<T>`, // Should NOT try to validate T
+      ],
+    },
+    {
+      name: "generic: utility types like Partial<T> are validated",
+      input: `
+interface User { name: string; age: number; }
+function updateUser(partial: Partial<User>): Partial<User> {
+  return partial;
+}`,
+      expectedPatterns: [
+        `typia.createAssert<Partial<User>>()`,
+        `__typical_assert_`,
+      ],
+    },
+    {
+      name: "generic: Pick utility type is validated",
+      input: `
+interface User { name: string; age: number; email: string; }
+function getName(user: Pick<User, "name">): Pick<User, "name"> {
+  return user;
+}`,
+      expectedPatterns: [
+        `typia.createAssert<Pick<User, "name">>()`,
+      ],
+    },
+    // Destructuring pattern tests
+    // NOTE: Current behavior uses 'param' as fallback name for destructured params
+    // This is a known limitation - the validation still works at runtime
+    {
+      name: "destructuring: validates destructured parameter with type annotation",
+      input: `
+interface User { name: string; age: number; }
+function greet({ name, age }: User): string {
+  return name + age;
+}`,
+      expectedPatterns: [
+        `typia.createAssert<User>()`,
+        `__typical_assert_User(param)`, // Uses 'param' fallback for destructured bindings
+      ],
+    },
+    {
+      name: "destructuring: validates rest parameters",
+      input: `
+interface Item { id: number; }
+function processItems(...items: Item[]): number {
+  return items.length;
+}`,
+      expectedPatterns: [
+        `typia.createAssert<Item[]>()`,
+        `__typical_assert_`,
+        `(items)`, // Rest params use their actual name
+      ],
+    },
+    {
+      name: "destructuring: validates array destructuring",
+      input: `
+function processFirst([first, second]: [string, number]): string {
+  return first;
+}`,
+      expectedPatterns: [
+        /typia\.createAssert<\[\s*string,\s*number\s*\]>/, // Tuple type (may have whitespace)
+        `__typical_assert_0(param)`, // Uses 'param' fallback for array destructuring
+      ],
+    },
+    // Union and intersection type tests
+    {
+      name: "union: validates union type parameters",
+      input: `
+interface Cat { meow(): void; }
+interface Dog { bark(): void; }
+function pet(animal: Cat | Dog): Cat | Dog {
+  return animal;
+}`,
+      expectedPatterns: [
+        `typia.createAssert<Cat | Dog>()`,
+        `__typical_assert_`,
+      ],
+    },
+    {
+      name: "intersection: validates intersection type parameters",
+      input: `
+interface Named { name: string; }
+interface Aged { age: number; }
+function process(person: Named & Aged): Named & Aged {
+  return person;
+}`,
+      expectedPatterns: [
+        `typia.createAssert<Named & Aged>()`,
+        `__typical_assert_`,
+      ],
+    },
+    {
+      name: "discriminated union: validates discriminated union",
+      input: `
+interface Circle { kind: "circle"; radius: number; }
+interface Square { kind: "square"; side: number; }
+type Shape = Circle | Square;
+function area(shape: Shape): number {
+  return shape.kind === "circle" ? 3.14 * shape.radius ** 2 : shape.side ** 2;
+}`,
+      expectedPatterns: [
+        `typia.createAssert<Shape>()`,
+        `__typical_assert_Shape(shape)`,
+      ],
+    },
+    // Class method tests
+    {
+      name: "class: validates instance method parameters and returns",
+      input: `
+interface User { name: string; }
+class UserService {
+  getUser(id: number): User {
+    return { name: "test" };
+  }
+}`,
+      expectedPatterns: [
+        `typia.createAssert<number>()`,
+        `typia.createAssert<User>()`,
+        `__typical_assert_number(id)`,
+      ],
+    },
+    {
+      name: "class: validates static method parameters",
+      input: `
+interface Config { debug: boolean; }
+class AppConfig {
+  static parse(json: string): Config {
+    return { debug: true };
+  }
+}`,
+      expectedPatterns: [
+        `typia.createAssert<string>()`,
+        `typia.createAssert<Config>()`,
+        `__typical_assert_string(json)`,
+      ],
+    },
+    // NOTE: Constructors are currently NOT transformed (limitation)
+    // This test documents current behavior - constructor validation could be added later
+    {
+      name: "class: constructors are not currently transformed",
+      input: `
+interface Options { timeout: number; }
+class Client {
+  constructor(options: Options) {
+    console.log(options);
+  }
+}`,
+      notExpectedPatterns: [
+        `typia.createAssert`, // Constructors not transformed currently
+      ],
+    },
+    // Higher-order function tests
+    {
+      name: "HOF: validates outer function but not returned function body",
+      input: `
+interface User { name: string; }
+function createValidator(strict: boolean): (user: User) => boolean {
+  return (user: User) => {
+    return user.name.length > 0;
+  };
+}`,
+      expectedPatterns: [
+        `typia.createAssert<boolean>()`, // validates strict param
+        `typia.createAssert<User>()`, // validates inner user param
+      ],
+    },
+    // NOTE: Arrow function expression bodies (not blocks) don't get parameter validation
+    // Only arrow functions with block bodies { } get transformed
+    {
+      name: "HOF: curried function - outer validated, inner expression body not validated",
+      input: `
+function add(a: number): (b: number) => number {
+  return (b: number) => a + b;
+}`,
+      expectedPatterns: [
+        `typia.createAssert<number>()`,
+        `__typical_assert_number(a)`,
+      ],
+      notExpectedPatterns: [
+        `__typical_assert_number(b)`, // Expression body arrows don't get param validation
+      ],
+    },
+    {
+      name: "HOF: curried function with block body validates both levels",
+      input: `
+function add(a: number): (b: number) => number {
+  return (b: number) => {
+    return a + b;
+  };
+}`,
+      expectedPatterns: [
+        `typia.createAssert<number>()`,
+        `__typical_assert_number(a)`,
+        `__typical_assert_number(b)`,
       ],
     },
   ];
