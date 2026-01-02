@@ -17,6 +17,14 @@ export interface TransformContext {
   context: ts.TransformationContext;
 }
 
+/**
+ * Internal state for a single file transformation.
+ * Passed between visitor functions to track mutable state.
+ */
+interface FileTransformState {
+  needsTypiaImport: boolean;
+}
+
 export class TypicalTransformer {
   public config: TypicalConfig;
   private program: ts.Program;
@@ -621,48 +629,40 @@ export class TypicalTransformer {
   }
 
   /**
-   * Transform a single source file with TypeScript AST
+   * Check if a type should be skipped (failed in typia on previous attempt).
    */
-  private transformSourceFile(
-    sourceFile: ts.SourceFile,
-    ctx: TransformContext,
-    typeChecker: ts.TypeChecker,
-    skippedTypes: Set<string> = new Set()
-  ): ts.SourceFile {
-    const { ts } = ctx;
-
-    // Helper to check if a type should be skipped (failed in typia on previous attempt)
-    const shouldSkipType = (typeText: string): boolean => {
-      if (skippedTypes.size === 0) return false;
-      // Normalize: remove all whitespace and semicolons for comparison
-      const normalize = (s: string) => s.replace(/[\s;]+/g, '').toLowerCase();
-      const normalized = normalize(typeText);
-      for (const skipped of skippedTypes) {
-        const skippedNormalized = normalize(skipped);
-        if (normalized === skippedNormalized || normalized.includes(skippedNormalized) || skippedNormalized.includes(normalized)) {
-          if (process.env.DEBUG) {
-            console.log(`TYPICAL: Matched skipped type: "${typeText.substring(0, 50)}..." matches "${skipped.substring(0, 50)}..."`);
-          }
-          return true;
+  private shouldSkipType(typeText: string, skippedTypes: Set<string>): boolean {
+    if (skippedTypes.size === 0) return false;
+    // Normalize: remove all whitespace and semicolons for comparison
+    const normalize = (s: string) => s.replace(/[\s;]+/g, '').toLowerCase();
+    const normalized = normalize(typeText);
+    for (const skipped of skippedTypes) {
+      const skippedNormalized = normalize(skipped);
+      if (normalized === skippedNormalized || normalized.includes(skippedNormalized) || skippedNormalized.includes(normalized)) {
+        if (process.env.DEBUG) {
+          console.log(`TYPICAL: Matched skipped type: "${typeText.substring(0, 50)}..." matches "${skipped.substring(0, 50)}..."`);
         }
-      }
-      return false;
-    };
-
-    if (!sourceFile.fileName.includes('transformer.test.ts')) {  
-      // Check if this file has already been transformed by us
-      const sourceText = sourceFile.getFullText();
-      if (sourceText.includes('__typical_' + 'assert_') || sourceText.includes('__typical_' + 'stringify_') || sourceText.includes('__typical_' + 'parse_')) {
-        throw new Error(`File ${sourceFile.fileName} has already been transformed by Typical! Double transformation detected.`);
+        return true;
       }
     }
+    return false;
+  }
 
-    // Reset caches for each file
-    this.typeValidators.clear();
-    this.typeStringifiers.clear();
-    this.typeParsers.clear();
+  /**
+   * Create an AST visitor function for transforming a source file.
+   * The visitor handles JSON calls, type casts, and function declarations.
+   */
+  private createVisitor(
+    ctx: TransformContext,
+    typeChecker: ts.TypeChecker,
+    skippedTypes: Set<string>,
+    state: FileTransformState
+  ): (node: ts.Node) => ts.Node {
+    const { ts } = ctx;
+    const shouldSkipType = (typeText: string) => this.shouldSkipType(typeText, skippedTypes);
 
-    let needsTypiaImport = false;
+    // Forward declaration for mutual recursion
+    let transformFunction: (func: ts.FunctionDeclaration | ts.ArrowFunction | ts.MethodDeclaration) => ts.Node;
 
     const visit = (node: ts.Node): ts.Node => {
       // Transform JSON calls first (before they get wrapped in functions)
@@ -677,7 +677,7 @@ export class TypicalTransformer {
         ) {
           const transformed = this.transformJSONCall(node, ctx, typeChecker, shouldSkipType);
           if (transformed) {
-            needsTypiaImport = true;
+            state.needsTypiaImport = true;
             return transformed;
           }
           return node;
@@ -719,7 +719,7 @@ export class TypicalTransformer {
           return ctx.ts.visitEachChild(node, visit, ctx.context);
         }
 
-        needsTypiaImport = true;
+        state.needsTypiaImport = true;
 
         // Visit the expression first to transform any nested casts
         const visitedExpression = ctx.ts.visitNode(node.expression, visit) as ts.Expression;
@@ -750,26 +750,26 @@ export class TypicalTransformer {
 
       // Transform function declarations
       if (ts.isFunctionDeclaration(node)) {
-        needsTypiaImport = true;
+        state.needsTypiaImport = true;
         return transformFunction(node);
       }
 
       // Transform arrow functions
       if (ts.isArrowFunction(node)) {
-        needsTypiaImport = true;
+        state.needsTypiaImport = true;
         return transformFunction(node);
       }
 
       // Transform method declarations
       if (ts.isMethodDeclaration(node)) {
-        needsTypiaImport = true;
+        state.needsTypiaImport = true;
         return transformFunction(node);
       }
 
       return ctx.ts.visitEachChild(node, visit, ctx.context);
     };
 
-    const transformFunction = (
+    transformFunction = (
       func: ts.FunctionDeclaration | ts.ArrowFunction | ts.MethodDeclaration
     ): ts.Node => {
       const body = func.body;
@@ -833,7 +833,7 @@ export class TypicalTransformer {
                     : null;
 
                   if (validatorName) {
-                    needsTypiaImport = true;
+                    state.needsTypiaImport = true;
                     visitedBody = ctx.factory.createCallExpression(
                       ctx.factory.createPropertyAccessExpression(
                         visitedBody,
@@ -1247,13 +1247,43 @@ export class TypicalTransformer {
       return func;
     };
 
+    return visit;
+  }
+
+  /**
+   * Transform a single source file with TypeScript AST
+   */
+  private transformSourceFile(
+    sourceFile: ts.SourceFile,
+    ctx: TransformContext,
+    typeChecker: ts.TypeChecker,
+    skippedTypes: Set<string> = new Set()
+  ): ts.SourceFile {
+    if (!sourceFile.fileName.includes('transformer.test.ts')) {
+      // Check if this file has already been transformed by us
+      const sourceText = sourceFile.getFullText();
+      if (sourceText.includes('__typical_' + 'assert_') || sourceText.includes('__typical_' + 'stringify_') || sourceText.includes('__typical_' + 'parse_')) {
+        throw new Error(`File ${sourceFile.fileName} has already been transformed by Typical! Double transformation detected.`);
+      }
+    }
+
+    // Reset caches for each file
+    this.typeValidators.clear();
+    this.typeStringifiers.clear();
+    this.typeParsers.clear();
+
+    // Create state object to track mutable state across visitor calls
+    const state: FileTransformState = { needsTypiaImport: false };
+
+    // Create visitor and transform the source file
+    const visit = this.createVisitor(ctx, typeChecker, skippedTypes, state);
     let transformedSourceFile = ctx.ts.visitNode(
       sourceFile,
       visit
     ) as ts.SourceFile;
 
     // Add typia import and validator statements if needed
-    if (needsTypiaImport) {
+    if (state.needsTypiaImport) {
       transformedSourceFile = this.addTypiaImport(transformedSourceFile, ctx);
 
       // Add validator statements after imports (only if using reusable validators)
