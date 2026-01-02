@@ -1449,16 +1449,32 @@ export class TypicalTransformer {
   /**
    * Check if a single type (not a union) should be ignored.
    * Checks both the type name and its base classes.
+   * Uses Set-based cycle detection to handle recursive type hierarchies.
    * @param patterns Pre-compiled RegExp patterns
+   * @param visited Set of type IDs already visited (for cycle detection)
    */
-  private isIgnoredSingleType(type: ts.Type, patterns: RegExp[], typeChecker?: ts.TypeChecker, depth = 0): boolean {
-    // Prevent infinite recursion
-    if (depth > 20) return false;
+  private isIgnoredSingleType(
+    type: ts.Type,
+    patterns: RegExp[],
+    typeChecker?: ts.TypeChecker,
+    visited: Set<number> = new Set()
+  ): boolean {
+    // Use type ID for cycle detection (more precise than depth counter)
+    const typeId = (type as { id?: number }).id;
+    if (typeId !== undefined) {
+      if (visited.has(typeId)) {
+        if (process.env.DEBUG) {
+          console.log(`TYPICAL: Cycle detected for type "${type.symbol?.name || '?'}" (id: ${typeId}), skipping`);
+        }
+        return false; // Already visited this type, not ignored
+      }
+      visited.add(typeId);
+    }
 
     const typeName = type.symbol?.name || '';
 
     if (process.env.DEBUG) {
-      console.log(`TYPICAL: isIgnoredSingleType checking type: "${typeName}" (depth: ${depth})`);
+      console.log(`TYPICAL: isIgnoredSingleType checking type: "${typeName}" (visited: ${visited.size})`);
     }
 
     // Check direct name match
@@ -1476,7 +1492,7 @@ export class TypicalTransformer {
       console.log(`TYPICAL: Type "${typeName}" has ${baseTypes.length} base types: ${baseTypes.map(t => t.symbol?.name || '?').join(', ')}`);
     }
     for (const baseType of baseTypes) {
-      if (this.isIgnoredSingleType(baseType, patterns, typeChecker, depth + 1)) {
+      if (this.isIgnoredSingleType(baseType, patterns, typeChecker, visited)) {
         if (process.env.DEBUG) {
           console.log(`TYPICAL: Type "${typeName}" ignored because base type "${baseType.symbol?.name}" is ignored`);
         }
@@ -1505,7 +1521,7 @@ export class TypicalTransformer {
                 // Recursively check the heritage type
                 if (typeChecker) {
                   const heritageTypeObj = typeChecker.getTypeAtLocation(heritageType);
-                  if (this.isIgnoredSingleType(heritageTypeObj, patterns, typeChecker, depth + 1)) {
+                  if (this.isIgnoredSingleType(heritageTypeObj, patterns, typeChecker, visited)) {
                     return true;
                   }
 
@@ -1518,7 +1534,7 @@ export class TypicalTransformer {
                       if (process.env.DEBUG) {
                         console.log(`TYPICAL: Type "${typeName}" mixin arg: "${argType.symbol?.name}" (from call expression)`);
                       }
-                      if (this.isIgnoredSingleType(argType, patterns, typeChecker, depth + 1)) {
+                      if (this.isIgnoredSingleType(argType, patterns, typeChecker, visited)) {
                         if (process.env.DEBUG) {
                           console.log(`TYPICAL: Type "${typeName}" ignored because mixin argument "${argType.symbol?.name}" is ignored`);
                         }
