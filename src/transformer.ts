@@ -137,6 +137,33 @@ export class TypicalTransformer {
     console.log(`TYPICAL: Wrote intermediate file: ${intermediateFilePath}`);
   }
 
+  /**
+   * Format typia diagnostic errors into readable error messages.
+   */
+  private formatTypiaErrors(errors: ts.Diagnostic[]): string[] {
+    return errors.map(d => {
+      const fullMessage = typeof d.messageText === 'string' ? d.messageText : d.messageText.messageText;
+
+      if (d.file && d.start !== undefined && d.length !== undefined) {
+        const { line, character } = d.file.getLineAndCharacterOfPosition(d.start);
+        // Extract the actual source code that caused the error
+        const sourceSnippet = d.file.text.substring(d.start, d.start + d.length);
+        // Truncate long snippets
+        const snippet = sourceSnippet.length > 100
+          ? sourceSnippet.substring(0, 100) + '...'
+          : sourceSnippet;
+
+        // Format the error message - extract type issues from typia's verbose output
+        const formattedIssues = this.formatTypiaError(fullMessage);
+
+        return `${d.file.fileName}:${line + 1}:${character + 1}\n` +
+          `  Code: ${snippet}\n` +
+          formattedIssues;
+      }
+      return this.formatTypiaError(fullMessage);
+    });
+  }
+
   public createSourceFile(fileName: string, content: string): ts.SourceFile {
     return this.ts.createSourceFile(
       fileName,
@@ -266,27 +293,7 @@ export class TypicalTransformer {
       }
 
       // No retryable errors, throw the original error
-      const errorMessages = errors.map(d => {
-        const fullMessage = typeof d.messageText === 'string' ? d.messageText : d.messageText.messageText;
-
-        if (d.file && d.start !== undefined && d.length !== undefined) {
-          const { line, character } = d.file.getLineAndCharacterOfPosition(d.start);
-          // Extract the actual source code that caused the error
-          const sourceSnippet = d.file.text.substring(d.start, d.start + d.length);
-          // Truncate long snippets
-          const snippet = sourceSnippet.length > 100
-            ? sourceSnippet.substring(0, 100) + '...'
-            : sourceSnippet;
-
-          // Format the error message - extract type issues from typia's verbose output
-          const formattedIssues = this.formatTypiaError(fullMessage);
-
-          return `${d.file.fileName}:${line + 1}:${character + 1}\n` +
-            `  Code: ${snippet}\n` +
-            formattedIssues;
-        }
-        return this.formatTypiaError(fullMessage);
-      });
+      const errorMessages = this.formatTypiaErrors(errors);
       throw new Error(
         `TYPICAL: Typia transformation failed:\n\n${errorMessages.join('\n\n')}`
       );
@@ -439,27 +446,7 @@ export class TypicalTransformer {
         // Check for typia errors via diagnostics
         const errors = diagnostics.filter(d => d.category === this.ts.DiagnosticCategory.Error);
         if (errors.length > 0) {
-          const errorMessages = errors.map(d => {
-            const fullMessage = typeof d.messageText === 'string' ? d.messageText : d.messageText.messageText;
-
-            if (d.file && d.start !== undefined && d.length !== undefined) {
-              const { line, character } = d.file.getLineAndCharacterOfPosition(d.start);
-              // Extract the actual source code that caused the error
-              const sourceSnippet = d.file.text.substring(d.start, d.start + d.length);
-              // Truncate long snippets
-              const snippet = sourceSnippet.length > 100
-                ? sourceSnippet.substring(0, 100) + '...'
-                : sourceSnippet;
-
-              // Format the error message - extract type issues from typia's verbose output
-              const formattedIssues = this.formatTypiaError(fullMessage);
-
-              return `${d.file.fileName}:${line + 1}:${character + 1}\n` +
-                `  Code: ${snippet}\n` +
-                formattedIssues;
-            }
-            return this.formatTypiaError(fullMessage);
-          });
+          const errorMessages = this.formatTypiaErrors(errors);
           throw new Error(
             `TYPICAL: Typia transformation failed:\n\n${errorMessages.join('\n\n')}`
           );
