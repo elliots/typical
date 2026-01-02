@@ -62,6 +62,7 @@ If not provided, these default settings will be used.
 | `hoistRegex` | `true` | Hoist regex patterns to top-level constants (improves performance) |
 | `ignoreDOMTypes` | `true` | Skip validation for DOM types (Document, Element, etc.) |
 | `ignoreTypes` | `[]` | Type patterns to skip validation for (supports wildcards, e.g., `["React.*"]`) |
+| `debug.writeIntermediateFiles` | `false` | Write `.typical.ts` files showing code before typia transform |
 
 ## Usage
 
@@ -173,6 +174,139 @@ Typical uses the TypeScript Compiler API to parse and transform your TypeScript 
 But basically you shouldn't need to care about how it works internally, it makes typescript strongly typed*. You can still use `any` and `unknown` if you want to opt out of type safety.
 
 * sort of. probably. something like it anyway.
+
+## Flow Analysis
+
+Typical includes smart flow analysis to avoid redundant validations. When you return a value that was already validated (either as a parameter or via a type-annotated const), the return statement won't be wrapped in another validation call.
+
+### When return validation is skipped:
+
+```typescript
+interface User { name: string; }
+
+// Direct parameter return - no redundant validation
+function validate(user: User): User {
+  return user;  // Already validated on entry, skip return validation
+}
+
+// Property access from validated parameter
+function getAddress(user: User): Address {
+  return user.address;  // user was validated, address is safe
+}
+
+// Type-annotated const
+function getUser(): User {
+  const user: User = fetchData();  // const is validated here
+  return user;  // skip redundant validation
+}
+```
+
+### When return validation IS applied (tainting):
+
+```typescript
+// After mutation
+function updateUser(user: User): User {
+  user.name = "modified";  // Mutation taints the value
+  return user;  // Must re-validate
+}
+
+// After passing to another function
+function processUser(user: User): User {
+  someFunction(user);  // Could have mutated user
+  return user;  // Must re-validate
+}
+
+// After await (async boundary)
+async function asyncProcess(user: User): Promise<User> {
+  await delay();  // Async boundary taints values
+  return user;  // Must re-validate
+}
+
+// Spread into new object
+function cloneUser(user: User): User {
+  return { ...user };  // New object, must validate
+}
+```
+
+## Debugging
+
+### Intermediate Files
+
+To see what code Typical generates before typia processes it, enable intermediate file output:
+
+```json
+{
+  "debug": {
+    "writeIntermediateFiles": true
+  }
+}
+```
+
+This creates `.typical.ts` files alongside your output showing the code with typia calls injected but not yet transformed.
+
+### Verbose Logging
+
+Set `DEBUG=1` environment variable for detailed logging:
+
+```bash
+DEBUG=1 npm run build
+```
+
+## Troubleshooting
+
+### "Failed to transform the following types"
+
+This error means typia couldn't generate validation code for certain types. Common causes:
+
+1. **DOM types**: Types like `HTMLElement`, `Document`, etc. have complex intersections typia can't process.
+   - Solution: Enable `ignoreDOMTypes: true` (default) or add specific types to `ignoreTypes`
+
+2. **React types**: Event handlers, refs, and other React types often can't be validated.
+   - Solution: Add `"React.*"` to `ignoreTypes`
+
+3. **Third-party library types**: Some library types are too complex.
+   - Solution: Add the specific type patterns to `ignoreTypes`
+
+```json
+{
+  "ignoreTypes": ["React.*", "Express.Request", "Prisma.*"]
+}
+```
+
+### "Window & typeof globalThis" errors
+
+This occurs when a type includes DOM globals. Enable `ignoreDOMTypes: true` or add the specific type to `ignoreTypes`.
+
+### Generic type parameters not validated
+
+Type parameters (`T`, `U`, etc.) cannot be validated at runtime because the actual type isn't known until the function is called. This is by design:
+
+```typescript
+function identity<T>(value: T): T {
+  return value;  // T is not validated - no runtime type info
+}
+```
+
+Concrete types in the same function ARE validated:
+
+```typescript
+function process<T>(value: T, user: User): User {
+  return user;  // User IS validated
+}
+```
+
+### Constructor parameters not validated
+
+Currently, class constructors are not transformed. This is a known limitation. Validate in the constructor body if needed:
+
+```typescript
+class Client {
+  constructor(options: Options) {
+    // Manual validation if needed
+    if (!options.timeout) throw new Error("timeout required");
+  }
+}
+```
 
 ## Credits
 The actual validation work is done by [typia](https://github.com/samchon/typia). This package just generates the necessary code to call typia's functions based on your TypeScript types.
