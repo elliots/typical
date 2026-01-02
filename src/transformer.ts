@@ -44,6 +44,72 @@ export class TypicalTransformer {
     this.program = program ?? setupTsProgram(this.ts);
   }
 
+  /**
+   * Create a new TypeScript program with transformed source code.
+   * This is needed so typia can resolve types from our generated typia.createAssert<T>() calls.
+   */
+  private createTypiaProgram(
+    fileName: string,
+    transformedCode: string,
+    languageVersion: ts.ScriptTarget = this.ts.ScriptTarget.ES2020
+  ): { newProgram: ts.Program; boundSourceFile: ts.SourceFile } {
+    // Create a new source file from the transformed code
+    const newSourceFile = this.ts.createSourceFile(
+      fileName,
+      transformedCode,
+      languageVersion,
+      true
+    );
+
+    // Build map of all source files, replacing the transformed one
+    const compilerOptions = this.program.getCompilerOptions();
+    const originalSourceFiles = new Map<string, ts.SourceFile>();
+    for (const sf of this.program.getSourceFiles()) {
+      originalSourceFiles.set(sf.fileName, sf);
+    }
+    originalSourceFiles.set(fileName, newSourceFile);
+
+    // Create custom compiler host that serves our transformed file
+    const customHost: ts.CompilerHost = {
+      getSourceFile: (hostFileName, langVersion) => {
+        if (originalSourceFiles.has(hostFileName)) {
+          return originalSourceFiles.get(hostFileName);
+        }
+        return this.ts.createSourceFile(
+          hostFileName,
+          this.ts.sys.readFile(hostFileName) || "",
+          langVersion,
+          true
+        );
+      },
+      getDefaultLibFileName: (opts) => this.ts.getDefaultLibFilePath(opts),
+      writeFile: () => {},
+      getCurrentDirectory: () => this.ts.sys.getCurrentDirectory(),
+      getCanonicalFileName: (fn) =>
+        this.ts.sys.useCaseSensitiveFileNames ? fn : fn.toLowerCase(),
+      useCaseSensitiveFileNames: () => this.ts.sys.useCaseSensitiveFileNames,
+      getNewLine: () => this.ts.sys.newLine,
+      fileExists: (fn) => originalSourceFiles.has(fn) || this.ts.sys.fileExists(fn),
+      readFile: (fn) => this.ts.sys.readFile(fn),
+    };
+
+    // Create new program, passing oldProgram to reuse dependency context
+    const newProgram = this.ts.createProgram(
+      Array.from(originalSourceFiles.keys()),
+      compilerOptions,
+      customHost,
+      this.program
+    );
+
+    // Get the bound source file from the new program (has proper symbol tables)
+    const boundSourceFile = newProgram.getSourceFile(fileName);
+    if (!boundSourceFile) {
+      throw new Error(`Failed to get bound source file: ${fileName}`);
+    }
+
+    return { newProgram, boundSourceFile };
+  }
+
   public createSourceFile(fileName: string, content: string): ts.SourceFile {
     return this.ts.createSourceFile(
       fileName,
@@ -134,60 +200,8 @@ export class TypicalTransformer {
       console.log("TYPICAL: Before typia transform (first 500 chars):", code.substring(0, 500));
     }
 
-    // Create a new source file from the transformed code
-    const newSourceFile = this.ts.createSourceFile(
-      fileName,
-      code,
-      this.ts.ScriptTarget.ES2020,
-      true
-    );
-
-    // Create a new program with the transformed source file so typia can resolve types.
-    // Pass oldProgram to reuse parsed/bound data from unchanged dependency files.
-    const compilerOptions = this.program.getCompilerOptions();
-    const originalSourceFiles = new Map<string, ts.SourceFile>();
-    for (const sf of this.program.getSourceFiles()) {
-      originalSourceFiles.set(sf.fileName, sf);
-    }
-    // Replace the original source file with our transformed one
-    originalSourceFiles.set(fileName, newSourceFile);
-
-    const customHost: ts.CompilerHost = {
-      getSourceFile: (hostFileName, languageVersion) => {
-        if (originalSourceFiles.has(hostFileName)) {
-          return originalSourceFiles.get(hostFileName);
-        }
-        return this.ts.createSourceFile(
-          hostFileName,
-          this.ts.sys.readFile(hostFileName) || "",
-          languageVersion,
-          true
-        );
-      },
-      getDefaultLibFileName: (opts) => this.ts.getDefaultLibFilePath(opts),
-      writeFile: () => {},
-      getCurrentDirectory: () => this.ts.sys.getCurrentDirectory(),
-      getCanonicalFileName: (fn) =>
-        this.ts.sys.useCaseSensitiveFileNames ? fn : fn.toLowerCase(),
-      useCaseSensitiveFileNames: () => this.ts.sys.useCaseSensitiveFileNames,
-      getNewLine: () => this.ts.sys.newLine,
-      fileExists: (fn) => originalSourceFiles.has(fn) || this.ts.sys.fileExists(fn),
-      readFile: (fn) => this.ts.sys.readFile(fn),
-    };
-
-    // Create new program, passing oldProgram to reuse dependency context
-    const newProgram = this.ts.createProgram(
-      Array.from(originalSourceFiles.keys()),
-      compilerOptions,
-      customHost,
-      this.program // Reuse old program's structure for unchanged files
-    );
-
-    // Get the bound source file from the new program (has proper symbol tables)
-    const boundSourceFile = newProgram.getSourceFile(fileName);
-    if (!boundSourceFile) {
-      throw new Error(`Failed to get bound source file: ${fileName}`);
-    }
+    // Create a new program with the transformed source file so typia can resolve types
+    const { newProgram, boundSourceFile } = this.createTypiaProgram(fileName, code);
 
     // Collect typia diagnostics to detect transformation failures
     const diagnostics: ts.Diagnostic[] = [];
@@ -392,60 +406,12 @@ export class TypicalTransformer {
           console.log("TYPICAL: Before typia transform (first 500 chars):", transformedCode.substring(0, 500));
         }
 
-        // Create a new source file from the transformed code
-        const newSourceFile = this.ts.createSourceFile(
+        // Create a new program with the transformed source file so typia can resolve types
+        const { newProgram, boundSourceFile } = this.createTypiaProgram(
           sourceFile.fileName,
           transformedCode,
-          sourceFile.languageVersion,
-          true
+          sourceFile.languageVersion
         );
-
-        // Create a new program with the transformed source file so typia can resolve types.
-        // Pass oldProgram to reuse parsed/bound data from unchanged dependency files.
-        const compilerOptions = this.program.getCompilerOptions();
-        const originalSourceFiles = new Map<string, ts.SourceFile>();
-        for (const sf of this.program.getSourceFiles()) {
-          originalSourceFiles.set(sf.fileName, sf);
-        }
-        // Replace the original source file with our transformed one
-        originalSourceFiles.set(sourceFile.fileName, newSourceFile);
-
-        const customHost: ts.CompilerHost = {
-          getSourceFile: (hostFileName, languageVersion) => {
-            if (originalSourceFiles.has(hostFileName)) {
-              return originalSourceFiles.get(hostFileName);
-            }
-            return this.ts.createSourceFile(
-              hostFileName,
-              this.ts.sys.readFile(hostFileName) || "",
-              languageVersion,
-              true
-            );
-          },
-          getDefaultLibFileName: (opts) => this.ts.getDefaultLibFilePath(opts),
-          writeFile: () => {},
-          getCurrentDirectory: () => this.ts.sys.getCurrentDirectory(),
-          getCanonicalFileName: (fn) =>
-            this.ts.sys.useCaseSensitiveFileNames ? fn : fn.toLowerCase(),
-          useCaseSensitiveFileNames: () => this.ts.sys.useCaseSensitiveFileNames,
-          getNewLine: () => this.ts.sys.newLine,
-          fileExists: (fn) => originalSourceFiles.has(fn) || this.ts.sys.fileExists(fn),
-          readFile: (fn) => this.ts.sys.readFile(fn),
-        };
-
-        // Create new program, passing oldProgram to reuse dependency context
-        const newProgram = this.ts.createProgram(
-          Array.from(originalSourceFiles.keys()),
-          compilerOptions,
-          customHost,
-          this.program // Reuse old program's structure for unchanged files
-        );
-
-        // Get the bound source file from the new program (has proper symbol tables)
-        const boundSourceFile = newProgram.getSourceFile(sourceFile.fileName);
-        if (!boundSourceFile) {
-          throw new Error(`Failed to get bound source file: ${sourceFile.fileName}`);
-        }
 
         // Collect typia diagnostics to detect transformation failures
         const diagnostics: ts.Diagnostic[] = [];
