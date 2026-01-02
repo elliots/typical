@@ -1,6 +1,6 @@
 import * as path from 'path';
 import { minimatch } from 'minimatch';
-import { TypicalConfig } from './config.js';
+import type { TypicalConfig } from './config.js';
 
 /**
  * Determines if a file should be transformed based on include/exclude patterns

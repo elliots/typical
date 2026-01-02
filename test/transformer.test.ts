@@ -2,7 +2,8 @@ import { test, describe } from "node:test";
 import assert from "node:assert";
 import ts from "typescript";
 import { TypicalTransformer } from "../src/transformer.js";
-import { compileIgnorePattern, compileIgnorePatterns, TypicalConfig } from "../src/config.js";
+import { compileIgnorePattern, compileIgnorePatterns } from "../src/config.js";
+import type { TypicalConfig } from "../src/config.js";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { TraceMap, originalPositionFor, eachMapping } from "@jridgewell/trace-mapping";
 
@@ -683,6 +684,31 @@ function processFirst([first, second]: [string, number]): string {
         `__typical_assert_0(param)`, // Uses 'param' fallback for array destructuring
       ],
     },
+    // Optional parameter tests
+    {
+      name: "optional: validates optional parameter with undefined union",
+      input: `
+function greet(name?: string): string {
+  return name ?? "World";
+}`,
+      expectedPatterns: [
+        `typia.createAssert<string | undefined>()`,
+        /__(typical_assert_\d+|typical_assert_string_undefined)\(name\)/, // Validator for optional param
+      ],
+    },
+    {
+      name: "optional: multiple params with some optional",
+      input: `
+function format(required: string, optional?: number): string {
+  return required + (optional ?? 0);
+}`,
+      expectedPatterns: [
+        `typia.createAssert<string>()`,
+        `typia.createAssert<number | undefined>()`,
+        `__typical_assert_string(required)`,
+        /__(typical_assert_\d+|typical_assert_number_undefined)\(optional\)/, // Validator for optional param
+      ],
+    },
     // Union and intersection type tests
     {
       name: "union: validates union type parameters",
@@ -821,7 +847,7 @@ function add(a: number): (b: number) => number {
     ({ name, input, expected, expectedPatterns, notExpectedPatterns }) => {
       test(name, () => {
         const fileName = "test/test.temp.ts";
-        const transformer = createTestTransformer(fileName, input);
+        const transformer = createTestTransformer(fileName, input, { reusableValidators: true });
 
         const transformedCode = transformer.transform(fileName, "basic").code;
 
@@ -1266,7 +1292,9 @@ function processNumbers(nums: number[]): number[] {
     test("source map includes content when includeContent is true", () => {
       const testName = "includes_content";
       const fileName = `test/output/${testName}.ts`;
-      const input = `function greet(name: string): string { return "Hello " + name; }`;
+      const input = `function greet(name: string): string { 
+      console.log("Greeting", name);
+      return "Hello " + name; }`;
       const transformer = createTestTransformer(fileName, input, {
         sourceMap: { enabled: true, includeContent: true },
       });
@@ -1336,7 +1364,7 @@ processData(u);
       const input = `function greet(name: string): string { return "Hello " + name; }`;
       // The type annotation "string" for param starts at col 21
 
-      const transformer = createTestTransformer(fileName, input);
+      const transformer = createTestTransformer(fileName, input, { reusableValidators: true });
       const result = transformer.transform(fileName, "basic", { sourceMap: true });
 
       writeTestOutput(testName, result.code, "ts", result.map, input);
@@ -1368,8 +1396,8 @@ processData(u);
       // "number" for param a starts at col 16
       // "number" for param b starts at col 27
 
-      const transformer = createTestTransformer(fileName, input);
-      const result = transformer.transform(fileName, "basic", { sourceMap: true });
+      const transformer = createFullContextTransformer(fileName, input, { reusableValidators: true });
+      const result = transformer.transform(fileName, "typia", { sourceMap: true });
 
       writeTestOutput(testName, result.code, "ts", result.map, input);
 
@@ -1407,7 +1435,7 @@ processData(u);
       const input = `function greet(name: string): string { return "Hello " + name; }`;
       // Return type "string" starts at col 30
 
-      const transformer = createTestTransformer(fileName, input);
+      const transformer = createTestTransformer(fileName, input, { reusableValidators: true });
       const result = transformer.transform(fileName, "basic", { sourceMap: true });
 
       writeTestOutput(testName, result.code, "ts", result.map, input);
@@ -1438,7 +1466,7 @@ processData(u);
       // "string" return type starts at col 30
       const input = `function greet(name: string): string { return "Hello " + name; }`;
 
-      const transformer = createTestTransformer(fileName, input);
+      const transformer = createTestTransformer(fileName, input, { reusableValidators: true });
       const result = transformer.transform(fileName, "basic", { sourceMap: true });
 
       writeTestOutput(testName, result.code, "ts", result.map, input);

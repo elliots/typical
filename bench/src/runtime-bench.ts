@@ -75,6 +75,8 @@ import {
   testLargeArrayJson,
   testSmallWithExtrasJson,
   testSmallPayloadWithExtras,
+} from "./scenarios/json-types.js";
+import type {
   LargePayload,
   MediumPayload,
   SmallPayload,
