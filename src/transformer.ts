@@ -164,6 +164,24 @@ export class TypicalTransformer {
     });
   }
 
+  /**
+   * Check for untransformed typia calls and throw an error if found.
+   * This is a fallback in case typia silently fails without reporting a diagnostic.
+   */
+  private checkUntransformedTypiaCalls(code: string, fileName: string): void {
+    const untransformedCalls = this.findUntransformedTypiaCalls(code);
+    if (untransformedCalls.length > 0) {
+      const failedTypes = untransformedCalls.map(c => c.type).filter((v, i, a) => a.indexOf(v) === i);
+      throw new Error(
+        `TYPICAL: Failed to transform the following types (typia cannot process them):\n` +
+        failedTypes.map(t => `  - ${t}`).join('\n') +
+        `\n\nTo skip validation for these types, add to ignoreTypes in typical.json:\n` +
+        `  "ignoreTypes": [${failedTypes.map(t => `"${t}"`).join(', ')}]` +
+        `\n\nFile: ${fileName}`
+      );
+    }
+  }
+
   public createSourceFile(fileName: string, content: string): ts.SourceFile {
     return this.ts.createSourceFile(
       fileName,
@@ -311,19 +329,8 @@ export class TypicalTransformer {
 
     const finalCode = printer.printFile(typiaTransformed);
 
-    // Also check for untransformed typia calls as a fallback
-    // (in case typia silently fails without reporting a diagnostic)
-    const untransformedCalls = this.findUntransformedTypiaCalls(finalCode);
-    if (untransformedCalls.length > 0) {
-      const failedTypes = untransformedCalls.map(c => c.type).filter((v, i, a) => a.indexOf(v) === i);
-      throw new Error(
-        `TYPICAL: Failed to transform the following types (typia cannot process them):\n` +
-        failedTypes.map(t => `  - ${t}`).join('\n') +
-        `\n\nTo skip validation for these types, add to ignoreTypes in typical.json:\n` +
-        `  "ignoreTypes": [${failedTypes.map(t => `"${t}"`).join(', ')}]` +
-        `\n\nFile: ${fileName}`
-      );
-    }
+    // Check for untransformed typia calls as a fallback
+    this.checkUntransformedTypiaCalls(finalCode, fileName);
 
     return finalCode;
   }
@@ -461,19 +468,9 @@ export class TypicalTransformer {
           );
         }
 
-        // Also check for untransformed typia calls as a fallback
+        // Check for untransformed typia calls as a fallback
         const finalCode = printer.printFile(transformedSourceFile);
-        const untransformedCalls = this.findUntransformedTypiaCalls(finalCode);
-        if (untransformedCalls.length > 0) {
-          const failedTypes = untransformedCalls.map(c => c.type).filter((v, i, a) => a.indexOf(v) === i);
-          throw new Error(
-            `TYPICAL: Failed to transform the following types (typia cannot process them):\n` +
-            failedTypes.map(t => `  - ${t}`).join('\n') +
-            `\n\nTo skip validation for these types, add to ignoreTypes in typical.json:\n` +
-            `  "ignoreTypes": [${failedTypes.map(t => `"${t}"`).join(', ')}]` +
-            `\n\nFile: ${sourceFile.fileName}`
-          );
-        }
+        this.checkUntransformedTypiaCalls(finalCode, sourceFile.fileName);
 
         return transformedSourceFile;
       };
