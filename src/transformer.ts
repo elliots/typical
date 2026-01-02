@@ -478,6 +478,149 @@ export class TypicalTransformer {
   }
 
   /**
+   * Transform JSON.stringify or JSON.parse calls to use typia's validated versions.
+   * Returns the transformed node if applicable, or undefined to indicate no transformation.
+   */
+  private transformJSONCall(
+    node: ts.CallExpression,
+    ctx: TransformContext,
+    typeChecker: ts.TypeChecker,
+    shouldSkipType: (typeText: string) => boolean
+  ): ts.Node | undefined {
+    const { ts, factory } = ctx;
+    const propertyAccess = node.expression as ts.PropertyAccessExpression;
+
+    if (propertyAccess.name.text === "stringify") {
+      // For stringify, we need to infer the type from the argument
+      // First check if the argument type is 'any' - if so, skip transformation
+      if (node.arguments.length > 0) {
+        const arg = node.arguments[0];
+        const argType = typeChecker.getTypeAtLocation(arg);
+        if (this.isAnyOrUnknownTypeFlags(argType)) {
+          return undefined; // Don't transform JSON.stringify for any/unknown types
+        }
+      }
+
+      if (this.config.reusableValidators) {
+        // Infer type from argument
+        const arg = node.arguments[0];
+        const { typeText, typeNode } = this.inferStringifyType(arg, typeChecker, ctx);
+
+        const stringifierName = this.getOrCreateStringifier(typeText, typeNode);
+        return factory.createCallExpression(
+          factory.createIdentifier(stringifierName),
+          undefined,
+          node.arguments
+        );
+      } else {
+        // Use inline typia.json.stringify
+        return factory.updateCallExpression(
+          node,
+          factory.createPropertyAccessExpression(
+            factory.createPropertyAccessExpression(
+              factory.createIdentifier("typia"),
+              "json"
+            ),
+            "stringify"
+          ),
+          node.typeArguments,
+          node.arguments
+        );
+      }
+    } else if (propertyAccess.name.text === "parse") {
+      // For JSON.parse, we need to infer the expected type from context
+      // Check if this is part of a variable declaration or type assertion
+      let targetType: ts.TypeNode | undefined;
+
+      // Look for type annotations in parent nodes
+      let parent = node.parent;
+      while (parent) {
+        if (ts.isVariableDeclaration(parent) && parent.type) {
+          targetType = parent.type;
+          break;
+        } else if (ts.isAsExpression(parent)) {
+          targetType = parent.type;
+          break;
+        } else if (ts.isReturnStatement(parent)) {
+          // Look for function return type
+          let funcParent = parent.parent;
+          while (funcParent) {
+            if (
+              (ts.isFunctionDeclaration(funcParent) ||
+                ts.isArrowFunction(funcParent) ||
+                ts.isMethodDeclaration(funcParent)) &&
+              funcParent.type
+            ) {
+              targetType = funcParent.type;
+              break;
+            }
+            funcParent = funcParent.parent;
+          }
+          break;
+        } else if (ts.isArrowFunction(parent) && parent.type) {
+          // Arrow function with expression body (not block)
+          // e.g., (s: string): User => JSON.parse(s)
+          targetType = parent.type;
+          break;
+        }
+        parent = parent.parent;
+      }
+
+      if (targetType && this.isAnyOrUnknownType(targetType)) {
+        // Don't transform JSON.parse for any/unknown types
+        return undefined;
+      }
+
+      // If we can't determine the target type and there's no explicit type argument,
+      // don't transform - we can't validate against an unknown type
+      if (!targetType && !node.typeArguments) {
+        return undefined;
+      }
+
+      if (this.config.reusableValidators && targetType) {
+        // Use reusable parser - use typeNode text to preserve local aliases
+        const typeText = this.getTypeKey(targetType, typeChecker);
+
+        // Skip types that failed in typia (retry mechanism)
+        if (shouldSkipType(typeText)) {
+          if (process.env.DEBUG) {
+            console.log(`TYPICAL: Skipping previously failed type for JSON.parse: ${typeText}`);
+          }
+          return undefined;
+        }
+
+        const parserName = this.getOrCreateParser(typeText, targetType);
+
+        return factory.createCallExpression(
+          factory.createIdentifier(parserName),
+          undefined,
+          node.arguments
+        );
+      } else {
+        // Use inline typia.json.assertParse
+        const typeArguments = targetType
+          ? [targetType]
+          : node.typeArguments;
+
+        return factory.updateCallExpression(
+          node,
+          factory.createPropertyAccessExpression(
+            factory.createPropertyAccessExpression(
+              factory.createIdentifier("typia"),
+              "json"
+            ),
+            "assertParse"
+          ),
+          typeArguments,
+          node.arguments
+        );
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
    * Transform a single source file with TypeScript AST
    */
   private transformSourceFile(
@@ -532,127 +675,12 @@ export class TypicalTransformer {
           ts.isIdentifier(propertyAccess.expression) &&
           propertyAccess.expression.text === "JSON"
         ) {
-          needsTypiaImport = true;
-
-          if (propertyAccess.name.text === "stringify") {
-            // For stringify, we need to infer the type from the argument
-            // First check if the argument type is 'any' - if so, skip transformation
-            if (node.arguments.length > 0) {
-              const arg = node.arguments[0];
-              const argType = typeChecker.getTypeAtLocation(arg);
-              if (this.isAnyOrUnknownTypeFlags(argType)) {
-                return node; // Don't transform JSON.stringify for any/unknown types
-              }
-            }
-
-            if (this.config.reusableValidators) {
-              // Infer type from argument
-              const arg = node.arguments[0];
-              const { typeText, typeNode } = this.inferStringifyType(arg, typeChecker, ctx);
-
-              const stringifierName = this.getOrCreateStringifier(typeText, typeNode);
-              return ctx.factory.createCallExpression(
-                ctx.factory.createIdentifier(stringifierName),
-                undefined,
-                node.arguments
-              );
-            } else {
-              // Use inline typia.json.stringify
-              return ctx.factory.updateCallExpression(
-                node,
-                ctx.factory.createPropertyAccessExpression(
-                  ctx.factory.createPropertyAccessExpression(
-                    ctx.factory.createIdentifier("typia"),
-                    "json"
-                  ),
-                  "stringify"
-                ),
-                node.typeArguments,
-                node.arguments
-              );
-            }
-          } else if (propertyAccess.name.text === "parse") {
-            // For JSON.parse, we need to infer the expected type from context
-            // Check if this is part of a variable declaration or type assertion
-            let targetType: ts.TypeNode | undefined;
-
-            // Look for type annotations in parent nodes
-            let parent = node.parent;
-            while (parent) {
-              if (ts.isVariableDeclaration(parent) && parent.type) {
-                targetType = parent.type;
-                break;
-              } else if (ts.isAsExpression(parent)) {
-                targetType = parent.type;
-                break;
-              } else if (ts.isReturnStatement(parent)) {
-                // Look for function return type
-                let funcParent = parent.parent;
-                while (funcParent) {
-                  if (
-                    (ts.isFunctionDeclaration(funcParent) ||
-                      ts.isArrowFunction(funcParent) ||
-                      ts.isMethodDeclaration(funcParent)) &&
-                    funcParent.type
-                  ) {
-                    targetType = funcParent.type;
-                    break;
-                  }
-                  funcParent = funcParent.parent;
-                }
-                break;
-              } else if (ts.isArrowFunction(parent) && parent.type) {
-                // Arrow function with expression body (not block)
-                // e.g., (s: string): User => JSON.parse(s)
-                targetType = parent.type;
-                break;
-              }
-              parent = parent.parent;
-            }
-
-            if (targetType && this.isAnyOrUnknownType(targetType)) {
-              // Don't transform JSON.parse for any/unknown types
-              return node;
-            }
-
-            // If we can't determine the target type and there's no explicit type argument,
-            // don't transform - we can't validate against an unknown type
-            if (!targetType && !node.typeArguments) {
-              return node;
-            }
-
-            if (this.config.reusableValidators && targetType) {
-              // Use reusable parser - use typeNode text to preserve local aliases
-              const typeText = this.getTypeKey(targetType, typeChecker);
-              const parserName = this.getOrCreateParser(typeText, targetType);
-
-              const newCall = ctx.factory.createCallExpression(
-                ctx.factory.createIdentifier(parserName),
-                undefined,
-                node.arguments
-              );
-
-              return newCall;
-            } else {
-              // Use inline typia.json.assertParse
-              const typeArguments = targetType
-                ? [targetType]
-                : node.typeArguments;
-
-              return ctx.factory.updateCallExpression(
-                node,
-                ctx.factory.createPropertyAccessExpression(
-                  ctx.factory.createPropertyAccessExpression(
-                    ctx.factory.createIdentifier("typia"),
-                    "json"
-                  ),
-                  "assertParse"
-                ),
-                typeArguments,
-                node.arguments
-              );
-            }
+          const transformed = this.transformJSONCall(node, ctx, typeChecker, shouldSkipType);
+          if (transformed) {
+            needsTypiaImport = true;
+            return transformed;
           }
+          return node;
         }
       }
 
