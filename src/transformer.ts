@@ -110,6 +110,33 @@ export class TypicalTransformer {
     return { newProgram, boundSourceFile };
   }
 
+  /**
+   * Write intermediate file for debugging purposes.
+   * Creates a .typical.ts file showing the code after typical's transformations
+   * but before typia processes it.
+   */
+  private writeIntermediateFile(fileName: string, code: string): void {
+    if (!this.config.debug?.writeIntermediateFiles) {
+      return;
+    }
+
+    const compilerOptions = this.program.getCompilerOptions();
+    const outDir = compilerOptions.outDir || ".";
+    const rootDir = compilerOptions.rootDir || ".";
+
+    const relativePath = path.relative(rootDir, fileName);
+    const intermediateFileName = relativePath.replace(/\.(tsx?)$/, ".typical.$1");
+    const intermediateFilePath = path.join(outDir, intermediateFileName);
+
+    const dir = path.dirname(intermediateFilePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    fs.writeFileSync(intermediateFilePath, code);
+    console.log(`TYPICAL: Wrote intermediate file: ${intermediateFilePath}`);
+  }
+
   public createSourceFile(fileName: string, content: string): ts.SourceFile {
     return this.ts.createSourceFile(
       fileName,
@@ -177,24 +204,7 @@ export class TypicalTransformer {
    * Returns either the transformed code string, or a retry signal with the failed type.
    */
   private applyTypiaTransform(fileName: string, code: string, printer: ts.Printer): string | { retry: true; failedType: string } {
-    // Write intermediate file if debug option is enabled
-    if (this.config.debug?.writeIntermediateFiles) {
-      const compilerOptions = this.program.getCompilerOptions();
-      const outDir = compilerOptions.outDir || ".";
-      const rootDir = compilerOptions.rootDir || ".";
-
-      const relativePath = path.relative(rootDir, fileName);
-      const intermediateFileName = relativePath.replace(/\.(tsx?)$/, ".typical.$1");
-      const intermediateFilePath = path.join(outDir, intermediateFileName);
-
-      const dir = path.dirname(intermediateFilePath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-
-      fs.writeFileSync(intermediateFilePath, code);
-      console.log(`TYPICAL: Wrote intermediate file: ${intermediateFilePath}`);
-    }
+    this.writeIntermediateFile(fileName, code);
 
     if (process.env.DEBUG) {
       console.log("TYPICAL: Before typia transform (first 500 chars):", code.substring(0, 500));
@@ -386,21 +396,7 @@ export class TypicalTransformer {
           return transformedSourceFile;
         }
 
-        // Write intermediate file if debug option is enabled
-        if (this.config.debug?.writeIntermediateFiles) {
-          const compilerOptions = this.program.getCompilerOptions();
-          const outDir = compilerOptions.outDir || ".";
-          const rootDir = compilerOptions.rootDir || ".";
-          const relativePath = path.relative(rootDir, sourceFile.fileName);
-          const intermediateFileName = relativePath.replace(/\.(tsx?)$/, ".typical.$1");
-          const intermediateFilePath = path.join(outDir, intermediateFileName);
-          const dir = path.dirname(intermediateFilePath);
-          if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-          }
-          fs.writeFileSync(intermediateFilePath, transformedCode);
-          console.log(`TYPICAL: Wrote intermediate file: ${intermediateFilePath}`);
-        }
+        this.writeIntermediateFile(sourceFile.fileName, transformedCode);
 
         if (process.env.DEBUG) {
           console.log("TYPICAL: Before typia transform (first 500 chars):", transformedCode.substring(0, 500));
