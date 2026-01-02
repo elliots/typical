@@ -29,6 +29,19 @@ export interface TypicalConfig {
   validateFunctions?: boolean;
 }
 
+/**
+ * Pre-compiled regex patterns for ignore type matching.
+ * This is populated during config loading for performance.
+ */
+export interface CompiledIgnorePatterns {
+  /** Compiled patterns from user ignoreTypes config */
+  userPatterns: RegExp[];
+  /** Compiled patterns from DOM_TYPES_TO_IGNORE (when ignoreDOMTypes is true) */
+  domPatterns: RegExp[];
+  /** All patterns combined for quick checking */
+  allPatterns: RegExp[];
+}
+
 export const defaultConfig: TypicalConfig = {
   include: ["**/*.ts", "**/*.tsx"],
   exclude: ["node_modules/**", "**/*.d.ts", "dist/**", "build/**"],
@@ -86,6 +99,72 @@ export const DOM_TYPES_TO_IGNORE = [
 
 import fs from 'fs';
 import path from 'path';
+
+/**
+ * Convert a glob pattern to a RegExp for type matching.
+ * Supports wildcards: "React.*" -> /^React\..*$/
+ */
+export function compileIgnorePattern(pattern: string): RegExp | null {
+  try {
+    const regexStr = '^' + pattern
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')  // Escape special regex chars except *
+      .replace(/\*/g, '.*') + '$';
+    return new RegExp(regexStr);
+  } catch (error) {
+    console.warn(`TYPICAL: Invalid ignoreTypes pattern "${pattern}": ${error}`);
+    return null;
+  }
+}
+
+/**
+ * Pre-compile all ignore patterns for efficient matching.
+ */
+export function compileIgnorePatterns(config: TypicalConfig): CompiledIgnorePatterns {
+  const userPatterns: RegExp[] = [];
+  const domPatterns: RegExp[] = [];
+
+  // Compile user patterns
+  for (const pattern of config.ignoreTypes ?? []) {
+    const compiled = compileIgnorePattern(pattern);
+    if (compiled) {
+      userPatterns.push(compiled);
+    }
+  }
+
+  // Compile DOM patterns if enabled (default: true)
+  if (config.ignoreDOMTypes !== false) {
+    for (const pattern of DOM_TYPES_TO_IGNORE) {
+      const compiled = compileIgnorePattern(pattern);
+      if (compiled) {
+        domPatterns.push(compiled);
+      }
+    }
+  }
+
+  return {
+    userPatterns,
+    domPatterns,
+    allPatterns: [...userPatterns, ...domPatterns],
+  };
+}
+
+// Cache for compiled patterns, keyed by config identity
+let cachedPatterns: CompiledIgnorePatterns | null = null;
+let cachedConfig: TypicalConfig | null = null;
+
+/**
+ * Get compiled ignore patterns, using cache if config hasn't changed.
+ */
+export function getCompiledIgnorePatterns(config: TypicalConfig): CompiledIgnorePatterns {
+  // Simple identity check - if same config object, use cache
+  if (cachedConfig === config && cachedPatterns) {
+    return cachedPatterns;
+  }
+
+  cachedConfig = config;
+  cachedPatterns = compileIgnorePatterns(config);
+  return cachedPatterns;
+}
 
 export function loadConfig(configPath?: string): TypicalConfig {
   const configFile = configPath || path.join(process.cwd(), 'typical.json');

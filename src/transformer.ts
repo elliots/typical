@@ -1,7 +1,7 @@
 import ts from "typescript";
 import fs from "fs";
 import path from "path";
-import { loadConfig, TypicalConfig, DOM_TYPES_TO_IGNORE } from "./config.js";
+import { loadConfig, TypicalConfig, getCompiledIgnorePatterns, CompiledIgnorePatterns } from "./config.js";
 import { shouldTransformFile } from "./file-filter.js";
 import { hoistRegexConstructors } from "./regex-hoister.js";
 
@@ -29,6 +29,7 @@ export class TypicalTransformer {
   public config: TypicalConfig;
   private program: ts.Program;
   private ts: typeof ts;
+  private compiledPatterns: CompiledIgnorePatterns | null = null;
   private typeValidators = new Map<
     string,
     { name: string; typeNode: ts.TypeNode }
@@ -1320,6 +1321,16 @@ export class TypicalTransformer {
   }
 
   /**
+   * Get pre-compiled ignore patterns, caching them for performance.
+   */
+  private getCompiledPatterns(): CompiledIgnorePatterns {
+    if (!this.compiledPatterns) {
+      this.compiledPatterns = getCompiledIgnorePatterns(this.config);
+    }
+    return this.compiledPatterns;
+  }
+
+  /**
    * Check if a TypeNode represents a type that shouldn't be validated.
    * This includes:
    * - any/unknown (intentional escape hatches)
@@ -1409,12 +1420,8 @@ export class TypicalTransformer {
    * Also handles union types: "Document | Element" is ignored if "Document" or "Element" is in ignoreTypes.
    */
   private isIgnoredType(typeName: string, typeChecker?: ts.TypeChecker, type?: ts.Type): boolean {
-    // Combine user patterns with DOM types if ignoreDOMTypes is enabled (default: true)
-    const userPatterns = this.config.ignoreTypes ?? [];
-    const domPatterns = this.config.ignoreDOMTypes !== false ? DOM_TYPES_TO_IGNORE : [];
-    const patterns = [...userPatterns, ...domPatterns];
-
-    if (patterns.length === 0) return false;
+    const compiled = this.getCompiledPatterns();
+    if (compiled.allPatterns.length === 0) return false;
 
     // For union types, check each constituent
     if (type && type.isUnion()) {
@@ -1423,12 +1430,12 @@ export class TypicalTransformer {
       );
       if (nonNullTypes.length === 0) return false;
       // All non-null types must be ignored
-      return nonNullTypes.every(t => this.isIgnoredSingleType(t, patterns, typeChecker));
+      return nonNullTypes.every(t => this.isIgnoredSingleType(t, compiled.allPatterns, typeChecker));
     }
 
     // For non-union types, check directly
     if (type && typeChecker) {
-      return this.isIgnoredSingleType(type, patterns, typeChecker);
+      return this.isIgnoredSingleType(type, compiled.allPatterns, typeChecker);
     }
 
     // Fallback: string-based matching for union types like "Document | Element | null"
@@ -1436,14 +1443,15 @@ export class TypicalTransformer {
     const nonNullParts = typeParts.filter(t => t !== 'null' && t !== 'undefined');
     if (nonNullParts.length === 0) return false;
 
-    return nonNullParts.every(part => this.matchesIgnorePattern(part, patterns));
+    return nonNullParts.every(part => this.matchesIgnorePatternCompiled(part, compiled.allPatterns));
   }
 
   /**
    * Check if a single type (not a union) should be ignored.
    * Checks both the type name and its base classes.
+   * @param patterns Pre-compiled RegExp patterns
    */
-  private isIgnoredSingleType(type: ts.Type, patterns: string[], typeChecker?: ts.TypeChecker, depth = 0): boolean {
+  private isIgnoredSingleType(type: ts.Type, patterns: RegExp[], typeChecker?: ts.TypeChecker, depth = 0): boolean {
     // Prevent infinite recursion
     if (depth > 20) return false;
 
@@ -1454,7 +1462,7 @@ export class TypicalTransformer {
     }
 
     // Check direct name match
-    if (this.matchesIgnorePattern(typeName, patterns)) {
+    if (this.matchesIgnorePatternCompiled(typeName, patterns)) {
       if (process.env.DEBUG) {
         console.log(`TYPICAL: Type "${typeName}" matched ignore pattern directly`);
       }
@@ -1488,7 +1496,7 @@ export class TypicalTransformer {
                 if (process.env.DEBUG) {
                   console.log(`TYPICAL: Type "${typeName}" extends "${baseTypeName}" (from heritage clause)`);
                 }
-                if (this.matchesIgnorePattern(baseTypeName, patterns)) {
+                if (this.matchesIgnorePatternCompiled(baseTypeName, patterns)) {
                   if (process.env.DEBUG) {
                     console.log(`TYPICAL: Type "${typeName}" ignored because it extends "${baseTypeName}"`);
                   }
@@ -1530,16 +1538,11 @@ export class TypicalTransformer {
   }
 
   /**
-   * Check if a single type name matches any ignore pattern.
+   * Check if a single type name matches any pre-compiled ignore pattern.
+   * @param patterns Pre-compiled RegExp patterns
    */
-  private matchesIgnorePattern(typeName: string, patterns: string[]): boolean {
-    return patterns.some(pattern => {
-      // Convert glob pattern to regex: "React.*" -> /^React\..*$/
-      const regexStr = '^' + pattern
-        .replace(/[.+^${}()|[\]\\]/g, '\\$&')  // Escape special regex chars except *
-        .replace(/\*/g, '.*') + '$';
-      return new RegExp(regexStr).test(typeName);
-    });
+  private matchesIgnorePatternCompiled(typeName: string, patterns: RegExp[]): boolean {
+    return patterns.some(pattern => pattern.test(typeName));
   }
 
   /**

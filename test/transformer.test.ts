@@ -2,6 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert";
 import ts from "typescript";
 import { TypicalTransformer } from "../src/transformer.js";
+import { compileIgnorePattern, compileIgnorePatterns, TypicalConfig } from "../src/config.js";
 import { writeFileSync } from "node:fs";
 
 interface TestCase {
@@ -920,6 +921,110 @@ const escaped = data as unknown;
       assert.ok(
         !transformedCode.includes("__typical_assert_"),
         "Should not validate 'as unknown' casts"
+      );
+    });
+  });
+
+  // Pre-compiled ignore pattern tests
+  describe("ignoreTypes pattern compilation", () => {
+    test("compiles valid glob patterns to RegExp", () => {
+      const pattern = compileIgnorePattern("React.*");
+      assert.ok(pattern instanceof RegExp, "Should return RegExp");
+      assert.ok(pattern.test("React.FormEvent"), "Should match React.FormEvent");
+      assert.ok(pattern.test("React.ChangeEvent"), "Should match React.ChangeEvent");
+      assert.ok(!pattern.test("ReactDOM"), "Should not match ReactDOM");
+    });
+
+    test("compiles wildcard-only pattern", () => {
+      const pattern = compileIgnorePattern("*Event");
+      assert.ok(pattern instanceof RegExp, "Should return RegExp");
+      assert.ok(pattern.test("MouseEvent"), "Should match MouseEvent");
+      assert.ok(pattern.test("KeyboardEvent"), "Should match KeyboardEvent");
+      assert.ok(!pattern.test("EventTarget"), "Should not match EventTarget");
+    });
+
+    test("compiles exact match pattern", () => {
+      const pattern = compileIgnorePattern("Document");
+      assert.ok(pattern instanceof RegExp, "Should return RegExp");
+      assert.ok(pattern.test("Document"), "Should match Document");
+      assert.ok(!pattern.test("DocumentFragment"), "Should not match DocumentFragment");
+    });
+
+    test("compileIgnorePatterns creates all pattern categories", () => {
+      const config: TypicalConfig = {
+        ignoreTypes: ["React.*", "Express.Request"],
+        ignoreDOMTypes: true,
+      };
+      const compiled = compileIgnorePatterns(config);
+
+      // User patterns
+      assert.strictEqual(compiled.userPatterns.length, 2, "Should have 2 user patterns");
+
+      // DOM patterns (should have many)
+      assert.ok(compiled.domPatterns.length > 10, "Should have many DOM patterns");
+
+      // All patterns combined
+      assert.strictEqual(
+        compiled.allPatterns.length,
+        compiled.userPatterns.length + compiled.domPatterns.length,
+        "allPatterns should be sum of user and DOM patterns"
+      );
+    });
+
+    test("compileIgnorePatterns respects ignoreDOMTypes: false", () => {
+      const config: TypicalConfig = {
+        ignoreTypes: ["MyType"],
+        ignoreDOMTypes: false,
+      };
+      const compiled = compileIgnorePatterns(config);
+
+      assert.strictEqual(compiled.userPatterns.length, 1, "Should have 1 user pattern");
+      assert.strictEqual(compiled.domPatterns.length, 0, "Should have 0 DOM patterns when disabled");
+      assert.strictEqual(compiled.allPatterns.length, 1, "Should only have user patterns");
+    });
+
+    test("ignoreTypes patterns are used during transformation", () => {
+      const fileName = "test/test.temp.ts";
+      const input = `
+interface MyIgnoredType { value: number; }
+function process(x: MyIgnoredType): MyIgnoredType {
+  return x;
+}`;
+      const transformer = createTestTransformer(fileName, input, {
+        ignoreTypes: ["MyIgnoredType"],
+        reusableValidators: true,
+      });
+      const transformedCode = transformer.transform(fileName, "basic");
+
+      // Should NOT have validator for ignored type
+      assert.ok(
+        !transformedCode.includes("typia.createAssert<MyIgnoredType>"),
+        "Should not create validator for ignored type"
+      );
+    });
+
+    test("wildcard ignoreTypes pattern matches multiple types", () => {
+      const fileName = "test/test.temp.ts";
+      const input = `
+interface MyEvent { type: string; }
+interface OtherEvent { kind: string; }
+function handleEvent(e: MyEvent): MyEvent { return e; }
+function handleOther(e: OtherEvent): OtherEvent { return e; }
+`;
+      const transformer = createTestTransformer(fileName, input, {
+        ignoreTypes: ["*Event"],
+        reusableValidators: true,
+      });
+      const transformedCode = transformer.transform(fileName, "basic");
+
+      // Should NOT have validators for *Event types
+      assert.ok(
+        !transformedCode.includes("typia.createAssert<MyEvent>"),
+        "Should not create validator for MyEvent"
+      );
+      assert.ok(
+        !transformedCode.includes("typia.createAssert<OtherEvent>"),
+        "Should not create validator for OtherEvent"
       );
     });
   });
