@@ -24,6 +24,8 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "rm -f test/test.temp.ts && tsc && node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
+    "test:coverage": "rm -f test/test.temp.ts && tsc && node --import ./dist/src/esm-loader-register.js --test --experimental-test-coverage dist/test/*.test.js",
+    "test:coverage:html": "rm -f test/test.temp.ts && tsc && c8 --reporter=html --reporter=text --include='dist/src/**' node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
     "bench": "cd bench && npm install && npm run bench",
     "test:all": "npm test && npm run bench",
     "prepublishOnly": "npm run build && npm test",
@@ -67,7 +69,8 @@
     "unplugin": "2.3.11"
   },
   "devDependencies": {
-    "@types/node": "22"
+    "@types/node": "22",
+    "c8": "^10.1.2"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"

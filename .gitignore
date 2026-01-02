@@ -3,3 +3,6 @@ dist
 node_modules
 *.temp.ts
 **/*.typical.ts*
+coverage/
+
+.DS_Store

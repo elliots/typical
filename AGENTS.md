@@ -112,6 +112,7 @@ Located in `src/config.ts`. Key options:
 - ES modules (`"type": "module"`)
 - Uses semicolons
 - Use existing patterns from transformer.ts
+- Use pnpm
 
 ## Common Tasks
 

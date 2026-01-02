@@ -27,7 +27,39 @@ function createTestTransformer(fileName: string, content: string, config?: Const
     strict: true,
     esModuleInterop: true,
     skipLibCheck: true,
+    // Include lib files so typia can resolve built-in types
+    lib: ["lib.es2020.d.ts"],
   };
+
+  const program = ts.createProgram([fileName], compilerOptions);
+  return new TypicalTransformer(config, program, ts);
+}
+
+/**
+ * Create a transformer with full lib context for typia mode tests.
+ * Uses the project's tsconfig.json so typia can properly resolve types.
+ */
+function createFullContextTransformer(fileName: string, content: string, config?: ConstructorParameters<typeof TypicalTransformer>[0]): TypicalTransformer {
+  writeFileSync(fileName, content);
+
+  // Load the project's tsconfig for full type resolution
+  const configPath = ts.findConfigFile("./", ts.sys.fileExists, "tsconfig.json");
+  let compilerOptions: ts.CompilerOptions;
+
+  if (configPath) {
+    const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
+    const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, "./");
+    compilerOptions = parsed.options;
+  } else {
+    // Fallback if no tsconfig found
+    compilerOptions = {
+      target: ts.ScriptTarget.ES2020,
+      module: ts.ModuleKind.ESNext,
+      strict: true,
+      esModuleInterop: true,
+      skipLibCheck: true,
+    };
+  }
 
   const program = ts.createProgram([fileName], compilerOptions);
   return new TypicalTransformer(config, program, ts);
@@ -1025,6 +1057,173 @@ function handleOther(e: OtherEvent): OtherEvent { return e; }
       assert.ok(
         !transformedCode.includes("typia.createAssert<OtherEvent>"),
         "Should not create validator for OtherEvent"
+      );
+    });
+  });
+
+  // Full transpile tests (typia mode) - these test the complete pipeline including typia and regex hoisting
+  // Uses createFullContextTransformer to provide proper type resolution for typia
+  describe("full transpile (typia mode)", () => {
+    test("transforms simple primitive validation with typia", () => {
+      const fileName = "test/test.temp.ts";
+      const input = `
+function checkNumber(n: number): number {
+  return n;
+}`;
+      const transformer = createFullContextTransformer(fileName, input, { reusableValidators: true });
+      const transformedCode = transformer.transform(fileName, "typia");
+
+      // typia.createAssert<T>() calls should be expanded to actual validation functions
+      // Check that the typia call syntax is gone (but "typia.createAssert" in strings is ok)
+      assert.ok(
+        !transformedCode.includes("typia.createAssert<"),
+        "typia.createAssert<T>() calls should be transformed away"
+      );
+      // Should have typia's internal validation imports
+      assert.ok(
+        transformedCode.includes("__typia_transform__"),
+        "Should contain typia internal imports"
+      );
+    });
+
+    test("hoistRegex: false does not add __regex_ variables", () => {
+      const fileName = "test/test.temp.ts";
+      const input = `
+function checkNumber(n: number): number {
+  return n;
+}`;
+      const transformer = createFullContextTransformer(fileName, input, {
+        reusableValidators: true,
+        hoistRegex: false
+      });
+      const transformedCode = transformer.transform(fileName, "typia");
+
+      // Should complete without error
+      assert.ok(transformedCode.length > 0, "Should produce output");
+      // Should NOT have hoisted regex variables
+      assert.ok(
+        !transformedCode.includes("const __regex_"),
+        "Should not hoist regex when hoistRegex is false"
+      );
+    });
+
+    test("reusableValidators: false generates inline validation", () => {
+      const fileName = "test/test.temp.ts";
+      const input = `
+function checkString(s: string): string {
+  return s;
+}`;
+      const transformer = createFullContextTransformer(fileName, input, { reusableValidators: false });
+      const transformedCode = transformer.transform(fileName, "typia");
+
+      // Should not have __typical_assert_ variables (those are for reusable mode)
+      assert.ok(
+        !transformedCode.includes("const __typical_assert_"),
+        "Should not have reusable validator variable declarations"
+      );
+      // Should still have typia's validation logic
+      assert.ok(
+        transformedCode.includes("__typia_transform__"),
+        "Should contain typia validation"
+      );
+    });
+
+    test("validateFunctions: false skips all function validation", () => {
+      const fileName = "test/test.temp.ts";
+      const input = `
+function noValidation(n: number): number {
+  return n;
+}`;
+      const transformer = createFullContextTransformer(fileName, input, {
+        reusableValidators: true,
+        validateFunctions: false
+      });
+      const transformedCode = transformer.transform(fileName, "typia");
+
+      // With validateFunctions: false, no typia calls should be generated for functions
+      // So the output should not contain __typical_assert_ or typia validation imports
+      assert.ok(
+        !transformedCode.includes("__typical_assert_"),
+        "Should not have validators when validateFunctions is false"
+      );
+      assert.ok(
+        !transformedCode.includes("__typia_transform__"),
+        "Should not have typia imports when validateFunctions is false"
+      );
+    });
+
+    test("multiple primitive parameters all get validated", () => {
+      const fileName = "test/test.temp.ts";
+      const input = `
+function multiParam(a: string, b: number, c: boolean): string {
+  return a;
+}`;
+      const transformer = createFullContextTransformer(fileName, input, { reusableValidators: true });
+      const transformedCode = transformer.transform(fileName, "typia");
+
+      // Should have typia validation for all three types
+      assert.ok(
+        transformedCode.includes("__typia_transform__"),
+        "Should contain typia validation"
+      );
+      // Should have validators for string, number, boolean
+      assert.ok(
+        transformedCode.includes("__typical_assert_string") &&
+        transformedCode.includes("__typical_assert_number") &&
+        transformedCode.includes("__typical_assert_boolean"),
+        "Should have validators for all primitive types"
+      );
+    });
+
+    test("interface types are fully transformed by typia", () => {
+      const fileName = "test/test.temp.ts";
+      const input = `
+interface User {
+  name: string;
+  age: number;
+}
+function validateUser(user: User): User {
+  return user;
+}`;
+      const transformer = createFullContextTransformer(fileName, input, { reusableValidators: true });
+      const transformedCode = transformer.transform(fileName, "typia");
+
+      // typia.createAssert<T>() syntax should be expanded
+      assert.ok(
+        !transformedCode.includes("typia.createAssert<"),
+        "typia.createAssert<T>() should be transformed"
+      );
+      // Should contain property validation for User
+      assert.ok(
+        transformedCode.includes('"string" === typeof input.name') ||
+        transformedCode.includes("input.name"),
+        "Should validate name property"
+      );
+      assert.ok(
+        transformedCode.includes('"number" === typeof input.age') ||
+        transformedCode.includes("input.age"),
+        "Should validate age property"
+      );
+    });
+
+    test("array types are transformed by typia", () => {
+      const fileName = "test/test.temp.ts";
+      const input = `
+function processNumbers(nums: number[]): number[] {
+  return nums;
+}`;
+      const transformer = createFullContextTransformer(fileName, input, { reusableValidators: true });
+      const transformedCode = transformer.transform(fileName, "typia");
+
+      // typia.createAssert<T>() should be expanded
+      assert.ok(
+        !transformedCode.includes("typia.createAssert<"),
+        "typia.createAssert<T>() should be transformed"
+      );
+      // Should contain array check logic
+      assert.ok(
+        transformedCode.includes("Array.isArray"),
+        "Should contain Array.isArray check"
       );
     });
   });
