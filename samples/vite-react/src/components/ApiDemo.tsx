@@ -28,6 +28,7 @@ export function ApiDemo() {
         message: `Parsed successfully!\nID: ${parsed.id}\nName: ${parsed.name}\nActive: ${parsed.active}\n\nStringified: ${stringified}`
       })
     } catch (err) {
+      console.log(err)
       setResult({ type: 'error', message: err instanceof Error ? err.message : String(err) })
     }
   }

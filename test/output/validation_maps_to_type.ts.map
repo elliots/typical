@@ -1,0 +1,12 @@
+{
+  "version": 3,
+  "file": "test/output/validation_maps_to_type.ts",
+  "sources": [
+    "test/output/validation_maps_to_type.ts"
+  ],
+  "names": [],
+  "mappings": "AAAA;AAAqB;AAArB;AAAqB;AAAS;AAAA",
+  "sourcesContent": [
+    "function greet(name: string): string { return \"Hello \" + name; }"
+  ]
+}

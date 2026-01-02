@@ -1,6 +1,6 @@
 import { resolve, extname } from 'path'
-import type { TypicalConfig } from '@elliots/typical'
-import { TypicalTransformer } from '@elliots/typical'
+import type { TypicalConfig, TransformResult } from '@elliots/typical'
+import { TypicalTransformer, validateConfig } from '@elliots/typical'
 import { buildTimer } from './timing'
 import type { ProgramManager } from './program-manager'
 
@@ -8,16 +8,26 @@ import type { ProgramManager } from './program-manager'
 const TRANSFORM_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts'])
 
 /**
+ * Result of transformTypia function - compatible with unplugin transform hook.
+ */
+export interface TransformTypiaResult {
+  code: string
+  map?: object | null
+}
+
+/**
  * Transform a TypeScript file with Typical.
  *
  * Uses a shared ProgramManager for incremental compilation across files.
+ * Returns both code and source map for use with Vite/Rollup/Webpack.
  */
 export function transformTypia(
   id: string,
   source: string,
   config: TypicalConfig,
   programManager: ProgramManager,
-): string | undefined {
+  options: { sourceMap?: boolean } = {},
+): TransformTypiaResult | undefined {
   buildTimer.start('total-transform')
 
   // Only transform TypeScript files (skip virtual modules, JS files, etc.)
@@ -45,21 +55,29 @@ export function transformTypia(
     return undefined
   }
 
-  // Create transformer with this program
+  // Validate config (adjusts reusableValidators if source maps are enabled)
   buildTimer.start('create-transformer')
-  const transformer = new TypicalTransformer(config, program)
+  const validatedConfig = validateConfig(config)
+  const transformer = new TypicalTransformer(validatedConfig, program)
   buildTimer.end('create-transformer')
 
-  // Transform the file
+  // Determine if source maps should be generated
+  // Default to true for bundlers since they typically want source maps
+  const generateSourceMap = options.sourceMap ?? (config.sourceMap?.enabled ?? true)
+
+  // Transform the file with source map support
   buildTimer.start('transform')
-  const result = transformer.transform(sourceFile, 'js')
+  const result = transformer.transform(sourceFile, 'js', { sourceMap: generateSourceMap })
   buildTimer.end('transform')
 
   buildTimer.end('total-transform')
 
   if (process.env.DEBUG) {
-    console.log('[unplugin-typical] Transform output (first 1000 chars):', result.substring(0, 1000))
+    console.log('[unplugin-typical] Transform output (first 1000 chars):', result.code.substring(0, 1000))
   }
 
-  return result
+  return {
+    code: result.code,
+    map: result.map,
+  }
 }

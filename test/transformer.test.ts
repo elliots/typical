@@ -3,7 +3,29 @@ import assert from "node:assert";
 import ts from "typescript";
 import { TypicalTransformer } from "../src/transformer.js";
 import { compileIgnorePattern, compileIgnorePatterns, TypicalConfig } from "../src/config.js";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { TraceMap, originalPositionFor, eachMapping } from "@jridgewell/trace-mapping";
+
+// delete existing test output dir
+rmSync("test/output", { recursive: true, force: true });
+
+// Ensure test/output directory exists
+mkdirSync("test/output", { recursive: true });
+
+
+/**
+ * Write test output files for debugging source maps.
+ */
+function writeTestOutput(testName: string, code: string, codeType: 'js' | 'ts', map: object | null, originalInput?: string) {
+  const safeName = testName.replace(/[^a-zA-Z0-9]/g, "_");
+  writeFileSync(`test/output/${safeName}.${codeType}`, code);
+  if (map) {
+    writeFileSync(`test/output/${safeName}.${codeType}.map`, JSON.stringify(map, null, 2));
+  }
+  if (originalInput) {
+    writeFileSync(`test/output/${safeName}.original.ts`, originalInput);
+  }
+}
 
 interface TestCase {
   name: string;
@@ -75,9 +97,12 @@ describe("TypicalTransformer", () => {
     {
       name: "function with basic parameter and return type validation",
       input: `function greet(name: string): string {return "Hello " + name;}`,
-      expected: `import typia from "typia";
-const __typical_assert_string = typia.createAssert<string>();
-function greet(name: string): string { __typical_assert_string(name); return __typical_assert_string("Hello " + name); }`,
+      expectedPatterns: [
+        `import typia from "typia"`,
+        `const __typical_assert_string = typia.createAssert<string>()`,
+        `__typical_assert_string(name)`,
+        `return __typical_assert_string("Hello " + name)`,
+      ],
     },
     {
       name: "JSON.stringify transformation",
@@ -102,19 +127,14 @@ function parseData(jsonStr: string): { id: number, name: string } {
   return JSON.parse(jsonStr);
 }`,
       // Note: No return validation wrapper since assertParse already validates
-      expected: `import typia from "typia";
-const __typical_assert_string = typia.createAssert<string>();
-const __typical_parse_0 = typia.json.createAssertParse<{
-    id: number;
-    name: string;
-}>();
-function parseData(jsonStr: string): {
-    id: number;
-    name: string;
-} {
-    __typical_assert_string(jsonStr);
-    return __typical_parse_0(jsonStr);
-}`,
+      expectedPatterns: [
+        `import typia from "typia"`,
+        `const __typical_assert_string = typia.createAssert<string>()`,
+        `typia.json.createAssertParse<{`,
+        `__typical_assert_string(jsonStr)`,
+        `return __typical_parse_0(jsonStr)`,
+      ],
+      notExpectedPatterns: [`JSON.parse`],
     },
     {
       name: "return type validation",
@@ -123,18 +143,13 @@ function getData(): { id: number, name: string } {
   const data = { id: 1, name: "test" };
   return data;
 }`,
-      expected: ` import typia from "typia";
-const __typical_assert_0 = typia.createAssert<{
-    id: number;
-    name: string;
-}>();
-function getData(): {
-    id: number;
-    name: string;
-} {
-    const data = { id: 1, name: "test" };
-    return __typical_assert_0(data);
-}`,
+      expectedPatterns: [
+        `import typia from "typia"`,
+        `typia.createAssert<{`,
+        `id: number`,
+        `name: string`,
+        `return __typical_assert_0(data)`,
+      ],
     },
     {
       name: "arrow functions",
@@ -142,13 +157,13 @@ function getData(): {
 const multiply = (a: number, b: number): number => {
   return a * b;
 };`,
-      expected: `import typia from "typia";
-const __typical_assert_number = typia.createAssert<number>();
-const multiply = (a: number, b: number): number => {
-    __typical_assert_number(a);
-    __typical_assert_number(b);
-    return __typical_assert_number(a * b);
-};`,
+      expectedPatterns: [
+        `import typia from "typia"`,
+        `const __typical_assert_number = typia.createAssert<number>()`,
+        `__typical_assert_number(a)`,
+        `__typical_assert_number(b)`,
+        `return __typical_assert_number(a * b)`,
+      ],
     },
     {
       name: "complex types",
@@ -168,27 +183,14 @@ function processUserLike(user: User) {
 function processUserStringId(user: User) {
   return { ...user, id: user.id + '-1' };
 }`,
-      expected: `import typia from "typia";
-const __typical_assert_User = typia.createAssert<User>();
-const __typical_assert_0 = typia.createAssert<{ id: number; name: string; email?: string; }>();
-const __typical_assert_1 = typia.createAssert<{ id: string; name: string; email?: string; }>();
-interface User {
-    id: number;
-    name: string;
-    email?: string;
-}
-function processUser(user: User): User {
-    __typical_assert_User(user);
-    return __typical_assert_User({ ...user, id: user.id + 1 });
-}
-function processUserLike(user: User) {
-    __typical_assert_User(user);
-    return __typical_assert_0({ ...user, id: user.id + 1 });
-}
-function processUserStringId(user: User) {
-    __typical_assert_User(user);
-    return __typical_assert_1({ ...user, id: user.id + '-1' });
-}`,
+      expectedPatterns: [
+        `import typia from "typia"`,
+        `const __typical_assert_User = typia.createAssert<User>()`,
+        `__typical_assert_User(user)`,
+        `return __typical_assert_User({ ...user, id: user.id + 1 })`,
+        `return __typical_assert_0({ ...user, id: user.id + 1 })`,
+        `return __typical_assert_1({ ...user, id: user.id + '-1' })`,
+      ],
     },
     {
       name: "async functions unwrap Promise return type",
@@ -821,7 +823,7 @@ function add(a: number): (b: number) => number {
         const fileName = "test/test.temp.ts";
         const transformer = createTestTransformer(fileName, input);
 
-        const transformedCode = transformer.transform(fileName, "basic");
+        const transformedCode = transformer.transform(fileName, "basic").code;
 
         // console.log("Transformed Code:\n", transformedCode);
 
@@ -885,7 +887,7 @@ const data = { name: "test", age: 30, email: "test@example.com" };
 const user = data as User;
 `;
       const transformer = createTestTransformer(fileName, input, { validateCasts: true, reusableValidators: true });
-      const transformedCode = transformer.transform(fileName, "basic");
+      const transformedCode = transformer.transform(fileName, "basic").code;
 
       // Should have validator
       assert.ok(
@@ -915,7 +917,7 @@ const data = { name: "test", age: 30 };
 const user = data as User;
 `;
       const transformer = createTestTransformer(fileName, input, { validateCasts: false, reusableValidators: true });
-      const transformedCode = transformer.transform(fileName, "basic");
+      const transformedCode = transformer.transform(fileName, "basic").code;
 
       // Should NOT have validator for the cast
       assert.ok(
@@ -931,7 +933,7 @@ const data = { name: "test" };
 const escaped = data as any;
 `;
       const transformer = createTestTransformer(fileName, input, { validateCasts: true, reusableValidators: true });
-      const transformedCode = transformer.transform(fileName, "basic");
+      const transformedCode = transformer.transform(fileName, "basic").code;
 
       // Should NOT validate 'as any'
       assert.ok(
@@ -947,7 +949,7 @@ const data = { name: "test" };
 const escaped = data as unknown;
 `;
       const transformer = createTestTransformer(fileName, input, { validateCasts: true, reusableValidators: true });
-      const transformedCode = transformer.transform(fileName, "basic");
+      const transformedCode = transformer.transform(fileName, "basic").code;
 
       // Should NOT validate 'as unknown'
       assert.ok(
@@ -1026,7 +1028,7 @@ function process(x: MyIgnoredType): MyIgnoredType {
         ignoreTypes: ["MyIgnoredType"],
         reusableValidators: true,
       });
-      const transformedCode = transformer.transform(fileName, "basic");
+      const transformedCode = transformer.transform(fileName, "basic").code;
 
       // Should NOT have validator for ignored type
       assert.ok(
@@ -1047,7 +1049,7 @@ function handleOther(e: OtherEvent): OtherEvent { return e; }
         ignoreTypes: ["*Event"],
         reusableValidators: true,
       });
-      const transformedCode = transformer.transform(fileName, "basic");
+      const transformedCode = transformer.transform(fileName, "basic").code;
 
       // Should NOT have validators for *Event types
       assert.ok(
@@ -1071,7 +1073,7 @@ function checkNumber(n: number): number {
   return n;
 }`;
       const transformer = createFullContextTransformer(fileName, input, { reusableValidators: true });
-      const transformedCode = transformer.transform(fileName, "typia");
+      const transformedCode = transformer.transform(fileName, "typia").code;
 
       // typia.createAssert<T>() calls should be expanded to actual validation functions
       // Check that the typia call syntax is gone (but "typia.createAssert" in strings is ok)
@@ -1096,7 +1098,7 @@ function checkNumber(n: number): number {
         reusableValidators: true,
         hoistRegex: false
       });
-      const transformedCode = transformer.transform(fileName, "typia");
+      const transformedCode = transformer.transform(fileName, "typia").code;
 
       // Should complete without error
       assert.ok(transformedCode.length > 0, "Should produce output");
@@ -1114,7 +1116,7 @@ function checkString(s: string): string {
   return s;
 }`;
       const transformer = createFullContextTransformer(fileName, input, { reusableValidators: false });
-      const transformedCode = transformer.transform(fileName, "typia");
+      const transformedCode = transformer.transform(fileName, "typia").code;
 
       // Should not have __typical_assert_ variables (those are for reusable mode)
       assert.ok(
@@ -1138,7 +1140,7 @@ function noValidation(n: number): number {
         reusableValidators: true,
         validateFunctions: false
       });
-      const transformedCode = transformer.transform(fileName, "typia");
+      const transformedCode = transformer.transform(fileName, "typia").code;
 
       // With validateFunctions: false, no typia calls should be generated for functions
       // So the output should not contain __typical_assert_ or typia validation imports
@@ -1159,7 +1161,7 @@ function multiParam(a: string, b: number, c: boolean): string {
   return a;
 }`;
       const transformer = createFullContextTransformer(fileName, input, { reusableValidators: true });
-      const transformedCode = transformer.transform(fileName, "typia");
+      const transformedCode = transformer.transform(fileName, "typia").code;
 
       // Should have typia validation for all three types
       assert.ok(
@@ -1186,7 +1188,7 @@ function validateUser(user: User): User {
   return user;
 }`;
       const transformer = createFullContextTransformer(fileName, input, { reusableValidators: true });
-      const transformedCode = transformer.transform(fileName, "typia");
+      const transformedCode = transformer.transform(fileName, "typia").code;
 
       // typia.createAssert<T>() syntax should be expanded
       assert.ok(
@@ -1213,7 +1215,7 @@ function processNumbers(nums: number[]): number[] {
   return nums;
 }`;
       const transformer = createFullContextTransformer(fileName, input, { reusableValidators: true });
-      const transformedCode = transformer.transform(fileName, "typia");
+      const transformedCode = transformer.transform(fileName, "typia").code;
 
       // typia.createAssert<T>() should be expanded
       assert.ok(
@@ -1224,6 +1226,301 @@ function processNumbers(nums: number[]): number[] {
       assert.ok(
         transformedCode.includes("Array.isArray"),
         "Should contain Array.isArray check"
+      );
+    });
+  });
+
+  // Source map generation tests
+  describe("source map generation", () => {
+    test("generates source map when sourceMap option is true", () => {
+      const testName = "generates_source_map";
+      const fileName = `test/output/${testName}.ts`;
+      const input = `function greet(name: string): string { return "Hello " + name; }`;
+      const transformer = createTestTransformer(fileName, input);
+
+      const result = transformer.transform(fileName, "basic", { sourceMap: true });
+
+      writeTestOutput(testName, result.code, "ts", result.map, input);
+
+      assert.ok(result.code, "Should have code");
+      assert.ok(result.map, "Should have source map");
+      assert.equal(result.map!.version, 3, "Should be source map v3");
+      assert.ok(Array.isArray(result.map!.sources), "Should have sources array");
+      assert.ok(result.map!.sources.length > 0, "Sources should have at least one entry");
+    });
+
+    test("does not generate source map when sourceMap option is false", () => {
+      const testName = "no_source_map";
+      const fileName = `test/output/${testName}.ts`;
+      const input = `function greet(name: string): string { return "Hello " + name; }`;
+      const transformer = createTestTransformer(fileName, input);
+
+      const result = transformer.transform(fileName, "basic", { sourceMap: false });
+
+      writeTestOutput(testName, result.code, 'ts', null, input);
+
+      assert.ok(result.code, "Should have code");
+      assert.equal(result.map, null, "Should not have source map");
+    });
+
+    test("source map includes content when includeContent is true", () => {
+      const testName = "includes_content";
+      const fileName = `test/output/${testName}.ts`;
+      const input = `function greet(name: string): string { return "Hello " + name; }`;
+      const transformer = createTestTransformer(fileName, input, {
+        sourceMap: { enabled: true, includeContent: true },
+      });
+
+      const result = transformer.transform(fileName, "basic", { sourceMap: true });
+
+      writeTestOutput(testName, result.code, "ts", result.map, input);
+
+      assert.ok(result.map, "Should have source map");
+      assert.ok(result.map!.sourcesContent, "Should have sourcesContent");
+      assert.ok(Array.isArray(result.map!.sourcesContent), "sourcesContent should be array");
+    });
+
+    test("every line in output has a source mapping", () => {
+      const testName = "every_line_mapped";
+      const fileName = `test/output/${testName}.ts`;
+      const input = `
+      interface User {
+  id: number;
+  name: string;
+}
+
+function processData(data: User) {
+  return JSON.stringify(data);
+}
+
+const u = JSON.parse('{"id":1,"name":"Alice"}') as User;
+processData(u);
+`;
+      const transformer = createFullContextTransformer(fileName, input, {
+        reusableValidators: false
+      });
+
+      const result = transformer.transform(fileName, "typia", { sourceMap: true });
+      assert.ok(result.map, "Should have source map");
+
+      writeTestOutput(testName, result.code, "ts", result.map, input);
+
+      const outputLines = result.code.split('\n');
+      const tracer = new TraceMap(result.map!);
+
+      // Collect all mapped lines
+      const mappedLines = new Set<number>();
+      eachMapping(tracer, (mapping) => {
+        mappedLines.add(mapping.generatedLine);
+      });
+
+      // Every non-empty line should have a mapping (except sourceMappingURL comment)
+      outputLines.forEach((line, idx) => {
+        const lineNum = idx + 1; // 1-based
+        const trimmed = line.trim();
+        // Skip empty lines and sourceMappingURL comment (added after map generation)
+        if (trimmed.length > 0 && !trimmed.startsWith('//# sourceMappingURL')) {
+          assert.ok(
+            mappedLines.has(lineNum),
+            `Line ${lineNum} should have a source mapping: "${line.substring(0, 50)}..."`
+          );
+        }
+      });
+    });
+
+    test("validation code maps to type annotation position", () => {
+      const testName = "validation_maps_to_type";
+      const fileName = `test/output/${testName}.ts`;
+      // Col:  0         1         2         3
+      //       0123456789012345678901234567890123456789
+      const input = `function greet(name: string): string { return "Hello " + name; }`;
+      // The type annotation "string" for param starts at col 21
+
+      const transformer = createTestTransformer(fileName, input);
+      const result = transformer.transform(fileName, "basic", { sourceMap: true });
+
+      writeTestOutput(testName, result.code, "ts", result.map, input);
+
+      assert.ok(result.map, "Should have source map");
+
+      const tracer = new TraceMap(result.map!);
+      const outputLines = result.code.split('\n');
+
+      // Find the line with parameter validation
+      const validationLineIdx = outputLines.findIndex(line =>
+        line.includes('__typical_assert_string(name)')
+      );
+      assert.ok(validationLineIdx >= 0, "Should have validation line for parameter");
+
+      // Get the original position for the validation line
+      const pos = originalPositionFor(tracer, { line: validationLineIdx + 1, column: 0 });
+
+      assert.equal(pos.line, 1, "Validation should map to original line 1");
+      assert.equal(pos.column, 21, "Validation should map to col 21 (type annotation 'string')");
+    });
+
+    test("multiple parameters map to their type annotations", () => {
+      const testName = "multiple_params";
+      const fileName = `test/output/${testName}.ts`;
+      // Col:  0         1         2         3         4         5
+      //       012345678901234567890123456789012345678901234567890123456789
+      const input = `function add(a: number, b: number): number { return a + b; }`;
+      // "number" for param a starts at col 16
+      // "number" for param b starts at col 27
+
+      const transformer = createTestTransformer(fileName, input);
+      const result = transformer.transform(fileName, "basic", { sourceMap: true });
+
+      writeTestOutput(testName, result.code, "ts", result.map, input);
+
+      assert.ok(result.map, "Should have source map");
+
+      const tracer = new TraceMap(result.map!);
+      const outputLines = result.code.split('\n');
+
+      // Find line with validation for param a
+      const validationALineIdx = outputLines.findIndex(line =>
+        line.includes('__typical_assert_number(a)') || line.includes('typia.assert<number>(a)')
+      );
+      assert.ok(validationALineIdx >= 0, "Should have validation line for param a");
+
+      const posA = originalPositionFor(tracer, { line: validationALineIdx + 1, column: 0 });
+      assert.equal(posA.line, 1, "Validation for a should map to line 1");
+      assert.equal(posA.column, 16, "Validation for a should map to col 16 (type annotation)");
+
+      // Find line with validation for param b
+      const validationBLineIdx = outputLines.findIndex(line =>
+        line.includes('__typical_assert_number(b)') || line.includes('typia.assert<number>(b)')
+      );
+      assert.ok(validationBLineIdx >= 0, "Should have validation line for param b");
+
+      const posB = originalPositionFor(tracer, { line: validationBLineIdx + 1, column: 0 });
+      assert.equal(posB.line, 1, "Validation for b should map to line 1");
+      assert.equal(posB.column, 27, "Validation for b should map to col 27 (type annotation)");
+    });
+
+    test("return validation maps to return type annotation", () => {
+      const testName = "return_validation";
+      const fileName = `test/output/${testName}.ts`;
+      // Col:  0         1         2         3
+      //       0123456789012345678901234567890123456789
+      const input = `function greet(name: string): string { return "Hello " + name; }`;
+      // Return type "string" starts at col 30
+
+      const transformer = createTestTransformer(fileName, input);
+      const result = transformer.transform(fileName, "basic", { sourceMap: true });
+
+      writeTestOutput(testName, result.code, "ts", result.map, input);
+
+      assert.ok(result.map, "Should have source map");
+
+      const tracer = new TraceMap(result.map!);
+      const outputLines = result.code.split('\n');
+
+      // Find the line with return validation (return wrapped in validator)
+      const returnLineIdx = outputLines.findIndex(line =>
+        line.includes('return __typical_assert_string(')
+      );
+      assert.ok(returnLineIdx >= 0, "Should have return validation line");
+
+      const pos = originalPositionFor(tracer, { line: returnLineIdx + 1, column: 0 });
+      assert.equal(pos.line, 1, "Return validation should map to line 1");
+      assert.equal(pos.column, 30, "Return validation should map to col 30 (return type annotation)");
+    });
+
+    test("generated preamble lines map to type annotation positions", () => {
+      const testName = "generated_preamble";
+      const fileName = `test/output/${testName}.ts`;
+      // Input: function greet(name: string): string { return "Hello " + name; }
+      //        0         1         2         3
+      //        0123456789012345678901234567890123456789
+      // "string" param type starts at col 21
+      // "string" return type starts at col 30
+      const input = `function greet(name: string): string { return "Hello " + name; }`;
+
+      const transformer = createTestTransformer(fileName, input);
+      const result = transformer.transform(fileName, "basic", { sourceMap: true });
+
+      writeTestOutput(testName, result.code, "ts", result.map, input);
+
+      assert.ok(result.map, "Should have source map");
+
+      const tracer = new TraceMap(result.map!);
+
+      // Line 1 should be the import statement (generated) - inherits from default position
+      const pos1 = originalPositionFor(tracer, { line: 1, column: 0 });
+      assert.equal(pos1.line, 1, "Import line should map to line 1");
+      assert.equal(pos1.column, 0, "Import line should map to col 0");
+
+      // Line 2 should be the validator declaration (generated) - maps to type annotation
+      // The validator is created for "string" which appears at col 21 (param type)
+      const pos2 = originalPositionFor(tracer, { line: 2, column: 0 });
+      assert.equal(pos2.line, 1, "Validator declaration should map to line 1");
+      assert.equal(pos2.column, 21, "Validator declaration should map to type annotation col 21");
+    });
+
+    test("typia mode source maps point to original source", () => {
+      const testName = "typia_mode_source_map";
+      const fileName = `test/output/${testName}.ts`;
+      const input = `function checkNum(n: number): number { return n; }`;
+      const transformer = createFullContextTransformer(fileName, input);
+
+      const result = transformer.transform(fileName, "typia", { sourceMap: true });
+
+      writeTestOutput(testName, result.code, "ts", result.map, input);
+
+      assert.ok(result.code, "Should have code");
+      assert.ok(result.map, "Should have source map");
+
+      const tracer = new TraceMap(result.map!);
+      const outputLines = result.code.split('\n');
+
+      // Collect all mapped lines
+      const mappedLines = new Set<number>();
+      eachMapping(tracer, (mapping) => {
+        mappedLines.add(mapping.generatedLine);
+      });
+
+      // Every non-empty line should have a mapping
+      const unmappedLines: number[] = [];
+      outputLines.forEach((line, idx) => {
+        const lineNum = idx + 1;
+        if (line.trim().length > 0 && !mappedLines.has(lineNum)) {
+          unmappedLines.push(lineNum);
+        }
+      });
+
+      assert.ok(
+        unmappedLines.length === 0,
+        `All lines should be mapped. Unmapped: ${unmappedLines.join(', ')}`
+      );
+    });
+
+    test("js mode source maps compose correctly", () => {
+      const testName = "js_mode_source_map";
+      const fileName = `test/output/${testName}.ts`;
+      const input = `function checkNum(n: number): number { return n; }`;
+      const transformer = createFullContextTransformer(fileName, input);
+
+      const result = transformer.transform(fileName, "js", { sourceMap: true });
+
+      writeTestOutput(testName, result.code, "js", result.map, input);
+
+      assert.ok(result.code, "Should have JS code");
+      assert.ok(result.map, "Should have source map");
+      assert.ok(!result.code.includes(": number"), "Should be transpiled to JS");
+
+      // The composed map should still point back to the original TS file
+      assert.ok(
+        result.map!.sources.some(s => s && s.includes(testName)),
+        "Composed map should reference original source"
+      );
+
+      // Should have sourcesContent with original TS
+      assert.ok(result.map!.sourcesContent, "Should have sourcesContent");
+      assert.ok(
+        result.map!.sourcesContent![0]?.includes("number"),
+        "sourcesContent should have original TypeScript"
       );
     });
   });

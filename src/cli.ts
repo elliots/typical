@@ -5,8 +5,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { TypicalTransformer } from './transformer.js';
 import * as ts from 'typescript';
-import { loadConfig } from './config.js';
+import { loadConfig, validateConfig } from './config.js';
 import { shouldIncludeFile } from './file-filter.js';
+import { inlineSourceMapComment, externalSourceMapComment } from './source-map.js';
 
 const program = new Command();
 
@@ -22,24 +23,57 @@ program
   .option('-o, --output <file>', 'Output file')
   .option('-c, --config <file>', 'Config file path', 'typical.json')
   .option('-m, --mode <mode>', 'Transformation mode:  basic, typia, js', 'basic')
-  .action(async (file: string, options: { output?: string; config?: string; mode?: 'basic' | 'typia' | 'js' }) => {
+  .option('--source-map', 'Generate external source map file')
+  .option('--inline-source-map', 'Include inline source map in output')
+  .option('--no-source-map', 'Disable source map generation')
+  .action(async (file: string, options: {
+    output?: string;
+    config?: string;
+    mode?: 'basic' | 'typia' | 'js';
+    sourceMap?: boolean;
+    inlineSourceMap?: boolean;
+  }) => {
     try {
-      const config = loadConfig(options.config);
+      const config = validateConfig(loadConfig(options.config));
       const transformer = new TypicalTransformer(config);
-      
+
       if (!fs.existsSync(file)) {
         console.error(`File not found: ${file}`);
         process.exit(1);
       }
 
-      console.log(`Transforming ${file}...`);
-      const transformedCode = transformer.transform(path.resolve(file), options.mode ?? 'basic');
+      // Determine source map behavior
+      const generateSourceMap = options.inlineSourceMap || options.sourceMap !== false;
 
-      const outputFilename = options.output ? path.resolve(options.output) : options.mode === 'js' ? file + '.js' : file + '.transformed.ts';
-      
-      const outputFile = options.output ? path.resolve(options.output) : file + '.transformed.ts';
-      fs.writeFileSync(outputFile, transformedCode);
-      
+      console.log(`Transforming ${file}...`);
+      const result = transformer.transform(path.resolve(file), options.mode ?? 'basic', {
+        sourceMap: generateSourceMap,
+      });
+
+      // Determine output file path
+      const outputFile = options.output
+        ? path.resolve(options.output)
+        : options.mode === 'js'
+          ? file.replace(/\.tsx?$/, '.js')
+          : file + '.transformed.ts';
+
+      let outputCode = result.code;
+
+      // Handle source maps
+      if (result.map) {
+        if (options.inlineSourceMap) {
+          // Inline source map as data URL
+          outputCode += '\n' + inlineSourceMapComment(result.map);
+        } else if (options.sourceMap !== false) {
+          // Write external source map file
+          const mapFile = outputFile + '.map';
+          fs.writeFileSync(mapFile, JSON.stringify(result.map, null, 2));
+          outputCode += '\n' + externalSourceMapComment(path.basename(mapFile));
+          console.log(`Source map written to ${mapFile}`);
+        }
+      }
+
+      fs.writeFileSync(outputFile, outputCode);
       console.log(`Transformed code written to ${outputFile}`);
     } catch (error) {
       console.error('Transformation failed:', error);

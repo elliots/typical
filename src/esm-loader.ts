@@ -1,8 +1,11 @@
 import { fileURLToPath, pathToFileURL } from "url";
 import { existsSync } from "fs";
 import { TypicalTransformer } from "./transformer.js";
+import { inlineSourceMapComment } from "./source-map.js";
+import { loadConfig, validateConfig } from "./config.js";
 
-const transformer = new TypicalTransformer();
+const config = validateConfig(loadConfig());
+const transformer = new TypicalTransformer(config);
 
 /**
  * Resolve hook - rewrites .js imports to .ts if the .ts file exists
@@ -30,6 +33,7 @@ export async function resolve(specifier: string, context: any, nextResolve: any)
 
 /**
  * Load hook - transforms TypeScript files on the fly
+ * Includes inline source maps for proper error stack traces in Node.js
  */
 export async function load(url: string, context: any, nextLoad: any) {
   if (!url.endsWith(".ts")) {
@@ -38,10 +42,18 @@ export async function load(url: string, context: any, nextLoad: any) {
   const filePath = fileURLToPath(url);
 
   try {
-    const transformedCode = transformer.transform(filePath, 'js');
+    // Transform with source map support enabled
+    const result = transformer.transform(filePath, 'js', { sourceMap: true });
+
+    // Append inline source map for Node.js source map support
+    let source = result.code;
+    if (result.map) {
+      source += '\n' + inlineSourceMapComment(result.map);
+    }
+
     return {
       format: "module",
-      source: transformedCode,
+      source,
       shortCircuit: true,
     };
   } catch (error) {

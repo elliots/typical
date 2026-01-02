@@ -35,18 +35,23 @@ npm add typical
 
 Optional: Create a `typical.json` file in your project root.
 
-If not provided, these default settings will be used.
+If not provided, these default settings will be used (optimized for development):
 
 ```json
 {
   "include": ["**/*.ts", "**/*.tsx"],
   "exclude": ["node_modules/**", "**/*.d.ts", "dist/**", "build/**"],
-  "reusableValidators": true,
+  "reusableValidators": false,
   "validateFunctions": true,
   "validateCasts": false,
   "hoistRegex": true,
   "ignoreDOMTypes": true,
-  "ignoreTypes": []
+  "ignoreTypes": [],
+  "sourceMap": {
+    "enabled": true,
+    "includeContent": true,
+    "inline": false
+  }
 }
 ```
 
@@ -56,13 +61,31 @@ If not provided, these default settings will be used.
 |--------|---------|-------------|
 | `include` | `["**/*.ts", "**/*.tsx"]` | Glob patterns for files to transform |
 | `exclude` | `["node_modules/**", "**/*.d.ts", "dist/**", "build/**"]` | Glob patterns for files to skip |
-| `reusableValidators` | `true` | Create shared validators for identical types (smaller output, allows reuse) |
+| `reusableValidators` | `false` | Create shared validators for identical types (smaller output). Incompatible with source maps. |
 | `validateFunctions` | `true` | Validate function parameters and return types at runtime |
 | `validateCasts` | `false` | Validate type assertions (`as Type`) at runtime |
 | `hoistRegex` | `true` | Hoist regex patterns to top-level constants (improves performance) |
 | `ignoreDOMTypes` | `true` | Skip validation for DOM types (Document, Element, etc.) |
 | `ignoreTypes` | `[]` | Type patterns to skip validation for (supports wildcards, e.g., `["React.*"]`) |
+| `sourceMap.enabled` | `true` | Generate source maps for transformed code |
+| `sourceMap.includeContent` | `true` | Include original source content in source maps |
+| `sourceMap.inline` | `false` | Use inline source maps (data URL) instead of external files |
 | `debug.writeIntermediateFiles` | `false` | Write `.typical.ts` files showing code before typia transform |
+
+### Production Configuration
+
+For production builds, disable source maps and enable reusable validators for smaller output:
+
+```json
+{
+  "reusableValidators": true,
+  "sourceMap": {
+    "enabled": false
+  }
+}
+```
+
+Note: `reusableValidators` and `sourceMap.enabled` are mutually exclusive. Source maps require inline validators so each validation call can map back to its original type annotation. If both are enabled, `reusableValidators` will be automatically disabled with a warning.
 
 ## Usage
 

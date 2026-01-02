@@ -2,6 +2,24 @@ export interface TypicalDebugConfig {
   writeIntermediateFiles?: boolean;
 }
 
+/**
+ * Configuration options for source map generation.
+ */
+export interface TypicalSourceMapConfig {
+  /**
+   * Generate source maps. Default: true
+   */
+  enabled?: boolean;
+  /**
+   * Include original source content in the map. Default: true
+   */
+  includeContent?: boolean;
+  /**
+   * Use inline source maps (data URL) instead of external files. Default: false
+   */
+  inline?: boolean;
+}
+
 export interface TypicalConfig {
   include?: string[];
   exclude?: string[];
@@ -27,6 +45,11 @@ export interface TypicalConfig {
    * Default: true
    */
   validateFunctions?: boolean;
+  /**
+   * Source map generation settings.
+   * Controls whether and how source maps are generated for transformed code.
+   */
+  sourceMap?: TypicalSourceMapConfig;
 }
 
 /**
@@ -45,13 +68,18 @@ export interface CompiledIgnorePatterns {
 export const defaultConfig: TypicalConfig = {
   include: ["**/*.ts", "**/*.tsx"],
   exclude: ["node_modules/**", "**/*.d.ts", "dist/**", "build/**"],
-  reusableValidators: true,
+  reusableValidators: false, // Off by default for accurate source maps (set to true for production)
   validateCasts: false,
   validateFunctions: true,
   hoistRegex: true,
   ignoreDOMTypes: true,
   debug: {
     writeIntermediateFiles: false,
+  },
+  sourceMap: {
+    enabled: true, // On by default for debugging (set to false for production)
+    includeContent: true,
+    inline: false,
   },
 };
 
@@ -168,12 +196,12 @@ export function getCompiledIgnorePatterns(config: TypicalConfig): CompiledIgnore
 
 export function loadConfig(configPath?: string): TypicalConfig {
   const configFile = configPath || path.join(process.cwd(), 'typical.json');
-  
+
   if (fs.existsSync(configFile)) {
     try {
       const configContent = fs.readFileSync(configFile, 'utf8');
       const userConfig: Partial<TypicalConfig> = JSON.parse(configContent);
-      
+
       return {
         ...defaultConfig,
         ...userConfig,
@@ -185,4 +213,39 @@ export function loadConfig(configPath?: string): TypicalConfig {
   }
 
   return defaultConfig;
+}
+
+let warnedAboutSourceMaps = false;
+
+/**
+ * Validate and adjust config for consistency.
+ * Currently handles:
+ * - Disabling reusableValidators when source maps are enabled (required for accurate mappings)
+ *
+ * @param config The config to validate
+ * @returns Validated/adjusted config
+ */
+export function validateConfig(config: TypicalConfig): TypicalConfig {
+  let result = config;
+
+  // Source maps require inline validators (not reusable) because each validation
+  // call needs its own source map marker pointing to the correct type annotation.
+  // With reusable validators, the expanded typia code would all map to the validator
+  // declaration rather than the individual usage sites.
+  const sourceMapEnabled = config.sourceMap?.enabled !== false;
+  const reusableValidatorsEnabled = config.reusableValidators === true;
+
+  if (sourceMapEnabled && reusableValidatorsEnabled) {
+    if (!warnedAboutSourceMaps) {
+      warnedAboutSourceMaps = true;
+      console.warn(
+        "TYPICAL: Both sourceMap and reusableValidators are enabled. " +
+        "Disabling reusableValidators for accurate source mapping. " +
+        "For production builds, set sourceMap.enabled: false to use reusableValidators."
+      );
+    }
+    result = { ...result, reusableValidators: false };
+  }
+
+  return result;
 }

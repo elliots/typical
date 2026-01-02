@@ -1,0 +1,1 @@
+function checkNum(n: number): number { return n; }

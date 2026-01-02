@@ -1,20 +1,288 @@
 import ts from "typescript";
 import fs from "fs";
 import path from "path";
-import { loadConfig, TypicalConfig, getCompiledIgnorePatterns, CompiledIgnorePatterns } from "./config.js";
+import { loadConfig, validateConfig, TypicalConfig, getCompiledIgnorePatterns, CompiledIgnorePatterns } from "./config.js";
 import { shouldTransformFile } from "./file-filter.js";
 import { hoistRegexConstructors } from "./regex-hoister.js";
+import {
+  TransformResult,
+  composeSourceMaps,
+} from "./source-map.js";
+import type { EncodedSourceMap } from '@ampproject/remapping';
 
 import { transform as typiaTransform } from "typia/lib/transform.js";
 import { setupTsProgram } from "./setup.js";
 
+// Re-export TransformResult for consumers
+export type { TransformResult } from "./source-map.js";
+
 // Flags for typeToTypeNode to prefer type aliases over import() syntax
 const TYPE_NODE_FLAGS = ts.NodeBuilderFlags.NoTruncation | ts.NodeBuilderFlags.UseAliasDefinedOutsideCurrentScope;
+
+// Source map markers:
+// - @T:line:col - Type annotation marker (maps generated code to source type annotation)
+// - @L:line - Line marker (identity mapping - maps output line to source line)
+//
+// Lines with @T markers map to the specified type annotation position
+// Lines with @L markers establish identity mapping (output line N maps to source line N)
+// Lines without markers inherit from the most recent marker above
+//
+// Match single-line comment markers: //@T:line:col or //@L:line
+const TYPE_MARKER_REGEX = /\/\/@T:(\d+):(\d+)/g;
+const LINE_MARKER_REGEX = /\/\/@L:(\d+)/g;
+// Strip all markers
+const ALL_MARKERS_REGEX = /\/\/@[TL]:\d+(?::\d+)?\n?/g;
+
+/**
+ * Add a type annotation marker comment to a node.
+ * The marker encodes the original line:column position of the type annotation
+ * so validation errors can be traced back to the source.
+ *
+ * Uses a single-line comment (//) which forces a newline after it,
+ * ensuring each marked statement is on its own line for accurate source maps.
+ */
+function addSourceMapMarker<T extends ts.Node>(
+  node: T,
+  sourceFile: ts.SourceFile,
+  originalNode: ts.Node
+): T {
+  const pos = originalNode.getStart(sourceFile);
+  const { line, character } = sourceFile.getLineAndCharacterOfPosition(pos);
+  // Use 1-based line numbers for source maps
+  // Single-line comment forces a newline after it
+  const marker = `@T:${line + 1}:${character}`;
+  if (process.env.DEBUG) {
+    console.log(`TYPICAL: Adding source map marker //${marker}`);
+  }
+  const result = ts.addSyntheticLeadingComment(
+    node,
+    ts.SyntaxKind.SingleLineCommentTrivia,
+    marker,
+    true // trailing newline
+  );
+  if (process.env.DEBUG) {
+    const comments = ts.getSyntheticLeadingComments(result);
+    console.log(`TYPICAL: Synthetic comments after addSourceMapMarker:`, comments?.length);
+  }
+  return result;
+}
+
+/**
+ * Add a line marker comment to a node for identity mapping.
+ * The marker encodes the original line number so the output line maps to itself.
+ *
+ * Uses a single-line comment (//) which forces a newline after it.
+ */
+function addLineMarker<T extends ts.Node>(
+  node: T,
+  sourceFile: ts.SourceFile,
+  originalNode: ts.Node
+): T {
+  const pos = originalNode.getStart(sourceFile);
+  const { line } = sourceFile.getLineAndCharacterOfPosition(pos);
+  // Use 1-based line numbers for source maps
+  const marker = `@L:${line + 1}`;
+  if (process.env.DEBUG) {
+    console.log(`TYPICAL: Adding line marker //${marker}`);
+  }
+  return ts.addSyntheticLeadingComment(
+    node,
+    ts.SyntaxKind.SingleLineCommentTrivia,
+    marker,
+    true // trailing newline
+  );
+}
+
+/**
+ * Parse source map markers from code and build a source map.
+ * Markers are single-line comments on their own line:
+ * - //@T:line:col - Type annotation marker (maps to specific source position)
+ * - //@L:line - Line marker (identity mapping to source line, col 0)
+ *
+ * The marker applies to the NEXT line (the actual code statement).
+ * Lines without markers inherit from the most recent marker above.
+ * Returns the code with markers stripped and the generated source map.
+ */
+function parseMarkersAndBuildSourceMap(
+  code: string,
+  fileName: string,
+  originalSource: string,
+  includeContent: boolean
+): { code: string; map: EncodedSourceMap } {
+  const lines = code.split('\n');
+
+  // Current mapping position (inherited by unmarked lines)
+  let currentOrigLine = 1;
+  let currentOrigCol = 0;
+  let pendingMarker: { line: number; col: number } | null = null;
+
+  const mappings: Array<{ generatedLine: number; generatedCol: number; originalLine: number; originalCol: number }> = [];
+  let outputLineNum = 0; // 0-indexed output line counter (after stripping markers)
+
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx];
+
+    // Check for type annotation marker (@T:line:col)
+    TYPE_MARKER_REGEX.lastIndex = 0;
+    const typeMatch = TYPE_MARKER_REGEX.exec(line);
+
+    if (typeMatch) {
+      // This is a @T marker line - store the position for the next line
+      pendingMarker = {
+        line: parseInt(typeMatch[1], 10),
+        col: parseInt(typeMatch[2], 10),
+      };
+      // Don't output this line or create a mapping for it
+      continue;
+    }
+
+    // Check for line marker (@L:line)
+    LINE_MARKER_REGEX.lastIndex = 0;
+    const lineMatch = LINE_MARKER_REGEX.exec(line);
+
+    if (lineMatch) {
+      // This is a @L marker line - identity mapping (col 0)
+      pendingMarker = {
+        line: parseInt(lineMatch[1], 10),
+        col: 0,
+      };
+      // Don't output this line or create a mapping for it
+      continue;
+    }
+
+    // This is a code line - apply pending marker if any
+    if (pendingMarker) {
+      currentOrigLine = pendingMarker.line;
+      currentOrigCol = pendingMarker.col;
+      pendingMarker = null;
+    }
+
+    outputLineNum++;
+
+    // Create mapping for this line
+    mappings.push({
+      generatedLine: outputLineNum,
+      generatedCol: 0,
+      originalLine: currentOrigLine,
+      originalCol: currentOrigCol,
+    });
+  }
+
+  // Strip all markers from the code
+  const cleanCode = code.replace(ALL_MARKERS_REGEX, '');
+
+  // Build VLQ-encoded source map
+  const map = buildSourceMapFromMappings(mappings, fileName, originalSource, includeContent);
+
+  return { code: cleanCode, map };
+}
+
+/**
+ * Build a source map from a list of position mappings.
+ */
+function buildSourceMapFromMappings(
+  mappings: Array<{ generatedLine: number; generatedCol: number; originalLine: number; originalCol: number }>,
+  fileName: string,
+  originalSource: string,
+  includeContent: boolean
+): EncodedSourceMap {
+  // Group mappings by generated line
+  const lineMap = new Map<number, Array<{ generatedCol: number; originalLine: number; originalCol: number }>>();
+  for (const m of mappings) {
+    if (!lineMap.has(m.generatedLine)) {
+      lineMap.set(m.generatedLine, []);
+    }
+    lineMap.get(m.generatedLine)!.push({
+      generatedCol: m.generatedCol,
+      originalLine: m.originalLine,
+      originalCol: m.originalCol,
+    });
+  }
+
+  // Build VLQ-encoded mappings string
+  const maxLine = Math.max(...mappings.map(m => m.generatedLine), 0);
+  const mappingLines: string[] = [];
+
+  let prevGenCol = 0;
+  let prevOrigLine = 0;
+  let prevOrigCol = 0;
+
+  for (let line = 1; line <= maxLine; line++) {
+    const lineMappings = lineMap.get(line);
+    if (!lineMappings || lineMappings.length === 0) {
+      mappingLines.push('');
+      continue;
+    }
+
+    // Sort by generated column
+    lineMappings.sort((a, b) => a.generatedCol - b.generatedCol);
+
+    const segments: string[] = [];
+    prevGenCol = 0; // Reset for each line
+
+    for (const m of lineMappings) {
+      // VLQ encode: [genCol, sourceIdx=0, origLine, origCol]
+      const segment = vlqEncode([
+        m.generatedCol - prevGenCol,
+        0, // source index (we only have one source)
+        (m.originalLine - 1) - prevOrigLine, // 0-based, relative
+        m.originalCol - prevOrigCol,
+      ]);
+      segments.push(segment);
+
+      prevGenCol = m.generatedCol;
+      prevOrigLine = m.originalLine - 1;
+      prevOrigCol = m.originalCol;
+    }
+
+    mappingLines.push(segments.join(','));
+  }
+
+  const map: EncodedSourceMap = {
+    version: 3,
+    file: fileName,
+    sources: [fileName],
+    names: [],
+    mappings: mappingLines.join(';'),
+  };
+
+  if (includeContent) {
+    map.sourcesContent = [originalSource];
+  }
+
+  return map;
+}
+
+// VLQ encoding for source maps
+const VLQ_BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const VLQ_BASE = 32;
+const VLQ_CONTINUATION_BIT = 32;
+
+function vlqEncode(values: number[]): string {
+  return values.map(vlqEncodeInteger).join('');
+}
+
+function vlqEncodeInteger(value: number): string {
+  let result = '';
+  let vlq = value < 0 ? ((-value) << 1) | 1 : value << 1;
+
+  do {
+    let digit = vlq & 31;
+    vlq >>>= 5;
+    if (vlq > 0) {
+      digit |= VLQ_CONTINUATION_BIT;
+    }
+    result += VLQ_BASE64[digit];
+  } while (vlq > 0);
+
+  return result;
+}
 
 export interface TransformContext {
   ts: typeof ts;
   factory: ts.NodeFactory;
   context: ts.TransformationContext;
+  sourceFile: ts.SourceFile;
 }
 
 /**
@@ -200,11 +468,19 @@ export class TypicalTransformer {
     );
   }
 
+  /**
+   * Transform options for controlling source map generation.
+   */
   public transform(
     sourceFile: ts.SourceFile | string,
     mode: "basic" | "typia" | "js",
-    skippedTypes: Set<string> = new Set()
-  ): string {
+    options: {
+      sourceMap?: boolean;
+      skippedTypes?: Set<string>;
+    } = {}
+  ): TransformResult {
+    const { sourceMap = false, skippedTypes = new Set() } = options;
+
     if (typeof sourceFile === "string") {
       const file = this.program.getSourceFile(sourceFile);
       if (!file) {
@@ -213,51 +489,156 @@ export class TypicalTransformer {
       sourceFile = file;
     }
 
+    const fileName = sourceFile.fileName;
+    const originalSource = sourceFile.getFullText();
     const printer = this.ts.createPrinter();
+    const includeContent = this.config.sourceMap?.includeContent ?? true;
 
-    // Phase 1: typical's own transformations only (no typia)
+    // Phase 1: typical's own transformations (adds source map markers as comments)
     const typicalTransformer = this.getTypicalOnlyTransformer(skippedTypes);
     const phase1Result = this.ts.transform(sourceFile, [typicalTransformer]);
     let transformedCode = printer.printFile(phase1Result.transformed[0]);
+    if (process.env.DEBUG) {
+      console.log("TYPICAL: After phase1 print (first 500):", transformedCode.substring(0, 500));
+      console.log("TYPICAL: Contains //@T:", transformedCode.includes("//@T:"));
+    }
     phase1Result.dispose();
 
     if (mode === "basic") {
-      return transformedCode;
+      // For basic mode, parse markers and build source map, then strip markers
+      if (sourceMap) {
+        const { code, map } = parseMarkersAndBuildSourceMap(
+          transformedCode,
+          fileName,
+          originalSource,
+          includeContent
+        );
+        return { code, map };
+      }
+      // No source map requested - just strip markers
+      return {
+        code: transformedCode.replace(ALL_MARKERS_REGEX, ''),
+        map: null,
+      };
     }
 
     // Phase 2: if code has typia calls, run typia transformer in its own context
+    // The markers survive through typia since they're comments
     if (transformedCode.includes("typia.")) {
       const result = this.applyTypiaTransform(sourceFile.fileName, transformedCode, printer);
-      if (typeof result === 'object' && result.retry) {
+      if (typeof result === 'object' && 'retry' in result && result.retry) {
         // Typia failed on a type - add to skipped and retry the whole transform
         skippedTypes.add(result.failedType);
         // Clear validator caches since we're retrying
         this.typeValidators.clear();
         this.typeStringifiers.clear();
         this.typeParsers.clear();
-        return this.transform(sourceFile, mode, skippedTypes);
+        return this.transform(sourceFile, mode, { sourceMap, skippedTypes });
       }
-      transformedCode = result as string;
+      transformedCode = (result as { code: string }).code;
     }
 
     if (mode === "typia") {
-      return transformedCode;
+      // For typia mode, parse markers and build source map, then strip markers
+      if (sourceMap) {
+        const { code, map } = parseMarkersAndBuildSourceMap(
+          transformedCode,
+          fileName,
+          originalSource,
+          includeContent
+        );
+        return { code, map };
+      }
+      // No source map requested - just strip markers
+      return {
+        code: transformedCode.replace(ALL_MARKERS_REGEX, ''),
+        map: null,
+      };
     }
 
-    // Mode "js" - transpile to JavaScript
+    // Mode "js" - first parse markers to build our source map, then transpile
+    let typicalMap: EncodedSourceMap | null = null;
+    if (sourceMap) {
+      const parsed = parseMarkersAndBuildSourceMap(
+        transformedCode,
+        fileName,
+        originalSource,
+        includeContent
+      );
+      transformedCode = parsed.code;
+      typicalMap = parsed.map;
+    } else {
+      // Strip markers even without source map
+      transformedCode = transformedCode.replace(ALL_MARKERS_REGEX, '');
+    }
+
+    // Transpile to JavaScript with source map support
+    const compilerOptions = {
+      ...this.program.getCompilerOptions(),
+      sourceMap: sourceMap,
+      inlineSourceMap: false,
+      inlineSources: false,
+    };
+
     const compileResult = ts.transpileModule(transformedCode, {
-      compilerOptions: this.program.getCompilerOptions(),
+      compilerOptions,
+      fileName,
     });
 
-    return compileResult.outputText;
+    // Compose the two source maps: typical -> original AND js -> typical
+    if (sourceMap && typicalMap) {
+      let jsMap: EncodedSourceMap | null = null;
+      if (compileResult.sourceMapText) {
+        try {
+          jsMap = JSON.parse(compileResult.sourceMapText) as EncodedSourceMap;
+          jsMap.sources = [fileName];
+        } catch {
+          // Failed to parse, continue without
+        }
+      }
+
+      // Compose maps: jsMap traces JS->TS, typicalMap traces TS->original
+      // Result traces JS->original
+      const composedMap = composeSourceMaps([typicalMap, jsMap], fileName);
+      if (composedMap && includeContent) {
+        composedMap.sourcesContent = [originalSource];
+      }
+
+      return {
+        code: compileResult.outputText,
+        map: composedMap,
+      };
+    }
+
+    return {
+      code: compileResult.outputText,
+      map: null,
+    };
+  }
+
+  /**
+   * Legacy transform method that returns just the code string.
+   * @deprecated Use transform() with options.sourceMap instead
+   */
+  public transformCode(
+    sourceFile: ts.SourceFile | string,
+    mode: "basic" | "typia" | "js",
+    skippedTypes: Set<string> = new Set()
+  ): string {
+    return this.transform(sourceFile, mode, { skippedTypes }).code;
   }
 
   /**
    * Apply typia transformation in a separate ts.transform() context.
    * This avoids mixing program contexts and eliminates the need for import recreation.
-   * Returns either the transformed code string, or a retry signal with the failed type.
+   * Returns either the transformed code, or a retry signal with the failed type.
+   * Source map markers in the code are preserved through the typia transformation.
    */
-  private applyTypiaTransform(fileName: string, code: string, printer: ts.Printer): string | { retry: true; failedType: string } {
+  private applyTypiaTransform(
+    fileName: string,
+    code: string,
+    printer: ts.Printer
+  ): { code: string } | { retry: true; failedType: string } {
     this.writeIntermediateFile(fileName, code);
 
     if (process.env.DEBUG) {
@@ -341,7 +722,9 @@ export class TypicalTransformer {
     // Check for untransformed typia calls as a fallback
     this.checkUntransformedTypiaCalls(finalCode, fileName);
 
-    return finalCode;
+    // Source map markers (@T:line:col) are preserved through typia transformation
+    // and will be parsed later in the transform() method
+    return { code: finalCode };
   }
 
   /**
@@ -352,11 +735,6 @@ export class TypicalTransformer {
     return (context: ts.TransformationContext) => {
       const factory = context.factory;
       const typeChecker = this.program.getTypeChecker();
-      const transformContext: TransformContext = {
-        ts: this.ts,
-        factory,
-        context,
-      };
 
       return (sourceFile: ts.SourceFile) => {
         // Check if this file should be transformed based on include/exclude patterns
@@ -367,6 +745,13 @@ export class TypicalTransformer {
         if (process.env.DEBUG) {
           console.log("TYPICAL: processing ", sourceFile.fileName);
         }
+
+        const transformContext: TransformContext = {
+          ts: this.ts,
+          factory,
+          context,
+          sourceFile,
+        };
 
         return this.transformSourceFile(sourceFile, transformContext, typeChecker, skippedTypes);
       };
@@ -384,11 +769,6 @@ export class TypicalTransformer {
     return (context: ts.TransformationContext) => {
       const factory = context.factory;
       const typeChecker = this.program.getTypeChecker();
-      const transformContext: TransformContext = {
-        ts: this.ts,
-        factory,
-        context,
-      };
 
       return (sourceFile: ts.SourceFile) => {
         // Check if this file should be transformed based on include/exclude patterns
@@ -399,6 +779,13 @@ export class TypicalTransformer {
         if (process.env.DEBUG) {
           console.log("TYPICAL: processing ", sourceFile.fileName);
         }
+
+        const transformContext: TransformContext = {
+          ts: this.ts,
+          factory,
+          context,
+          sourceFile,
+        };
 
         // Apply typical's transformations
         let transformedSourceFile = this.transformSourceFile(
@@ -932,8 +1319,11 @@ export class TypicalTransformer {
               undefined,
               [paramIdentifier]
             );
-            const assertCall =
+            let assertCall: ts.Statement =
               ctx.factory.createExpressionStatement(validatorCall);
+
+            // Add source map marker pointing to the parameter's type annotation
+            assertCall = addSourceMapMarker(assertCall, ctx.sourceFile, param.type!);
 
             validationStatements.push(assertCall);
           } else {
@@ -949,8 +1339,11 @@ export class TypicalTransformer {
               [param.type],
               [paramIdentifier]
             );
-            const assertCall =
+            let assertCall: ts.Statement =
               ctx.factory.createExpressionStatement(callExpression);
+
+            // Add source map marker pointing to the parameter's type annotation
+            assertCall = addSourceMapMarker(assertCall, ctx.sourceFile, param.type!);
 
             validationStatements.push(assertCall);
           }
@@ -1144,7 +1537,12 @@ export class TypicalTransformer {
                 [validatorExpr]
               );
 
-              return ctx.factory.updateReturnStatement(node, thenCall);
+              let updatedReturn = ctx.factory.updateReturnStatement(node, thenCall);
+              // Add source map marker pointing to the return type annotation
+              if (returnType && returnType.pos >= 0) {
+                updatedReturn = addSourceMapMarker(updatedReturn, ctx.sourceFile, returnType);
+              }
+              return updatedReturn;
             }
 
             // For async functions, we need to await the expression before validating
@@ -1176,7 +1574,12 @@ export class TypicalTransformer {
                 [expressionToValidate]
               );
 
-              return ctx.factory.updateReturnStatement(node, validatorCall);
+              let updatedReturn = ctx.factory.updateReturnStatement(node, validatorCall);
+              // Add source map marker pointing to the return type annotation
+              if (returnType && returnType.pos >= 0) {
+                updatedReturn = addSourceMapMarker(updatedReturn, ctx.sourceFile, returnType);
+              }
+              return updatedReturn;
             } else {
               // Use inline typia.assert calls
               const typiaIdentifier = ctx.factory.createIdentifier("typia");
@@ -1191,7 +1594,12 @@ export class TypicalTransformer {
                 [expressionToValidate]
               );
 
-              return ctx.factory.updateReturnStatement(node, callExpression);
+              let updatedReturn = ctx.factory.updateReturnStatement(node, callExpression);
+              // Add source map marker pointing to the return type annotation
+              if (returnType && returnType.pos >= 0) {
+                updatedReturn = addSourceMapMarker(updatedReturn, ctx.sourceFile, returnType);
+              }
+              return updatedReturn;
             }
           }
           return ctx.ts.visitEachChild(node, returnTransformer, ctx.context);
@@ -1313,7 +1721,197 @@ export class TypicalTransformer {
       }
     }
 
+    // Add line markers to original statements for source map identity mappings.
+    // This ensures original source lines map to themselves rather than inheriting
+    // from previous @T markers.
+    transformedSourceFile = this.addLineMarkersToStatements(transformedSourceFile, ctx, sourceFile);
+
     return transformedSourceFile;
+  }
+
+  /**
+   * Add @L line markers to nodes that have original source positions.
+   * This preserves identity mappings for original code, so lines from the source
+   * file map back to themselves rather than inheriting from generated code markers.
+   *
+   * We need to add markers to every node that will be printed on its own line,
+   * including nested members of interfaces, classes, etc.
+   */
+  private addLineMarkersToStatements(
+    transformedFile: ts.SourceFile,
+    ctx: TransformContext,
+    originalSourceFile: ts.SourceFile
+  ): ts.SourceFile {
+    const { ts, factory } = ctx;
+
+    // Check if a node already has a marker comment
+    const hasMarker = (node: ts.Node): boolean => {
+      const existingComments = ts.getSyntheticLeadingComments(node);
+      return existingComments?.some(c =>
+        c.text.startsWith('@T:') || c.text.startsWith('@L:')
+      ) ?? false;
+    };
+
+    // Check if node has valid original position
+    const hasOriginalPosition = (node: ts.Node): boolean => {
+      return node.pos >= 0 && node.end > node.pos;
+    };
+
+    // Recursively process a node and its children to add line markers
+    const addMarkersToNode = <T extends ts.Node>(node: T): T => {
+      // Handle interface declarations - add markers to members
+      if (ts.isInterfaceDeclaration(node)) {
+        const markedMembers = node.members.map(member => {
+          if (!hasMarker(member) && hasOriginalPosition(member)) {
+            return addLineMarker(member, originalSourceFile, member);
+          }
+          return member;
+        });
+        const updatedNode = factory.updateInterfaceDeclaration(
+          node,
+          node.modifiers,
+          node.name,
+          node.typeParameters,
+          node.heritageClauses,
+          markedMembers
+        );
+        // Also mark the interface itself
+        if (!hasMarker(updatedNode) && hasOriginalPosition(node)) {
+          return addLineMarker(updatedNode, originalSourceFile, node) as unknown as T;
+        }
+        return updatedNode as unknown as T;
+      }
+
+      // Handle type alias declarations
+      if (ts.isTypeAliasDeclaration(node)) {
+        if (!hasMarker(node) && hasOriginalPosition(node)) {
+          return addLineMarker(node, originalSourceFile, node);
+        }
+        return node;
+      }
+
+      // Handle class declarations - add markers to members
+      if (ts.isClassDeclaration(node)) {
+        const markedMembers = node.members.map(member => {
+          // Recursively process method bodies
+          let processedMember = member;
+          if (ts.isMethodDeclaration(member) && member.body) {
+            const markedBody = addMarkersToBlock(member.body);
+            if (markedBody !== member.body) {
+              processedMember = factory.updateMethodDeclaration(
+                member,
+                member.modifiers,
+                member.asteriskToken,
+                member.name,
+                member.questionToken,
+                member.typeParameters,
+                member.parameters,
+                member.type,
+                markedBody
+              );
+            }
+          }
+          if (!hasMarker(processedMember) && hasOriginalPosition(member)) {
+            return addLineMarker(processedMember, originalSourceFile, member);
+          }
+          return processedMember;
+        });
+        const updatedNode = factory.updateClassDeclaration(
+          node,
+          node.modifiers,
+          node.name,
+          node.typeParameters,
+          node.heritageClauses,
+          markedMembers
+        );
+        if (!hasMarker(updatedNode) && hasOriginalPosition(node)) {
+          return addLineMarker(updatedNode, originalSourceFile, node) as unknown as T;
+        }
+        return updatedNode as unknown as T;
+      }
+
+      // Handle function declarations - add markers to body statements
+      if (ts.isFunctionDeclaration(node) && node.body) {
+        const markedBody = addMarkersToBlock(node.body);
+        const updatedNode = factory.updateFunctionDeclaration(
+          node,
+          node.modifiers,
+          node.asteriskToken,
+          node.name,
+          node.typeParameters,
+          node.parameters,
+          node.type,
+          markedBody
+        );
+        if (!hasMarker(updatedNode) && hasOriginalPosition(node)) {
+          return addLineMarker(updatedNode, originalSourceFile, node) as unknown as T;
+        }
+        return updatedNode as unknown as T;
+      }
+
+      // Handle variable statements
+      if (ts.isVariableStatement(node)) {
+        if (!hasMarker(node) && hasOriginalPosition(node)) {
+          return addLineMarker(node, originalSourceFile, node);
+        }
+        return node;
+      }
+
+      // Handle expression statements
+      if (ts.isExpressionStatement(node)) {
+        if (!hasMarker(node) && hasOriginalPosition(node)) {
+          return addLineMarker(node, originalSourceFile, node);
+        }
+        return node;
+      }
+
+      // Handle return statements
+      if (ts.isReturnStatement(node)) {
+        if (!hasMarker(node) && hasOriginalPosition(node)) {
+          return addLineMarker(node, originalSourceFile, node);
+        }
+        return node;
+      }
+
+      // Handle if statements
+      if (ts.isIfStatement(node)) {
+        let thenStmt = node.thenStatement;
+        let elseStmt = node.elseStatement;
+
+        if (ts.isBlock(thenStmt)) {
+          thenStmt = addMarkersToBlock(thenStmt);
+        }
+        if (elseStmt && ts.isBlock(elseStmt)) {
+          elseStmt = addMarkersToBlock(elseStmt);
+        }
+
+        const updatedNode = factory.updateIfStatement(node, node.expression, thenStmt, elseStmt);
+        if (!hasMarker(updatedNode) && hasOriginalPosition(node)) {
+          return addLineMarker(updatedNode, originalSourceFile, node) as unknown as T;
+        }
+        return updatedNode as unknown as T;
+      }
+
+      // Default: just mark the node if it has original position
+      if (!hasMarker(node) && hasOriginalPosition(node)) {
+        return addLineMarker(node, originalSourceFile, node);
+      }
+
+      return node;
+    };
+
+    // Add markers to statements in a block
+    const addMarkersToBlock = (block: ts.Block): ts.Block => {
+      const markedStatements = block.statements.map(stmt => addMarkersToNode(stmt));
+      return factory.updateBlock(block, markedStatements);
+    };
+
+    // Process all top-level statements
+    const newStatements = factory.createNodeArray(
+      transformedFile.statements.map(stmt => addMarkersToNode(stmt))
+    );
+
+    return factory.updateSourceFile(transformedFile, newStatements);
   }
 
   public shouldTransformFile(fileName: string): boolean {
@@ -2002,13 +2600,20 @@ export class TypicalTransformer {
           []
         );
 
-        const declaration = factory.createVariableStatement(
+        let declaration: ts.Statement = factory.createVariableStatement(
           undefined,
           factory.createVariableDeclarationList(
             [factory.createVariableDeclaration(name, undefined, undefined, createCall)],
             ctx.ts.NodeFlags.Const
           )
         );
+
+        // Add source map marker pointing to the type node that triggered this validator
+        // This ensures all the expanded typia validation code maps back to the original type
+        if (typeNode.pos >= 0) {
+          declaration = addSourceMapMarker(declaration, ctx.sourceFile, typeNode);
+        }
+
         statements.push(declaration);
       }
     }

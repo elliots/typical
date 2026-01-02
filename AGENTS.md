@@ -81,18 +81,7 @@ The test file creates isolated TypeScript programs for each test case to avoid t
 
 ## Configuration Options
 
-Located in `src/config.ts`. Key options:
-
-| Option | Default | Purpose |
-|--------|---------|---------|
-| `validateFunctions` | `true` | Validate function params/returns |
-| `validateCasts` | `false` | Validate `as Type` assertions |
-| `reusableValidators` | `true` | Share validators for same types (smaller output) |
-| `hoistRegex` | `true` | Hoist regex to top-level constants |
-| `ignoreDOMTypes` | `true` | Skip DOM types (typia can't handle them) |
-| `ignoreTypes` | `[]` | Patterns to skip (e.g., `["React.*"]`) |
-| `include` | `["**/*.ts", "**/*.tsx"]` | Files to transform |
-| `exclude` | `["node_modules/**", ...]` | Files to skip |
+Located in `src/config.ts`.
 
 ## How Transformation Works
 
