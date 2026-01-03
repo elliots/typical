@@ -17,6 +17,8 @@ const mainPackages = [
   { name: '@elliots/typical-compiler', path: resolve(rootDir, 'packages/compiler') },
   { name: '@elliots/typical', path: rootDir },
   { name: '@elliots/unplugin-typical', path: resolve(rootDir, 'packages/unplugin') },
+  { name: '@elliots/bun-plugin-typical', path: resolve(rootDir, 'packages/bun-plugin') },
+  { name: '@elliots/typical-tsc-plugin', path: resolve(rootDir, 'packages/tsc-plugin') },
 ]
 
 function readJson(filePath) {
@@ -30,6 +32,19 @@ function writeJson(filePath, data) {
 function exec(cmd, options = {}) {
   console.log(`\n$ ${cmd}`)
   return execSync(cmd, { stdio: 'inherit', ...options })
+}
+
+/**
+ * Get the npm tag for a version.
+ * Prerelease versions (e.g., 0.2.0-beta.1) get a tag based on the prerelease identifier.
+ * Regular versions get 'latest'.
+ */
+function getNpmTag(version) {
+  const prereleaseMatch = version.match(/^\d+\.\d+\.\d+-([a-zA-Z]+)/)
+  if (prereleaseMatch) {
+    return prereleaseMatch[1] // e.g., 'beta', 'alpha', 'rc'
+  }
+  return 'latest'
 }
 
 function prompt(question) {
@@ -84,8 +99,9 @@ async function main() {
       break
     case '4':
       newVersion = await prompt(`Enter new version (current: ${currentVersion}): `)
-      if (!newVersion.match(/^\d+\.\d+\.\d+$/)) {
-        console.error('Invalid version format. Expected: x.y.z')
+      // Support semver with prerelease tags: x.y.z or x.y.z-prerelease.n
+      if (!newVersion.match(/^\d+\.\d+\.\d+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$/)) {
+        console.error('Invalid version format. Expected: x.y.z or x.y.z-tag.n (e.g., 0.2.0-beta.1)')
         process.exit(1)
       }
       break
@@ -117,9 +133,9 @@ async function main() {
     process.exit(0)
   }
 
-  // Build Go binaries for all platforms
-  console.log('\n==> Building Go binaries for all platforms...')
-  exec('./scripts/build-binaries.sh', { cwd: rootDir })
+  // Build everything (Go binaries for all platforms + TypeScript packages)
+  console.log('\n==> Building all packages...')
+  exec('pnpm run build:all', { cwd: rootDir })
 
   // Verify all binaries exist
   console.log('\n==> Verifying binaries...')
@@ -133,6 +149,15 @@ async function main() {
       process.exit(1)
     }
     console.log(`  ✓ ${pkg}`)
+  }
+
+  // Run tests before updating versions
+  console.log('\n==> Running tests...')
+  try {
+    exec('pnpm run test', { cwd: rootDir })
+  } catch (e) {
+    console.error('\nTests failed. Aborting publish.', e.message)
+    process.exit(1)
   }
 
   // Update versions in all package.json files
@@ -152,63 +177,86 @@ async function main() {
     const pkgJsonPath = resolve(pkg.path, 'package.json')
     const pkgJson = readJson(pkgJsonPath)
     pkgJson.version = newVersion
-
-    // Update optionalDependencies for compiler package
-    if (pkg.name === '@elliots/typical-compiler' && pkgJson.optionalDependencies) {
-      for (const depName of Object.keys(pkgJson.optionalDependencies)) {
-        if (depName.startsWith('@elliots/typical-compiler-')) {
-          pkgJson.optionalDependencies[depName] = newVersion
-        }
-      }
-    }
-
     writeJson(pkgJsonPath, pkgJson)
     console.log(`  Updated ${pkg.name} to ${newVersion}`)
   }
 
-  // Build TypeScript packages
-  console.log('\n==> Building TypeScript packages...')
-  exec('pnpm run build', { cwd: resolve(rootDir, 'packages/compiler') })
-  exec('pnpm run build', { cwd: rootDir })
-  exec('pnpm run build', { cwd: resolve(rootDir, 'packages/unplugin') })
-
-  // Run tests
-  console.log('\n==> Running tests...')
-  try {
-    exec('pnpm run test', { cwd: rootDir })
-  } catch (e) {
-    console.error('\nTests failed. Aborting publish.', e.message)
-    process.exit(1)
-  }
+  // Determine npm tag for this version
+  const npmTag = getNpmTag(newVersion)
+  console.log(`\n==> Using npm tag: ${npmTag}`)
 
   // Publish platform packages first
   console.log('\n==> Publishing platform packages...')
   for (const pkg of platformPackages) {
     const pkgDir = resolve(rootDir, 'packages', pkg)
-    exec('pnpm publish --no-git-checks --access public', { cwd: pkgDir })
+    exec(`pnpm publish --no-git-checks --access public --tag ${npmTag}`, { cwd: pkgDir })
   }
 
-  // Publish compiler package
+  // Publish compiler package (needs special handling to restore workspace refs)
   console.log('\n==> Publishing compiler package...')
-  exec('pnpm publish --no-git-checks --access public', { cwd: resolve(rootDir, 'packages/compiler') })
+  const compilerPath = resolve(rootDir, 'packages/compiler')
+  const compilerPkgPath = resolve(compilerPath, 'package.json')
+  const compilerPkg = readJson(compilerPkgPath)
+  const originalOptionalDeps = { ...compilerPkg.optionalDependencies }
+
+  // Update optionalDependencies to use published versions
+  for (const depName of Object.keys(compilerPkg.optionalDependencies || {})) {
+    if (depName.startsWith('@elliots/typical-compiler-')) {
+      compilerPkg.optionalDependencies[depName] = newVersion
+    }
+  }
+  writeJson(compilerPkgPath, compilerPkg)
+
+  try {
+    exec(`pnpm publish --no-git-checks --access public --tag ${npmTag}`, { cwd: compilerPath })
+  } finally {
+    // Restore workspace references
+    compilerPkg.optionalDependencies = originalOptionalDeps
+    writeJson(compilerPkgPath, compilerPkg)
+  }
 
   // Publish root package
   console.log('\n==> Publishing root package...')
-  exec('pnpm publish --no-git-checks --access public', { cwd: rootDir })
+  exec(`pnpm publish --no-git-checks --access public --tag ${npmTag}`, { cwd: rootDir })
 
-  // Update unplugin's dependency to use the published version instead of workspace
-  const unpluginPkgPath = resolve(rootDir, 'packages/unplugin/package.json')
-  const unpluginPkg = readJson(unpluginPkgPath)
-  const originalDep = unpluginPkg.dependencies['@elliots/typical']
-  unpluginPkg.dependencies['@elliots/typical'] = newVersion
-  writeJson(unpluginPkgPath, unpluginPkg)
+  // Publish packages that depend on @elliots/typical
+  // Update their workspace dependencies to use the published version
+  const dependentPackages = [
+    { name: 'unplugin', path: resolve(rootDir, 'packages/unplugin') },
+    { name: 'bun-plugin', path: resolve(rootDir, 'packages/bun-plugin') },
+    { name: 'tsc-plugin', path: resolve(rootDir, 'packages/tsc-plugin') },
+  ]
 
-  try {
-    exec('pnpm publish --no-git-checks --access public', { cwd: resolve(rootDir, 'packages/unplugin') })
-  } finally {
-    // Restore workspace reference
-    unpluginPkg.dependencies['@elliots/typical'] = originalDep
-    writeJson(unpluginPkgPath, unpluginPkg)
+  for (const pkg of dependentPackages) {
+    const pkgJsonPath = resolve(pkg.path, 'package.json')
+    const pkgJson = readJson(pkgJsonPath)
+    const originalDeps = {}
+
+    // Save and update workspace dependencies
+    for (const depType of ['dependencies', 'devDependencies', 'peerDependencies']) {
+      if (pkgJson[depType]) {
+        for (const [depName, depVersion] of Object.entries(pkgJson[depType])) {
+          if (depVersion === 'workspace:*' && depName.startsWith('@elliots/')) {
+            originalDeps[`${depType}.${depName}`] = depVersion
+            pkgJson[depType][depName] = newVersion
+          }
+        }
+      }
+    }
+
+    writeJson(pkgJsonPath, pkgJson)
+
+    try {
+      console.log(`\n==> Publishing ${pkg.name}...`)
+      exec(`pnpm publish --no-git-checks --access public --tag ${npmTag}`, { cwd: pkg.path })
+    } finally {
+      // Restore workspace references
+      for (const [key, value] of Object.entries(originalDeps)) {
+        const [depType, depName] = key.split('.')
+        pkgJson[depType][depName] = value
+      }
+      writeJson(pkgJsonPath, pkgJson)
+    }
   }
 
   // Create git tag

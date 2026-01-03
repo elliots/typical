@@ -2,20 +2,20 @@
 
 Typical makes TypeScript type-safe at runtime _with no changes to your code_.
 
-It transforms your TypeScript code to inject runtime validation based on your existing type annotations.
+It transforms your code to inject runtime validation based on your existing type annotations. With source maps, so errors point to the right lines in your original code.
 
 ## Why?
 
-- No need for zod, yup, ajv, or other runtime validation libraries - your types are already validated automatically
+- Less need for zod, yup, ajv, or other runtime validation libraries - your types are already validated automatically. If you can express it in TypeScript, Typical can validate it at runtime.
 - Protects against data leaks via `JSON.stringify` by ensuring only properties defined in your types are included
-- Catches type mismatches at runtime that TypeScript can't catch at compile time (API responses, JSON parsing, etc.)
+- Catches type mismatches at runtime that TypeScript can't catch at compile time (API responses, JSON parsing, un-typed/badly-typed libraries, vibe-coding coworkers etc.)
 
 ## Features
 
-- Automatic validation of function parameters and return types
+- Validation of function parameters and return types
 - Safe `JSON.parse` with type validation
 - Safe `JSON.stringify` that only includes defined properties
-- Optional type cast validation (`as Type`)
+- Validation of type casts (`as Type`)
 - Configurable include/exclude patterns
 
 ## Example
@@ -312,5 +312,6 @@ DEBUG=1 npm run build
 ## Limitations
 
 - Generic type parameters (`T`) cannot be validated - no runtime type information
-- DOM types and complex library types may be skipped
-- Class constructor parameters are not currently validated
+- Type-only imports of classes aren't checked (can't do instanceof on type-only imports)
+- Validation of functions is just not done. Need to think about that one.
+- Some complex types may not be fully supported yet. If you find any that fail, please open an issue!
