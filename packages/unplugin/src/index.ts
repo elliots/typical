@@ -1,9 +1,7 @@
 import { createUnplugin, type UnpluginInstance } from 'unplugin'
-import { loadConfig, type TypicalConfig } from '@elliots/typical'
+import { loadConfig, type TypicalConfig, ProgramManager, buildTimer } from '@elliots/typical'
 import { resolveOptions, type Options } from './core/options'
 import { transformTypia } from './core/transform'
-import { buildTimer } from './core/timing'
-import { ProgramManager } from './core/program-manager'
 
 export const Typical: UnpluginInstance<Options | undefined, false> = createUnplugin((rawOptions = {}) => {
   const options = resolveOptions(rawOptions)

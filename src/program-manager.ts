@@ -1,6 +1,6 @@
 import ts from 'typescript'
 import { resolve, dirname } from 'path'
-import { buildTimer } from './timing'
+import { buildTimer } from './timing.js'
 
 /**
  * Manages a shared TypeScript program across file transformations.
@@ -9,7 +9,7 @@ import { buildTimer } from './timing'
 export class ProgramManager {
   private program: ts.Program | undefined
   private compilerOptions: ts.CompilerOptions | undefined
-  private sourceContents = new Map<string, string>() // Virtual file contents (transformed by Vite)
+  private sourceContents = new Map<string, string>() // Virtual file contents (transformed by bundler)
   private sourceFileCache = new Map<string, ts.SourceFile>() // Cached source files from disk
   private host: ts.CompilerHost | undefined
 

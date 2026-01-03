@@ -1,0 +1,55 @@
+{
+  "name": "@elliots/bun-plugin-typical",
+  "version": "0.1.10",
+  "description": "Bun plugin for typical - runtime safe TypeScript transformer",
+  "keywords": [
+    "bun",
+    "runtime",
+    "typescript",
+    "typical",
+    "validation"
+  ],
+  "homepage": "https://github.com/elliots/typical#readme",
+  "bugs": {
+    "url": "https://github.com/elliots/typical/issues"
+  },
+  "license": "MIT",
+  "author": "Elliot Shepherd <elliot@jarofworms.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/elliots/typical.git",
+    "directory": "packages/bun-plugin"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./preload": "./dist/preload.mjs",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@elliots/typical": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.0.0",
+    "@types/node": "^22.0.0",
+    "tsdown": "^0.18.3"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

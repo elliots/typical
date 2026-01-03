@@ -1,8 +1,10 @@
 # Typical
 
-Typical adds runtime validation to typescript, making TypeScript type-safe at runtime _with no changes to your code_.
+Typical makes Typescript type-safe at runtime _with no changes to your code_.
 
-It can be used as a TSC plugin, ESM loader for Node.js, or with bundlers like Vite, Webpack, and Rollup via unplugin.
+It does this by transforming your TypeScript code to inject runtime validation calls using typia (but if its working correctly, you wont know or care *how*).
+
+It can be used as a TSC plugin, ESM loader for Node.js, Bun plugin, or with bundlers like Vite, Webpack, and Rollup via unplugin.
 
 ## Why?
 
@@ -21,15 +23,18 @@ Why not.
 - ✅ Configurable include/exclude patterns
 - ✅ Optionally reuse validation logic for identical types to optimize performance (enabled by default)
 - ✅ TSC plugin
-- ✅ ESM loader for runtime transformation with `node --import @elliots/typical/esm` (or `node --loader @elliots/typical/esm-loader` for older Node versions)
+- ✅ Node.js ESM loader for runtime transformation with `node --import @elliots/typical/esm` (or `node --loader @elliots/typical/esm-loader` for older Node versions)
+- ✅ Bun plugin for runtime transformation with `bun --plugin @elliots/typical/bun`
 - ✅ tsx wrapper (ttsx) for easy use like `npx ttsx script.ts`
 - ✅ Unplugin for Vite, Webpack, Rollup, esbuild, and more
 
 ## Installation
 
 ```bash
-npm add typical
+(npm|pnpm|bun) add @elliots/typical
 ```
+
+or follow unplugin instructions below.
 
 ## Configuration
 

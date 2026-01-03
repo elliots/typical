@@ -25,8 +25,8 @@ export class BuildTimer {
     this.starts.clear()
   }
 
-  report(): void {
-    console.log('\n[unplugin-typical] Build Performance Report:')
+  report(prefix = '[typical]'): void {
+    console.log(`\n${prefix} Build Performance Report:`)
     console.log('─'.repeat(60))
 
     // Sort stages by total time (descending) for better readability
@@ -70,5 +70,5 @@ export class BuildTimer {
   }
 }
 
-// Singleton instance for use across the plugin
+// Singleton instance for use across plugins
 export const buildTimer = new BuildTimer()

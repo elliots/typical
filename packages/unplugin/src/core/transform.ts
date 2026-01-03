@@ -1,8 +1,6 @@
 import { resolve, extname } from 'path'
-import type { TypicalConfig } from '@elliots/typical'
-import { TypicalTransformer, validateConfig } from '@elliots/typical'
-import { buildTimer } from './timing'
-import type { ProgramManager } from './program-manager'
+import type { TypicalConfig, ProgramManager } from '@elliots/typical'
+import { TypicalTransformer, validateConfig, buildTimer } from '@elliots/typical'
 
 // Extensions that we should transform
 const TRANSFORM_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts'])
