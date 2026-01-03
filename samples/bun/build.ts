@@ -1,4 +1,4 @@
-import typicalPlugin from '@elliots/bun-plugin-typical'
+import typicalPlugin, { closeTransformer } from '@elliots/bun-plugin-typical'
 
 const result = await Bun.build({
   entrypoints: ['./src/index.ts'],
@@ -13,11 +13,14 @@ const result = await Bun.build({
           enabled: true,
           includeContent: true,
           inline: true,
-        }
+        },
       },
     }),
   ],
 })
+
+// Close the transformer to release the Go process
+await closeTransformer()
 
 if (!result.success) {
   console.error('Build failed:')

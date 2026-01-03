@@ -1,6 +1,6 @@
 import { typicalPlugin } from '@elliots/bun-plugin-typical'
 
-Bun.plugin(
+void Bun.plugin(
   typicalPlugin({
     typical: {
       reusableValidators: false,
@@ -9,7 +9,7 @@ Bun.plugin(
         enabled: true,
         includeContent: true,
         inline: true,
-      }
+      },
     },
   }),
 )

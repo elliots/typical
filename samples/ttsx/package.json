@@ -1,7 +1,7 @@
 {
   "name": "typical-sample-ttsx",
   "version": "1.0.0",
-  "description": "Sample project using Typical TSX",
+  "description": "Sample project using Typical with ttsx (tsx wrapper)",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
@@ -9,7 +9,8 @@
     "dev": "ttsx --watch src/index.ts"
   },
   "dependencies": {
-    "@elliots/typical": "../.."
+    "@elliots/typical": "../..",
+    "tsx": "^4.21.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

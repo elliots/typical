@@ -20,7 +20,6 @@
     "url": "git+https://github.com/elliots/typical.git"
   },
   "bin": {
-    "ttsc": "bin/ttsc",
     "ttsx": "bin/ttsx",
     "typical": "bin/typical"
   },
@@ -33,7 +32,6 @@
   "main": "dist/src/index.js",
   "exports": {
     ".": "./dist/src/index.js",
-    "./tsc-plugin": "./dist/src/tsc-plugin.js",
     "./esm": "./dist/src/esm-loader-register.js",
     "./loader": "./dist/src/esm-loader.js"
   },
@@ -46,8 +44,12 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "build": "tsc",
+    "build:all": "pnpm run build:go:all && pnpm run build:ts",
+    "build:go": "cd packages/compiler && npm run build:go",
+    "build:go:all": "./scripts/build-binaries.sh",
+    "build:ts": "pnpm --filter './packages/*' run build && pnpm run build",
     "dev": "tsc --watch",
-    "test": "rm -f test/test.temp.ts && tsc &pn& node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
+    "test": "rm -f test/test.temp.ts && tsc && node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
     "test:coverage": "rm -f test/test.temp.ts && tsc && node --import ./dist/src/esm-loader-register.js --test --experimental-test-coverage dist/test/*.test.js",
     "test:coverage:html": "rm -f test/test.temp.ts && tsc && c8 --reporter=html --reporter=text --include='dist/src/**' node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
     "bench": "pnpm run build && cd bench && pnpm install && npm run bench",
@@ -59,29 +61,20 @@
     "sample:ttsc": "cd samples/ttsc && pnpm install && npm run build && npm run start",
     "sample:vite-react": "cd samples/vite-react && pnpm install && pnpm run test",
     "sample:bun": "cd samples/bun && pnpm install && bun run start",
-    "samples": "npm run sample:esm && npm run sample:ttsx && npm run sample:tsc && npm run sample:ttsc && npm run sample:vite-react && npm run sample:bun",
+    "samples": "npm run sample:esm && npm run sample:ttsx && npm run sample:vite-react && npm run sample:bun",
     "publish:all": "npm run lint && npm run format:check && node scripts/publish.js"
   },
   "dependencies": {
-    "@ampproject/remapping": "2.3.0",
-    "commander": "14.0.2",
-    "glob": "13.0.0",
-    "magic-string": "0.30.21",
-    "minimatch": "10.0.1",
-    "strip-json-comments": "5.0.3",
-    "ts-patch": "3.3.0",
-    "tsx": "4.21.0",
-    "typescript": "^5.0.0",
-    "typia": "11.0.0",
-    "unplugin": "2.3.11"
+    "@elliots/typical-compiler": "workspace:*",
+    "commander": "14.0.2"
   },
   "devDependencies": {
-    "@jridgewell/trace-mapping": "^0.3.31",
     "@types/node": "22",
     "c8": "10.1.3",
     "oxfmt": "^0.21.0",
     "oxlint": "1.36.0",
-    "oxlint-tsgolint": "0.10.1"
+    "oxlint-tsgolint": "0.10.1",
+    "typescript": "5.9.3"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
@@ -89,5 +82,10 @@
   "engines": {
     "pnpm": ">=10"
   },
-  "packageManager": "pnpm@10.6.1"
+  "packageManager": "pnpm@10.6.1",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "deasync"
+    ]
+  }
 }

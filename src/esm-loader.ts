@@ -1,11 +1,19 @@
 import { fileURLToPath, pathToFileURL } from 'url'
 import { existsSync } from 'fs'
 import { TypicalTransformer } from './transformer.js'
-import { inlineSourceMapComment } from './source-map.js'
 import { loadConfig, validateConfig } from './config.js'
 
 const config = validateConfig(loadConfig())
-const transformer = new TypicalTransformer(config)
+
+// Shared transformer - stays alive for the lifetime of the process
+let transformer: TypicalTransformer | null = null
+
+async function getTransformer(): Promise<TypicalTransformer> {
+  if (!transformer) {
+    transformer = new TypicalTransformer(config)
+  }
+  return transformer
+}
 
 /**
  * Resolve hook - rewrites .js imports to .ts if the .ts file exists
@@ -33,7 +41,7 @@ export async function resolve(specifier: string, context: any, nextResolve: any)
 
 /**
  * Load hook - transforms TypeScript files on the fly
- * Includes inline source maps for proper error stack traces in Node.js
+ * Note: Source maps not yet supported in v2
  */
 export async function load(url: string, context: any, nextLoad: any) {
   if (!url.endsWith('.ts')) {
@@ -42,18 +50,25 @@ export async function load(url: string, context: any, nextLoad: any) {
   const filePath = fileURLToPath(url)
 
   try {
-    // Transform with source map support enabled
-    const result = transformer.transform(filePath, 'js', { sourceMap: true })
+    const t = await getTransformer()
+    const result = await t.transform(filePath, 'ts')
 
-    // Append inline source map for Node.js source map support
-    let source = result.code
-    if (result.map) {
-      source += '\n' + inlineSourceMapComment(result.map)
-    }
+    // For now, output is TypeScript - need to transpile to JS
+    // TODO: Add JS transpilation in Go or here
+    // For now, use TypeScript's transpileModule as fallback
+    const ts = await import('typescript')
+    const transpiled = ts.default.transpileModule(result.code, {
+      compilerOptions: {
+        module: ts.default.ModuleKind.ESNext,
+        target: ts.default.ScriptTarget.ES2022,
+        esModuleInterop: true,
+      },
+      fileName: filePath,
+    })
 
     return {
       format: 'module',
-      source,
+      source: transpiled.outputText,
       shortCircuit: true,
     }
   } catch (error) {

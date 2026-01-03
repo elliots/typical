@@ -1,118 +1,129 @@
 # Typical
 
-Typical makes Typescript type-safe at runtime _with no changes to your code_.
+Typical makes TypeScript type-safe at runtime _with no changes to your code_.
 
-It does this by transforming your TypeScript code to inject runtime validation calls using typia (but if its working correctly, you wont know or care *how*).
-
-It can be used as a TSC plugin, ESM loader for Node.js, Bun plugin, or with bundlers like Vite, Webpack, and Rollup via unplugin.
+It transforms your TypeScript code to inject runtime validation based on your existing type annotations.
 
 ## Why?
 
-For some use cases it can mean you don't need to use zod, yup, ajv, or other runtime validation libraries, as your types are already validated automatically.
-
-It protects you from leaking data via JSON.stringify by making sure only the properties defined in your types are included in the output.
-
-Why not.
+- No need for zod, yup, ajv, or other runtime validation libraries - your types are already validated automatically
+- Protects against data leaks via `JSON.stringify` by ensuring only properties defined in your types are included
+- Catches type mismatches at runtime that TypeScript can't catch at compile time (API responses, JSON parsing, etc.)
 
 ## Features
 
-- ✅ Automatic validation of function parameters
-- ✅ Automatic validation of return types
-- ✅ Replace `JSON.stringify` with a custom stringifier (very fast!)
-- ✅ Replace `JSON.parse` with a custom parser and validator (very fast!)
-- ✅ Configurable include/exclude patterns
-- ✅ Optionally reuse validation logic for identical types to optimize performance (enabled by default)
-- ✅ TSC plugin
-- ✅ Node.js ESM loader for runtime transformation with `node --import @elliots/typical/esm` (or `node --loader @elliots/typical/esm-loader` for older Node versions)
-- ✅ Bun plugin for runtime transformation with `bun --plugin @elliots/typical/bun`
-- ✅ tsx wrapper (ttsx) for easy use like `npx ttsx script.ts`
-- ✅ Unplugin for Vite, Webpack, Rollup, esbuild, and more
+- Automatic validation of function parameters and return types
+- Safe `JSON.parse` with type validation
+- Safe `JSON.stringify` that only includes defined properties
+- Optional type cast validation (`as Type`)
+- Configurable include/exclude patterns
 
-## Installation
+## Example
 
-```bash
-(npm|pnpm|bun) add @elliots/typical
-```
+This code runs without errors in normal TypeScript, but Typical catches the invalid data:
 
-or follow unplugin instructions below.
-
-## Configuration
-
-Optional: Create a `typical.json` file in your project root.
-
-If not provided, these default settings will be used (optimized for development):
-
-```json
-{
-  "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules/**", "**/*.d.ts", "dist/**", "build/**"],
-  "reusableValidators": false,
-  "validateFunctions": true,
-  "validateCasts": false,
-  "hoistRegex": true,
-  "ignoreDOMTypes": true,
-  "ignoreTypes": [],
-  "sourceMap": {
-    "enabled": true,
-    "includeContent": true,
-    "inline": false
-  }
+```ts
+interface User {
+  name: string;
+  email: `${string}@${string}`;
 }
+
+// This will throw - email doesn't match the template literal type
+const user = JSON.parse('{"name":"Alice","email":"not-an-email"}') as User;
 ```
 
-### Configuration Options
+---
 
-| Option                         | Default                                                   | Description                                                                                   |
-| ------------------------------ | --------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `include`                      | `["**/*.ts", "**/*.tsx"]`                                 | Glob patterns for files to transform                                                          |
-| `exclude`                      | `["node_modules/**", "**/*.d.ts", "dist/**", "build/**"]` | Glob patterns for files to skip                                                               |
-| `reusableValidators`           | `false`                                                   | Create shared validators for identical types (smaller output). Incompatible with source maps. |
-| `validateFunctions`            | `true`                                                    | Validate function parameters and return types at runtime                                      |
-| `validateCasts`                | `false`                                                   | Validate type assertions (`as Type`) at runtime                                               |
-| `hoistRegex`                   | `true`                                                    | Hoist regex patterns to top-level constants (improves performance)                            |
-| `ignoreDOMTypes`               | `true`                                                    | Skip validation for DOM types (Document, Element, etc.)                                       |
-| `ignoreTypes`                  | `[]`                                                      | Type patterns to skip validation for (supports wildcards, e.g., `["React.*"]`)                |
-| `sourceMap.enabled`            | `true`                                                    | Generate source maps for transformed code                                                     |
-| `sourceMap.includeContent`     | `true`                                                    | Include original source content in source maps                                                |
-| `sourceMap.inline`             | `false`                                                   | Use inline source maps (data URL) instead of external files                                   |
-| `debug.writeIntermediateFiles` | `false`                                                   | Write `.typical.ts` files showing code before typia transform                                 |
+## Usage Options
 
-### Production Configuration
+Choose the integration that fits your workflow:
 
-For production builds, disable source maps and enable reusable validators for smaller output:
+| Method                                                    | Best For                        | Package                       |
+| --------------------------------------------------------- | ------------------------------- | ----------------------------- |
+| [ESM Loader](#nodejs-esm-loader)                          | Node.js scripts, development    | `@elliots/typical`            |
+| [ttsx](#ttsx-tsx-wrapper)                                 | Quick scripts with tsx          | `@elliots/typical` + `tsx`    |
+| [Bun Plugin](#bun)                                        | Bun projects                    | `@elliots/bun-plugin-typical` |
+| [Vite/Webpack/etc](#bundlers-vite-webpack-rollup-esbuild) | Frontend apps, bundled projects | `@elliots/unplugin-typical`   |
+| [tsc Plugin](#typescript-compiler-tsc)                    | Pure TypeScript compilation     | `@elliots/typical-tsc-plugin` |
 
-```json
-{
-  "reusableValidators": true,
-  "sourceMap": {
-    "enabled": false
-  }
-}
-```
+---
 
-Note: `reusableValidators` and `sourceMap.enabled` are mutually exclusive. Source maps require inline validators so each validation call can map back to its original type annotation. If both are enabled, `reusableValidators` will be automatically disabled with a warning.
+## Node.js (ESM Loader)
 
-## Usage
-
-See ./samples/esm and ./samples/tsc and ./samples/ttsx
-
-Quickest way to try it out is to use ttsx:
+The simplest way to run TypeScript with Typical validation.
 
 ```bash
 npm add @elliots/typical
-npx ttsx your-script.ts
 ```
-
-or globally:
 
 ```bash
-npm add -g @elliots/typical
-ttsx your-script.ts
+node --import @elliots/typical/esm src/index.ts
 ```
 
-## Vite / Webpack / Rollup (unplugin)
+Add to `package.json` scripts:
 
-Install the unplugin:
+```json
+{
+  "scripts": {
+    "start": "node --import @elliots/typical/esm src/index.ts"
+  }
+}
+```
+
+---
+
+## ttsx (tsx wrapper)
+
+A convenience wrapper that combines [tsx](https://github.com/privatenumber/tsx) with Typical.
+
+```bash
+npm add @elliots/typical tsx
+```
+
+```bash
+npx ttsx script.ts
+```
+
+Or install globally:
+
+```bash
+npm add -g @elliots/typical tsx
+ttsx script.ts
+```
+
+> **Note:** `tsx` must be installed separately. The `ttsx` command is a thin wrapper that runs `tsx` with the Typical ESM loader.
+
+---
+
+## Bun
+
+```bash
+bun add @elliots/bun-plugin-typical
+```
+
+Create `bunfig.toml`:
+
+```toml
+preload = ["./preload.ts"]
+```
+
+Create `preload.ts`:
+
+```ts
+import { typicalPlugin } from "@elliots/bun-plugin-typical";
+
+Bun.plugin(typicalPlugin());
+```
+
+Then run:
+
+```bash
+bun run src/index.ts
+```
+
+---
+
+## Bundlers (Vite, Webpack, Rollup, esbuild)
 
 ```bash
 npm add @elliots/unplugin-typical
@@ -120,223 +131,186 @@ npm add @elliots/unplugin-typical
 
 ### Vite
 
-```typescript
+```ts
 // vite.config.ts
-import Typical from '@elliots/unplugin-typical/vite'
+import Typical from "@elliots/unplugin-typical/vite";
 
 export default defineConfig({
-  plugins: [
-    Typical(),
-  ],
-})
+  plugins: [Typical()],
+});
 ```
 
 ### Webpack
 
-```typescript
+```js
 // webpack.config.js
-const Typical = require('@elliots/unplugin-typical/webpack').default
+const Typical = require("@elliots/unplugin-typical/webpack").default;
 
 module.exports = {
-  plugins: [
-    Typical(),
-  ],
-}
+  plugins: [Typical()],
+};
 ```
 
 ### Rollup
 
-```typescript
+```js
 // rollup.config.js
-import Typical from '@elliots/unplugin-typical/rollup'
+import Typical from "@elliots/unplugin-typical/rollup";
 
 export default {
-  plugins: [
-    Typical(),
-  ],
-}
+  plugins: [Typical()],
+};
 ```
 
 ### esbuild
 
-```typescript
-import { build } from 'esbuild'
-import Typical from '@elliots/unplugin-typical/esbuild'
+```ts
+import { build } from "esbuild";
+import Typical from "@elliots/unplugin-typical/esbuild";
 
 build({
   plugins: [Typical()],
-})
+});
 ```
 
-### Plugin Configuration
-
-Pass options directly to the plugin:
-
-```typescript
-Typical({
-  validateFunctions: true,
-  validateCasts: false,
-  // ... other options
-})
-```
-
-Or use a `typical.json` file in your project root (shared with other entry points like TSC plugin and ESM loader).
-
-## Example
-
-This code will run without errors when compiled normally, but will throw an error when using Typical.
+### Rolldown
 
 ```ts
-interface User {
-  name: string;
-  email: `${string}@${string}`;
-}
-const u = JSON.parse('{"name":"Alice","email":"oops-not-an-email"}') as User;
+// rolldown.config.ts
+import Typical from "@elliots/unplugin-typical/rolldown";
+
+export default {
+  plugins: [Typical()],
+};
 ```
 
-## How it works
+### Farm
 
-Typical uses the TypeScript Compiler API to parse and transform your TypeScript code. It analyzes function signatures, return types, and JSON operations to inject appropriate typia validation calls.
+```ts
+// farm.config.ts
+import Typical from "@elliots/unplugin-typical/farm";
 
-But basically you shouldn't need to care about how it works internally, it makes typescript strongly typed\*. You can still use `any` and `unknown` if you want to opt out of type safety.
-
-- sort of. probably. something like it anyway.
-
-## Flow Analysis
-
-Typical includes smart flow analysis to avoid redundant validations. When you return a value that was already validated (either as a parameter or via a type-annotated const), the return statement won't be wrapped in another validation call.
-
-### When return validation is skipped:
-
-```typescript
-interface User { name: string; }
-
-// Direct parameter return - no redundant validation
-function validate(user: User): User {
-  return user;  // Already validated on entry, skip return validation
-}
-
-// Property access from validated parameter
-function getAddress(user: User): Address {
-  return user.address;  // user was validated, address is safe
-}
-
-// Type-annotated const
-function getUser(): User {
-  const user: User = fetchData();  // const is validated here
-  return user;  // skip redundant validation
-}
+export default {
+  plugins: [Typical()],
+};
 ```
 
-### When return validation IS applied (tainting):
+### Rspack
 
-```typescript
-// After mutation
-function updateUser(user: User): User {
-  user.name = "modified";  // Mutation taints the value
-  return user;  // Must re-validate
-}
+```ts
+// rspack.config.ts
+import Typical from "@elliots/unplugin-typical/rspack";
 
-// After passing to another function
-function processUser(user: User): User {
-  someFunction(user);  // Could have mutated user
-  return user;  // Must re-validate
-}
-
-// After await (async boundary)
-async function asyncProcess(user: User): Promise<User> {
-  await delay();  // Async boundary taints values
-  return user;  // Must re-validate
-}
-
-// Spread into new object
-function cloneUser(user: User): User {
-  return { ...user };  // New object, must validate
-}
+export default {
+  plugins: [Typical()],
+};
 ```
 
-## Debugging
+---
 
-### Intermediate Files
+## TypeScript Compiler (tsc)
 
-To see what code Typical generates before typia processes it, enable intermediate file output:
+For projects that compile with `tsc` directly using [ts-patch](https://github.com/nonara/ts-patch).
+
+```bash
+npm add @elliots/typical-tsc-plugin ts-patch
+```
+
+### Option 1: ttsc (auto-injects plugin)
+
+The `ttsc` command automatically injects the plugin - no config needed:
+
+```bash
+npx ttsc
+```
+
+Add to `package.json`:
 
 ```json
 {
-  "debug": {
-    "writeIntermediateFiles": true
+  "scripts": {
+    "build": "ttsc"
   }
 }
 ```
 
-This creates `.typical.ts` files alongside your output showing the code with typia calls injected but not yet transformed.
+### Option 2: Manual tsconfig.json
 
-### Verbose Logging
+Add to your `tsconfig.json`:
 
-Set `DEBUG=1` environment variable for detailed logging:
+```json
+{
+  "compilerOptions": {
+    "plugins": [
+      {
+        "transform": "@elliots/typical-tsc-plugin",
+        "transformProgram": true
+      }
+    ]
+  }
+}
+```
+
+Then run ts-patch's tsc:
+
+```bash
+npx ts-patch install
+npx tsc
+```
+
+Or add a prepare script:
+
+```json
+{
+  "scripts": {
+    "prepare": "ts-patch install -s",
+    "build": "tsc"
+  }
+}
+```
+
+---
+
+## Configuration
+
+Create a `typical.json` file in your project root (optional):
+
+```json
+{
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules/**", "**/*.d.ts"],
+  "validateFunctions": true,
+  "validateCasts": false
+}
+```
+
+### Options
+
+| Option              | Default                                                   | Description                                   |
+| ------------------- | --------------------------------------------------------- | --------------------------------------------- |
+| `include`           | `["**/*.ts", "**/*.tsx"]`                                 | Files to transform                            |
+| `exclude`           | `["node_modules/**", "**/*.d.ts", "dist/**", "build/**"]` | Files to skip                                 |
+| `validateFunctions` | `true`                                                    | Validate function parameters and return types |
+| `validateCasts`     | `false`                                                   | Validate type assertions (`as Type`)          |
+
+---
+
+## How It Works
+
+Typical uses a Go-based compiler that leverages the TypeScript type checker to analyze your code. It generates runtime validators that check values against their declared types.
+
+Types that can't be validated at runtime (like generic type parameters `T`) are skipped. You can still use `any` and `unknown` to opt out of validation.
+
+## Debugging
+
+Set `DEBUG=1` for verbose logging:
 
 ```bash
 DEBUG=1 npm run build
 ```
 
-## Troubleshooting
+## Limitations
 
-### "Failed to transform the following types"
-
-This error means typia couldn't generate validation code for certain types. Common causes:
-
-1. **DOM types**: Types like `HTMLElement`, `Document`, etc. have complex intersections typia can't process.
-   - Solution: Enable `ignoreDOMTypes: true` (default) or add specific types to `ignoreTypes`
-
-2. **React types**: Event handlers, refs, and other React types often can't be validated.
-   - Solution: Add `"React.*"` to `ignoreTypes`
-
-3. **Third-party library types**: Some library types are too complex.
-   - Solution: Add the specific type patterns to `ignoreTypes`
-
-```json
-{
-  "ignoreTypes": ["React.*", "Express.Request", "Prisma.*"]
-}
-```
-
-### "Window & typeof globalThis" errors
-
-This occurs when a type includes DOM globals. Enable `ignoreDOMTypes: true` or add the specific type to `ignoreTypes`.
-
-### Generic type parameters not validated
-
-Type parameters (`T`, `U`, etc.) cannot be validated at runtime because the actual type isn't known until the function is called. This is by design:
-
-```typescript
-function identity<T>(value: T): T {
-  return value;  // T is not validated - no runtime type info
-}
-```
-
-Concrete types in the same function ARE validated:
-
-```typescript
-function process<T>(value: T, user: User): User {
-  return user;  // User IS validated
-}
-```
-
-### Constructor parameters not validated
-
-Currently, class constructors are not transformed. This is a known limitation. Validate in the constructor body if needed:
-
-```typescript
-class Client {
-  constructor(options: Options) {
-    // Manual validation if needed
-    if (!options.timeout) throw new Error("timeout required");
-  }
-}
-```
-
-## Credits
-
-The actual validation work is done by [typia](https://github.com/samchon/typia). This package just generates the necessary code to call typia's functions based on your TypeScript types.
-
-> NOTE: The whole package was all mostly LLM. Feel free to improve it without care for the author's feelings.
+- Generic type parameters (`T`) cannot be validated - no runtime type information
+- DOM types and complex library types may be skipped
+- Class constructor parameters are not currently validated

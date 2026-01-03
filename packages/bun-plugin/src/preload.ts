@@ -28,4 +28,4 @@
 import { typicalPlugin } from './index'
 
 // Register with default options
-Bun.plugin(typicalPlugin())
+void Bun.plugin(typicalPlugin())

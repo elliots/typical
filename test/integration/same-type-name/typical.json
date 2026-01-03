@@ -1,9 +1,0 @@
-{
-  "include": ["**/*.ts"],
-  "exclude": ["node_modules/**", "**/*.d.ts", "dist/**"],
-  "reusableValidators": true,
-  "validateCasts": false,
-  "debug": {
-    "writeIntermediateFiles": true
-  }
-}

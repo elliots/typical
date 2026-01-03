@@ -7,3 +7,9 @@ coverage/
 
 .DS_Store
 test/output
+test/fixtures
+
+# Go dependencies (cloned by sync-shims.sh)
+packages/compiler/go/typescript-go/
+packages/compiler/go/.tsgolint-cache/
+

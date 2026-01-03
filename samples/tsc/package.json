@@ -11,7 +11,8 @@
     "prepare": "ts-patch install -s"
   },
   "dependencies": {
-    "@elliots/typical": "../.."
+    "@elliots/typical": "../..",
+    "@elliots/typical-tsc-plugin": "../../packages/tsc-plugin"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

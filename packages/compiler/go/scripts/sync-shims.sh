@@ -1,0 +1,77 @@
+#!/bin/bash
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GO_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Temporary directory for tsgolint
+TSGOLINT_DIR="$GO_DIR/.tsgolint-cache"
+
+echo "==> Syncing shims from tsgolint..."
+
+# Clone or update tsgolint
+if [ -d "$TSGOLINT_DIR" ]; then
+    echo "Updating tsgolint..."
+    cd "$TSGOLINT_DIR"
+    git fetch origin
+    git reset --hard origin/main
+else
+    echo "Cloning tsgolint..."
+    git clone --depth 1 https://github.com/oxc-project/tsgolint.git "$TSGOLINT_DIR"
+    cd "$TSGOLINT_DIR"
+fi
+
+# Initialize submodules to get the exact typescript-go version
+git submodule update --init
+
+# Get the typescript-go commit hash
+TSGO_COMMIT=$(cd typescript-go && git rev-parse HEAD)
+echo "==> tsgolint uses typescript-go commit: $TSGO_COMMIT"
+
+# Copy shims to our project (preserving our extensions)
+echo "==> Copying shims..."
+# Save our custom extensions
+EXTENSIONS_BACKUP=""
+if [ -f "$GO_DIR/shim/checker/typical_extensions.go" ]; then
+    EXTENSIONS_BACKUP=$(mktemp)
+    cp "$GO_DIR/shim/checker/typical_extensions.go" "$EXTENSIONS_BACKUP"
+fi
+rm -rf "$GO_DIR/shim"
+cp -r "$TSGOLINT_DIR/shim" "$GO_DIR/shim"
+# Restore our custom extensions
+if [ -n "$EXTENSIONS_BACKUP" ] && [ -f "$EXTENSIONS_BACKUP" ]; then
+    cp "$EXTENSIONS_BACKUP" "$GO_DIR/shim/checker/typical_extensions.go"
+    rm "$EXTENSIONS_BACKUP"
+fi
+
+# Clone or update typescript-go to the same commit (no submodules!)
+echo "==> Updating typescript-go to $TSGO_COMMIT..."
+if [ -d "$GO_DIR/typescript-go" ]; then
+    cd "$GO_DIR/typescript-go"
+    git fetch origin
+else
+    echo "Cloning typescript-go..."
+    git clone https://github.com/microsoft/typescript-go.git "$GO_DIR/typescript-go"
+    cd "$GO_DIR/typescript-go"
+fi
+git checkout "$TSGO_COMMIT"
+
+# Apply patches if they exist
+echo "==> Applying patches from tsgolint..."
+if ls "$TSGOLINT_DIR/patches"/*.patch 1> /dev/null 2>&1; then
+    for patch in "$TSGOLINT_DIR/patches"/*.patch; do
+        echo "Applying $(basename "$patch")..."
+        git am --3way --no-gpg-sign "$patch" || {
+            echo "Patch may already be applied, continuing..."
+            git am --abort 2>/dev/null || true
+        }
+    done
+fi
+
+# Copy internal/collections if needed (tsgolint copies this)
+echo "==> Copying internal/collections..."
+mkdir -p "$GO_DIR/internal/collections"
+find "$TSGOLINT_DIR/typescript-go/internal/collections" -type f ! -name '*_test.go' -exec cp {} "$GO_DIR/internal/collections/" \;
+
+echo "==> Sync complete!"
+echo "typescript-go is now at: $TSGO_COMMIT"

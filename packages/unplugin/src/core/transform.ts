@@ -1,6 +1,7 @@
 import { resolve, extname } from 'path'
-import type { TypicalConfig, ProgramManager } from '@elliots/typical'
-import { TypicalTransformer, validateConfig, buildTimer } from '@elliots/typical'
+import type { TypicalConfig } from '@elliots/typical'
+import type { RawSourceMap } from '@elliots/typical-compiler'
+import { TypicalTransformer, buildTimer } from '@elliots/typical'
 
 // Extensions that we should transform
 const TRANSFORM_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts'])
@@ -10,16 +11,23 @@ const TRANSFORM_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts'])
  */
 export interface TransformTypiaResult {
   code: string
-  map?: object | null
+  map: RawSourceMap | null
 }
+
+// Shared transformer instance - Go server stays running across transforms
+let transformer: TypicalTransformer | null = null
 
 /**
  * Transform a TypeScript file with Typical.
  *
- * Uses a shared ProgramManager for incremental compilation across files.
- * Returns both code and source map for use with Vite/Rollup/Webpack.
+ * Uses the Go compiler via TypicalCompiler for validation code generation.
+ * The Go server stays running and maintains the TypeScript program state.
  */
-export function transformTypia(id: string, source: string, config: TypicalConfig, programManager: ProgramManager, options: { sourceMap?: boolean } = {}): TransformTypiaResult | undefined {
+export async function transformTypia(
+  id: string,
+  _source: string, // unused - Go reads file directly
+  config: TypicalConfig,
+): Promise<TransformTypiaResult | undefined> {
   buildTimer.start('total-transform')
 
   // Only transform TypeScript files (skip virtual modules, JS files, etc.)
@@ -31,35 +39,16 @@ export function transformTypia(id: string, source: string, config: TypicalConfig
 
   const resolvedId = resolve(id)
 
-  // Get or create program with this file's source
-  buildTimer.start('get-program')
-  const program = programManager.getProgram(resolvedId, source)
-  buildTimer.end('get-program')
-
-  // Get the source file from the program
-  buildTimer.start('get-source-file')
-  const sourceFile = programManager.getSourceFile(resolvedId)
-  buildTimer.end('get-source-file')
-
-  if (!sourceFile) {
-    buildTimer.end('total-transform')
-    console.warn(`[unplugin-typical] Could not get source file for: ${id}`)
-    return undefined
+  // Lazy init shared transformer
+  if (!transformer) {
+    buildTimer.start('init-transformer')
+    transformer = new TypicalTransformer(config)
+    buildTimer.end('init-transformer')
   }
 
-  // Validate config (adjusts reusableValidators if source maps are enabled)
-  buildTimer.start('create-transformer')
-  const validatedConfig = validateConfig(config)
-  const transformer = new TypicalTransformer(validatedConfig, program)
-  buildTimer.end('create-transformer')
-
-  // Determine if source maps should be generated
-  // Default to true for bundlers since they typically want source maps
-  const generateSourceMap = options.sourceMap ?? config.sourceMap?.enabled ?? true
-
-  // Transform the file with source map support
+  // Transform the file
   buildTimer.start('transform')
-  const result = transformer.transform(sourceFile, 'js', { sourceMap: generateSourceMap })
+  const result = await transformer.transform(resolvedId, 'ts')
   buildTimer.end('transform')
 
   buildTimer.end('total-transform')
@@ -71,5 +60,16 @@ export function transformTypia(id: string, source: string, config: TypicalConfig
   return {
     code: result.code,
     map: result.map,
+  }
+}
+
+/**
+ * Close the transformer and release resources.
+ * Should be called at build end.
+ */
+export async function closeTransformer(): Promise<void> {
+  if (transformer) {
+    await transformer.close()
+    transformer = null
   }
 }

@@ -12,8 +12,7 @@
     "declaration": false,
     "sourceMap": true,
     "moduleResolution": "node",
-    "resolveJsonModule": true,
-    "plugins": [{ "transform": "@elliots/typical/tsc-plugin" }]
+    "resolveJsonModule": true
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist"]

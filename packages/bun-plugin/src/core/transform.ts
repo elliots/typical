@@ -1,29 +1,33 @@
 import { resolve, extname } from 'path'
 import type { TypicalConfig } from '@elliots/typical'
-import { TypicalTransformer, validateConfig, buildTimer, inlineSourceMapComment } from '@elliots/typical'
+import { TypicalTransformer, validateConfig, buildTimer } from '@elliots/typical'
 
 // Extensions that we should transform
 const TRANSFORM_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts'])
 
 // Map file extensions to Bun loader types
-const LOADER_MAP: Record<string, 'js' | 'jsx'> = {
-  '.ts': 'js',
-  '.mts': 'js',
-  '.cts': 'js',
-  '.tsx': 'jsx',
+const LOADER_MAP: Record<string, 'ts' | 'tsx'> = {
+  '.ts': 'ts',
+  '.mts': 'ts',
+  '.cts': 'ts',
+  '.tsx': 'tsx',
 }
 
 export interface TransformResult {
   code: string
-  loader: 'js' | 'jsx'
+  loader: 'ts' | 'tsx'
 }
+
+// Shared transformer instance (Go compiler keeps project loaded)
+let sharedTransformer: TypicalTransformer | null = null
 
 /**
  * Transform a TypeScript file with Typical.
  *
- * Returns JavaScript code with validation injected.
+ * Returns TypeScript code with validation injected.
+ * Bun handles the final transpilation to JavaScript.
  */
-export function transformFile(filePath: string, config: TypicalConfig): TransformResult | undefined {
+export async function transformFile(filePath: string, config: TypicalConfig): Promise<TransformResult | undefined> {
   buildTimer.start('total-transform')
 
   // Only transform TypeScript files
@@ -35,21 +39,17 @@ export function transformFile(filePath: string, config: TypicalConfig): Transfor
 
   const resolvedPath = resolve(filePath)
 
-  // Validate config and create transformer
-  // NOTE: We don't pass a program - let TypicalTransformer use setupTsProgram
-  // to get proper project-wide type information
+  // Lazy init shared transformer (Go compiler stays running)
   buildTimer.start('create-transformer')
-  const validatedConfig = validateConfig(config)
-  const transformer = new TypicalTransformer(validatedConfig)
+  if (!sharedTransformer) {
+    const validatedConfig = validateConfig(config)
+    sharedTransformer = new TypicalTransformer(validatedConfig)
+  }
   buildTimer.end('create-transformer')
 
-  // Determine if source maps should be generated
-  const generateSourceMap = validatedConfig.sourceMap?.enabled ?? false
-
-  // Transform the file - use 'js' mode to fully resolve Typia calls into validation code
-  // Pass the file path as a string, transformer will read and parse it
+  // Transform the file - returns TypeScript with validators injected
   buildTimer.start('transform')
-  const result = transformer.transform(resolvedPath, 'js', { sourceMap: generateSourceMap })
+  const result = await sharedTransformer.transform(resolvedPath, 'ts')
   buildTimer.end('transform')
 
   buildTimer.end('total-transform')
@@ -58,14 +58,18 @@ export function transformFile(filePath: string, config: TypicalConfig): Transfor
     console.log(`[bun-plugin-typical] Transformed: ${filePath}`)
   }
 
-  // Inline source map if generated
-  let code = result.code
-  if (result.map) {
-    code += '\n' + inlineSourceMapComment(result.map)
-  }
-
   return {
-    code,
-    loader: LOADER_MAP[ext] ?? 'js',
+    code: result.code,
+    loader: LOADER_MAP[ext] ?? 'ts',
+  }
+}
+
+/**
+ * Close the shared transformer and release resources.
+ */
+export async function closeTransformer(): Promise<void> {
+  if (sharedTransformer) {
+    await sharedTransformer.close()
+    sharedTransformer = null
   }
 }

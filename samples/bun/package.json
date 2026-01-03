@@ -9,8 +9,8 @@
     "test": "bun run start"
   },
   "dependencies": {
-    "@elliots/typical": "workspace:*",
-    "@elliots/bun-plugin-typical": "workspace:*"
+    "@elliots/bun-plugin-typical": "workspace:*",
+    "@elliots/typical": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "^1.0.0",

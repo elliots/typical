@@ -45,27 +45,18 @@ export function typicalPlugin(rawOptions: Options = {}): BunPlugin {
       // Reset timing state for fresh builds
       buildTimer.reset()
 
-      build.onLoad({ filter: TS_FILTER }, args => {
+      build.onLoad({ filter: TS_FILTER }, async args => {
         // Skip excluded paths
-        if (
-          options.exclude.some(pattern =>
-            typeof pattern === 'string' ? args.path.includes(pattern) : pattern.test(args.path),
-          )
-        ) {
+        if (options.exclude.some(pattern => (typeof pattern === 'string' ? args.path.includes(pattern) : pattern.test(args.path)))) {
           return undefined
         }
 
         // Check include patterns if specified
-        if (
-          options.include.length > 0 &&
-          !options.include.some(pattern =>
-            typeof pattern === 'string' ? args.path.includes(pattern) : pattern.test(args.path),
-          )
-        ) {
+        if (options.include.length > 0 && !options.include.some(pattern => (typeof pattern === 'string' ? args.path.includes(pattern) : pattern.test(args.path)))) {
           return undefined
         }
 
-        const result = transformFile(args.path, typicalConfig)
+        const result = await transformFile(args.path, typicalConfig)
 
         if (!result) {
           return undefined
@@ -89,5 +80,5 @@ export function typicalPlugin(rawOptions: Options = {}): BunPlugin {
 export default typicalPlugin
 
 // Named exports
-export { typicalPlugin }
 export type { Options } from './core/options'
+export { closeTransformer } from './core/transform'

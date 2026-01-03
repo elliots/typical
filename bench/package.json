@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npx ttsc",
+    "build": "node scripts/build.js",
     "start": "node dist/runtime-bench.js",
-    "bench": "npx ttsc && node dist/runtime-bench.js"
+    "bench": "node scripts/build.js && node dist/runtime-bench.js"
   },
   "dependencies": {
     "@elliots/typical": "workspace:*",
