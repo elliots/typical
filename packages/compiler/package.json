@@ -1,0 +1,41 @@
+{
+  "name": "@elliots/typical-compiler",
+  "version": "0.0.1",
+  "description": "TypeScript compiler powered by tsgo for typical validation",
+  "keywords": [
+    "compiler",
+    "runtime",
+    "typescript",
+    "validation"
+  ],
+  "license": "MIT",
+  "author": "elliots",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:go": "./go/scripts/sync-shims.sh && cd go && go build -o ../bin/typical ./cmd/typical",
+    "test": "npx tsx test/e2e.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "optionalDependencies": {
+    "@elliots/typical-compiler-darwin-arm64": "0.0.1",
+    "@elliots/typical-compiler-darwin-x64": "0.0.1",
+    "@elliots/typical-compiler-linux-arm64": "0.0.1",
+    "@elliots/typical-compiler-linux-x64": "0.0.1",
+    "@elliots/typical-compiler-win32-arm64": "0.0.1",
+    "@elliots/typical-compiler-win32-x64": "0.0.1"
+  }
+}

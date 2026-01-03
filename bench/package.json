@@ -1,0 +1,21 @@
+{
+  "name": "typical-bench",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "start": "node dist/runtime-bench.js",
+    "bench": "node scripts/build.js && node dist/runtime-bench.js"
+  },
+  "dependencies": {
+    "@elliots/typical": "workspace:*",
+    "tinybench": "^6.0.0",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "22",
+    "ts-patch": "3.3.0",
+    "typescript": "^5.0.0"
+  }
+}

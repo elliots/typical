@@ -1,0 +1,15 @@
+dist
+*transformed.ts
+node_modules
+*.temp.ts
+**/*.typical.ts*
+coverage/
+
+.DS_Store
+test/output
+test/fixtures
+
+# Go dependencies (cloned by sync-shims.sh)
+packages/compiler/go/typescript-go/
+packages/compiler/go/.tsgolint-cache/
+

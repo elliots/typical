@@ -1,0 +1,19 @@
+{
+  "name": "typical-sample-bun",
+  "version": "1.0.0",
+  "description": "Sample project using Typical with Bun plugin",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "build": "bun run build.ts",
+    "test": "bun run start"
+  },
+  "dependencies": {
+    "@elliots/bun-plugin-typical": "workspace:*",
+    "@elliots/typical": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.0.0",
+    "typescript": "^5.3.0"
+  }
+}

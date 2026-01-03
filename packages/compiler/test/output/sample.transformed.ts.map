@@ -1,0 +1,12 @@
+{
+  "version": 3,
+  "file": "sample.transformed.ts",
+  "sources": [
+    "sample.ts"
+  ],
+  "names": [],
+  "mappings": "AAAA;AACA;AACA;AACA;AACA;AACA;AACA;AACA;AACA;AACA,sCAAe,mKAAuB;AACtC,+BAA8E,unBAA/C,4CAA+C,iDAAA,gBAAH;AAC3E,QAF6B,oJAErB,gBAFqB,iBAEL;AACxB;AACA;AACA;AACA,2EAAoB,+JAAW,mKAAc,sOAA8B;AAC3E,QADoE,unBAC5D,oBAD4D,iBACxC;AAC5B;AACA;AACA;AACA,+CAAa,6JAAU,6JAAwB;AAC/C,QADmC,oJAC3B,MAD2B,iBACrB;AACd;AACA;AACA;AACA,qDAAyB,+JAA4B;AACrD,QADqC,unBAC7B,6CAD6B,iBACgB;AACrD;AACA;AACA;AACA,oDAAwB,+JAA4B;AACpD,QADoC,CAC5B,8DAD4B,wpBACkC;AACtE;AACA;AACA;AACA,6CAAoB,iWAAyB;AAC7C,QADoC,oJAC5B,gCAD4B,iBACI;AACxC;AACA;AACA;AACA,qDAAsB,6LAA+B;AACrD,QAD4C,oJACpC,mBADoC,iBACjB;AAC3B;AACA;AACA;AACA,oCAAU,+JAA0B;AACpC,UADsB,6WACZ,KADY,iBACP;AACf;AACA;AACA,iCAAW,soBAAsB;AACjC,UADuB,sJACb,KADa,iBACR;AACf;AACA;AACA;AACA;",
+  "sourcesContent": [
+    "\ntype Email = `${string}@${string}.${string}`;\ninterface User {\n  id: number;\n  name: string;\n  email: Email;\n}\n\n// Simple function with primitive parameter and return\nfunction greet(name: string): string {\n  console.log('Greeting user:', { name, id: 123, email: 'test@example.com'} as User);\n  return \"Hello \" + name;\n}\n\n// Function with multiple parameters and object return\nfunction createUser(id: number, name: string, email: User['email']): User {\n  return { id, name, email };\n}\n\n// Arrow function\nconst add = (a: number, b: number): number => {\n  return a + b;\n};\n\n// Async function returning Promise\nasync function fetchUser(id: number): Promise<User> {\n  return { id, name: \"Test\", email: \"test@test.com\" };\n}\n\n// Sync function returning Promise\nfunction fetchUserLater(id: number): Promise<User> {\n  return Promise.resolve({ id, name: \"Test\", email: \"test@test.com\" });\n}\n\n// Array parameter\nfunction sumNumbers(nums: number[]): number {\n  return nums.reduce((a, b) => a + b, 0);\n}\n\n// Union type parameter\nfunction processValue(value: string | null): string {\n  return value ?? \"default\";\n}\n\nclass UserService {\n  getUser(id: number): User | null {\n    return null;\n  }\n\n  saveUser(user: User): boolean {\n    return true;\n  }\n}\n\nexport { greet, createUser, add, fetchUser, fetchUserLater, sumNumbers, processValue, UserService };\n"
+  ]
+}

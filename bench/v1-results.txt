@@ -1,0 +1,31 @@
+Runtime Validation Benchmark Results - V1 (Typia)
+===================================================
+Date: 2026-01-03
+
+Scenario                      |      Nothing |      Typical |          Zod |  vs Nothing |     vs Zod
+-----------------------------------------------------------------------------------------------------
+string                        |     24.36M/s |     24.17M/s |     24.41M/s |         +1% |        +1%
+number                        |     24.53M/s |     24.49M/s |     24.41M/s |         +0% |        -0%
+boolean                       |     24.51M/s |     24.88M/s |     24.66M/s |         -1% |        -1%
+object w/ template literals   |     24.27M/s |      9.19M/s |      7.88M/s |       +164% |       -17%
+nested w/ template literals   |     24.36M/s |      4.29M/s |      2.94M/s |       +468% |       -46%
+array w/ templates (10)       |     30.72M/s |      3.19M/s |      1.53M/s |       +863% |      -109%
+array w/ templates (100)      |     30.58M/s |    353.84K/s |    162.50K/s |      +8544% |      -118%
+union types                   |     28.98M/s |     24.48M/s |     11.16M/s |        +18% |      -119%
+template literals             |     28.22M/s |      1.76M/s |      1.67M/s |      +1507% |        -5%
+complex config                |     27.94M/s |     23.13M/s |      3.42M/s |        +21% |      -577%
+JSON.parse (small)            |      4.51M/s |      4.09M/s |      3.62M/s |        +10% |       -13%
+JSON.parse (small+extras)     |      4.49M/s |      4.10M/s |      3.63M/s |        +10% |       -13%
+JSON.parse (medium)           |      2.96M/s |      1.04M/s |    981.50K/s |       +184% |        -6%
+JSON.parse (large)            |    211.48K/s |    108.63K/s |     98.02K/s |        +95% |       -11%
+JSON.parse (1000 large)       |        221/s |        116/s |        102/s |        +91% |       -14%
+JSON.stringify (small)        |     10.04M/s |     20.44M/s |      7.15M/s |        -51% |      -186%
+JSON.stringify (small+extras) |      2.87M/s |     20.62M/s |      7.21M/s |        -86% |      -186%
+JSON.stringify (medium)       |      5.20M/s |      4.36M/s |      1.14M/s |        +19% |      -283%
+JSON.stringify (large)        |    398.15K/s |    217.97K/s |    134.41K/s |        +83% |       -62%
+JSON.stringify (1000 large)   |        370/s |        176/s |        120/s |       +110% |       -46%
+
+Notes:
+- vs Nothing = overhead vs no validation (lower is better)
+- vs Zod = negative means faster than zod (better)
+- Typical v1 uses typia for validation code generation

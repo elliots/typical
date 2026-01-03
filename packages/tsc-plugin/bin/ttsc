@@ -1,0 +1,12 @@
+#!/usr/bin/env node
+
+import { execSync } from "child_process";
+
+const tscCommand = `node $(node -p "require.resolve('ts-patch/compiler/tsc.js')") ${process.argv.slice(2).join(" ")}`;
+const patchTsConfig = new URL("../src/patch-tsconfig.cjs", import.meta.url);
+
+execSync(tscCommand, {
+  stdio: "inherit",
+  cwd: process.cwd(),
+  env: { ...process.env, NODE_OPTIONS: `--require ${patchTsConfig.pathname}` },
+});

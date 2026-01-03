@@ -1,0 +1,18 @@
+{
+  "name": "@elliots/typical-compiler-darwin-x64",
+  "version": "0.0.1",
+  "description": "Typical compiler binary for macOS x64",
+  "license": "MIT",
+  "author": "elliots",
+  "files": [
+    "index.js",
+    "bin/typical"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "index.js"
+}

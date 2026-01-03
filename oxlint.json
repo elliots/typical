@@ -1,0 +1,7 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "rules": {
+    "typescript/no-floating-promises": "error"
+  },
+  "ignorePatterns": ["node_modules", "dist", "samples/**/node_modules", "bench/node_modules", "test/fixtures", "bench/.transformed", "packages/compiler/test/fixtures", "packages/compiler/test/output"]
+}

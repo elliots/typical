@@ -1,0 +1,91 @@
+{
+  "name": "@elliots/typical",
+  "version": "0.1.10",
+  "description": "Runtime safe TypeScript transformer using typia",
+  "keywords": [
+    "runtime",
+    "transformer",
+    "typescript",
+    "typia",
+    "validation"
+  ],
+  "homepage": "https://github.com/elliots/typical#readme",
+  "bugs": {
+    "url": "https://github.com/elliots/typical/issues"
+  },
+  "license": "MIT",
+  "author": "Elliot Shepherd <elliot@jarofworms.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/elliots/typical.git"
+  },
+  "bin": {
+    "ttsx": "bin/ttsx",
+    "typical": "bin/typical"
+  },
+  "files": [
+    "bin",
+    "src",
+    "dist/src"
+  ],
+  "type": "module",
+  "main": "dist/src/index.js",
+  "exports": {
+    ".": "./dist/src/index.js",
+    "./esm": "./dist/src/esm-loader-register.js",
+    "./loader": "./dist/src/esm-loader.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "lint": "oxlint --type-aware",
+    "lint:fix": "oxlint --type-aware --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "build": "tsc",
+    "build:all": "pnpm run build:go:all && pnpm run build:ts",
+    "build:go": "cd packages/compiler && npm run build:go",
+    "build:go:all": "./scripts/build-binaries.sh",
+    "build:ts": "pnpm --filter './packages/*' run build && pnpm run build",
+    "dev": "tsc --watch",
+    "test": "rm -f test/test.temp.ts && tsc && node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
+    "test:coverage": "rm -f test/test.temp.ts && tsc && node --import ./dist/src/esm-loader-register.js --test --experimental-test-coverage dist/test/*.test.js",
+    "test:coverage:html": "rm -f test/test.temp.ts && tsc && c8 --reporter=html --reporter=text --include='dist/src/**' node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
+    "bench": "pnpm run build && cd bench && pnpm install && npm run bench",
+    "test:all": "npm test && npm run bench",
+    "prepublishOnly": "npm run build && npm test",
+    "sample:esm": "cd samples/esm && pnpm install && npm run start",
+    "sample:ttsx": "cd samples/ttsx && pnpm install && npm run start",
+    "sample:tsc": "cd samples/tsc && pnpm install && npm run build && npm run start",
+    "sample:ttsc": "cd samples/ttsc && pnpm install && npm run build && npm run start",
+    "sample:vite-react": "cd samples/vite-react && pnpm install && pnpm run test",
+    "sample:bun": "cd samples/bun && pnpm install && bun run start",
+    "samples": "npm run sample:esm && npm run sample:ttsx && npm run sample:vite-react && npm run sample:bun",
+    "publish:all": "npm run lint && npm run format:check && node scripts/publish.js"
+  },
+  "dependencies": {
+    "@elliots/typical-compiler": "workspace:*",
+    "commander": "14.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "22",
+    "c8": "10.1.3",
+    "oxfmt": "^0.21.0",
+    "oxlint": "1.36.0",
+    "oxlint-tsgolint": "0.10.1",
+    "typescript": "5.9.3"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "pnpm": ">=10"
+  },
+  "packageManager": "pnpm@10.6.1",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "deasync"
+    ]
+  }
+}
