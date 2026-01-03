@@ -61,6 +61,28 @@ importers:
         specifier: 0.10.1
         version: 0.10.1
 
+  bench:
+    dependencies:
+      '@elliots/typical':
+        specifier: workspace:*
+        version: link:..
+      tinybench:
+        specifier: ^6.0.0
+        version: 6.0.0
+      zod:
+        specifier: ^4.2.1
+        version: 4.3.4
+    devDependencies:
+      '@types/node':
+        specifier: '22'
+        version: 22.19.3
+      ts-patch:
+        specifier: 3.3.0
+        version: 3.3.0
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.3
+
   packages/unplugin:
     dependencies:
       '@elliots/typical':
@@ -1495,6 +1517,10 @@ packages:
   through@2.3.8:
     resolution: {integrity: sha512-w89qg7PI8wAdvX60bMDP+bFoD5Dvhm9oLheFp5O4a2QF0cSBGsBX4qZmadPMvVqlLJBBci+WqGGOAPvcDeNSVg==}
 
+  tinybench@6.0.0:
+    resolution: {integrity: sha512-BWlWpVbbZXaYjRV0twGLNQO00Zj4HA/sjLOQP2IvzQqGwRGp+2kh7UU3ijyJ3ywFRogYDRbiHDMrUOfaMnN56g==}
+    engines: {node: '>=20.0.0'}
+
   tinyexec@1.0.2:
     resolution: {integrity: sha512-W/KYk+NFhkmsYpuHq5JykngiOCnxeVL8v8dFnqxSD8qEEdRfXk1SDM6JzNqcERbcGYj9tMrDQBYV9cjgnunFIg==}
     engines: {node: '>=18'}
@@ -1682,6 +1708,9 @@ packages:
   yocto-queue@0.1.0:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
+
+  zod@4.3.4:
+    resolution: {integrity: sha512-Zw/uYiiyF6pUT1qmKbZziChgNPRu+ZRneAsMUDU6IwmXdWt5JwcUfy2bvLOCUtz5UniaN/Zx5aFttZYbYc7O/A==}
 
 snapshots:
 
@@ -2849,6 +2878,8 @@ snapshots:
 
   through@2.3.8: {}
 
+  tinybench@6.0.0: {}
+
   tinyexec@1.0.2: {}
 
   tinyglobby@0.2.15:
@@ -3016,3 +3047,5 @@ snapshots:
       yargs-parser: 21.1.1
 
   yocto-queue@0.1.0: {}
+
+  zod@4.3.4: {}

@@ -12,9 +12,8 @@
     "declaration": true,
     "sourceMap": true,
     "moduleResolution": "node",
-    "resolveJsonModule": true,
-    "verbatimModuleSyntax": true
+    "resolveJsonModule": true
   },
   "include": ["**/*.ts"],
-  "exclude": ["node_modules", "dist", "samples", "test/integration", "test/output", "packages"]
+  "exclude": ["node_modules", "dist", "samples", "test/integration", "test/output", "packages", "bench"]
 }

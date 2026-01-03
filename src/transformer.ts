@@ -341,6 +341,94 @@ export class TypicalTransformer {
   }
 
   /**
+   * Recreate all imports as synthetic nodes to prevent TypeScript from eliding them.
+   * This is necessary because TS emit analyzes the AST and may elide imports it thinks are unused,
+   * but after typia transformation, imports that weren't used in the original code may now be used.
+   */
+  private recreateImports(sourceFile: ts.SourceFile, factory: ts.NodeFactory, typeChecker: ts.TypeChecker): ts.SourceFile {
+    const newStatements: ts.Statement[] = []
+
+    for (const stmt of sourceFile.statements) {
+      if (this.ts.isImportDeclaration(stmt)) {
+        // Skip type-only imports entirely
+        if (stmt.importClause?.isTypeOnly) {
+          continue
+        }
+
+        const recreated = this.recreateImportDeclaration(stmt, factory, typeChecker)
+        if (recreated) {
+          newStatements.push(recreated)
+        }
+      } else {
+        newStatements.push(stmt)
+      }
+    }
+
+    return factory.updateSourceFile(sourceFile, newStatements, sourceFile.isDeclarationFile, sourceFile.referencedFiles, sourceFile.typeReferenceDirectives, sourceFile.hasNoDefaultLib, sourceFile.libReferenceDirectives)
+  }
+
+  /**
+   * Re-create an import declaration as a fully synthetic node.
+   * This prevents TypeScript from trying to look up symbol bindings
+   * and eliding the import as "unused".
+   */
+  private recreateImportDeclaration(importDecl: ts.ImportDeclaration, factory: ts.NodeFactory, typeChecker: ts.TypeChecker): ts.ImportDeclaration | undefined {
+    let importClause: ts.ImportClause | undefined
+
+    if (importDecl.importClause) {
+      const clause = importDecl.importClause
+      let namedBindings: ts.NamedImportBindings | undefined
+
+      if (clause.namedBindings) {
+        if (this.ts.isNamespaceImport(clause.namedBindings)) {
+          // import * as foo from "bar"
+          namedBindings = factory.createNamespaceImport(factory.createIdentifier(clause.namedBindings.name.text))
+        } else if (this.ts.isNamedImports(clause.namedBindings)) {
+          // import { foo, bar } from "baz"
+          // Filter out type-only imports (explicit or inferred from symbol)
+          const elements = clause.namedBindings.elements
+            .filter(el => {
+              // Skip explicit type-only specifiers
+              if (el.isTypeOnly) return false
+              // Check if the symbol is type-only (interface, type alias, etc.)
+              let symbol = typeChecker.getSymbolAtLocation(el.name)
+              // Follow alias to get the actual exported symbol
+              if (symbol && symbol.flags & this.ts.SymbolFlags.Alias) {
+                symbol = typeChecker.getAliasedSymbol(symbol)
+              }
+              if (symbol) {
+                const declarations = symbol.getDeclarations()
+                if (declarations && declarations.length > 0) {
+                  // If all declarations are type-only, skip this import
+                  const allTypeOnly = declarations.every(decl => this.ts.isInterfaceDeclaration(decl) || this.ts.isTypeAliasDeclaration(decl) || this.ts.isTypeLiteralNode(decl))
+                  if (allTypeOnly) return false
+                }
+              }
+              return true
+            })
+            .map(el => factory.createImportSpecifier(false, el.propertyName ? factory.createIdentifier(el.propertyName.text) : undefined, factory.createIdentifier(el.name.text)))
+          // Only create named imports if there are non-type specifiers
+          if (elements.length > 0) {
+            namedBindings = factory.createNamedImports(elements)
+          }
+        }
+      }
+
+      // Skip import entirely if no default import and no named bindings remain
+      const defaultName = clause.name ? factory.createIdentifier(clause.name.text) : undefined
+      if (!defaultName && !namedBindings) {
+        return undefined
+      }
+
+      importClause = factory.createImportClause(false, defaultName, namedBindings)
+    }
+
+    const moduleSpecifier = this.ts.isStringLiteral(importDecl.moduleSpecifier) ? factory.createStringLiteral(importDecl.moduleSpecifier.text) : importDecl.moduleSpecifier
+
+    return factory.createImportDeclaration(undefined, importClause, moduleSpecifier)
+  }
+
+  /**
    * Write intermediate file for debugging purposes.
    * Creates a .typical.ts file showing the code after typical's transformations
    * but before typia processes it.
@@ -809,6 +897,10 @@ export class TypicalTransformer {
         if (this.config.hoistRegex !== false) {
           transformedSourceFile = hoistRegexConstructors(transformedSourceFile, this.ts, factory)
         }
+
+        // Recreate imports as synthetic nodes to prevent TypeScript from eliding them
+        // This is necessary because TS emit analyzes the AST and may elide imports it thinks are unused
+        transformedSourceFile = this.recreateImports(transformedSourceFile, factory, newProgram.getTypeChecker())
 
         // Check for untransformed typia calls as a fallback
         const finalCode = printer.printFile(transformedSourceFile)

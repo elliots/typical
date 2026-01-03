@@ -47,16 +47,16 @@
     "format:check": "oxfmt --check",
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "rm -f test/test.temp.ts && tsc && node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
+    "test": "rm -f test/test.temp.ts && tsc &pn& node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
     "test:coverage": "rm -f test/test.temp.ts && tsc && node --import ./dist/src/esm-loader-register.js --test --experimental-test-coverage dist/test/*.test.js",
     "test:coverage:html": "rm -f test/test.temp.ts && tsc && c8 --reporter=html --reporter=text --include='dist/src/**' node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
-    "bench": "cd bench && npm install && npm run bench",
+    "bench": "pnpm run build && cd bench && pnpm install && npm run bench",
     "test:all": "npm test && npm run bench",
     "prepublishOnly": "npm run build && npm test",
-    "sample:esm": "cd samples/esm && npm install && npm run start",
-    "sample:ttsx": "cd samples/ttsx && npm install && npm run start",
-    "sample:tsc": "cd samples/tsc && npm install && npm run build && npm run start",
-    "sample:ttsc": "cd samples/ttsc && npm install && npm run build && npm run start",
+    "sample:esm": "cd samples/esm && pnpm install && npm run start",
+    "sample:ttsx": "cd samples/ttsx && pnpm install && npm run start",
+    "sample:tsc": "cd samples/tsc && pnpm install && npm run build && npm run start",
+    "sample:ttsc": "cd samples/ttsc && pnpm install && npm run build && npm run start",
     "sample:vite-react": "cd samples/vite-react && pnpm install && pnpm run test",
     "samples": "npm run sample:esm && npm run sample:ttsx && npm run sample:tsc && npm run sample:ttsc && npm run sample:vite-react",
     "publish:all": "npm run lint && npm run format:check && node scripts/publish.js"
@@ -86,7 +86,6 @@
     "typescript": "^5.0.0"
   },
   "engines": {
-    "npm": "please-use-pnpm",
     "pnpm": ">=10"
   },
   "packageManager": "pnpm@10.6.1"
