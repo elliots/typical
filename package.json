@@ -21,6 +21,10 @@
     "src"
   ],
   "scripts": {
+    "lint": "oxlint --type-aware",
+    "lint:fix": "oxlint --type-aware --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "rm -f test/test.temp.ts && tsc && node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
@@ -73,9 +77,17 @@
   "devDependencies": {
     "@jridgewell/trace-mapping": "^0.3.31",
     "@types/node": "22",
-    "c8": "10.1.3"
+    "c8": "10.1.3",
+    "oxfmt": "^0.21.0",
+    "oxlint": "1.36.0",
+    "oxlint-tsgolint": "0.10.1"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
+  },
+  "packageManager": "pnpm@10.6.1",
+  "engines": {
+    "npm": "please-use-pnpm",
+    "pnpm": ">=10"
   }
 }

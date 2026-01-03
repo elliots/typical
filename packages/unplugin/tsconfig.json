@@ -15,7 +15,6 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "baseUrl": ".",
     "paths": {
       "@elliots/typical": ["../../dist/src/index.d.ts"]
     }
