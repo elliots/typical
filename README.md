@@ -1,6 +1,6 @@
 # Typical
 
-Typical adds runtime validation to typescript, making TypeScript type-safe at runtime *with no changes to your code*. 
+Typical adds runtime validation to typescript, making TypeScript type-safe at runtime _with no changes to your code_.
 
 It can be used as a TSC plugin, ESM loader for Node.js, or with bundlers like Vite, Webpack, and Rollup via unplugin.
 
@@ -57,20 +57,20 @@ If not provided, these default settings will be used (optimized for development)
 
 ### Configuration Options
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `include` | `["**/*.ts", "**/*.tsx"]` | Glob patterns for files to transform |
-| `exclude` | `["node_modules/**", "**/*.d.ts", "dist/**", "build/**"]` | Glob patterns for files to skip |
-| `reusableValidators` | `false` | Create shared validators for identical types (smaller output). Incompatible with source maps. |
-| `validateFunctions` | `true` | Validate function parameters and return types at runtime |
-| `validateCasts` | `false` | Validate type assertions (`as Type`) at runtime |
-| `hoistRegex` | `true` | Hoist regex patterns to top-level constants (improves performance) |
-| `ignoreDOMTypes` | `true` | Skip validation for DOM types (Document, Element, etc.) |
-| `ignoreTypes` | `[]` | Type patterns to skip validation for (supports wildcards, e.g., `["React.*"]`) |
-| `sourceMap.enabled` | `true` | Generate source maps for transformed code |
-| `sourceMap.includeContent` | `true` | Include original source content in source maps |
-| `sourceMap.inline` | `false` | Use inline source maps (data URL) instead of external files |
-| `debug.writeIntermediateFiles` | `false` | Write `.typical.ts` files showing code before typia transform |
+| Option                         | Default                                                   | Description                                                                                   |
+| ------------------------------ | --------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `include`                      | `["**/*.ts", "**/*.tsx"]`                                 | Glob patterns for files to transform                                                          |
+| `exclude`                      | `["node_modules/**", "**/*.d.ts", "dist/**", "build/**"]` | Glob patterns for files to skip                                                               |
+| `reusableValidators`           | `false`                                                   | Create shared validators for identical types (smaller output). Incompatible with source maps. |
+| `validateFunctions`            | `true`                                                    | Validate function parameters and return types at runtime                                      |
+| `validateCasts`                | `false`                                                   | Validate type assertions (`as Type`) at runtime                                               |
+| `hoistRegex`                   | `true`                                                    | Hoist regex patterns to top-level constants (improves performance)                            |
+| `ignoreDOMTypes`               | `true`                                                    | Skip validation for DOM types (Document, Element, etc.)                                       |
+| `ignoreTypes`                  | `[]`                                                      | Type patterns to skip validation for (supports wildcards, e.g., `["React.*"]`)                |
+| `sourceMap.enabled`            | `true`                                                    | Generate source maps for transformed code                                                     |
+| `sourceMap.includeContent`     | `true`                                                    | Include original source content in source maps                                                |
+| `sourceMap.inline`             | `false`                                                   | Use inline source maps (data URL) instead of external files                                   |
+| `debug.writeIntermediateFiles` | `false`                                                   | Write `.typical.ts` files showing code before typia transform                                 |
 
 ### Production Configuration
 
@@ -181,12 +181,11 @@ Or use a `typical.json` file in your project root (shared with other entry point
 
 This code will run without errors when compiled normally, but will throw an error when using Typical.
 
-
 ```ts
 interface User {
   name: string;
   email: `${string}@${string}`;
-} 
+}
 const u = JSON.parse('{"name":"Alice","email":"oops-not-an-email"}') as User;
 ```
 
@@ -194,9 +193,9 @@ const u = JSON.parse('{"name":"Alice","email":"oops-not-an-email"}') as User;
 
 Typical uses the TypeScript Compiler API to parse and transform your TypeScript code. It analyzes function signatures, return types, and JSON operations to inject appropriate typia validation calls.
 
-But basically you shouldn't need to care about how it works internally, it makes typescript strongly typed*. You can still use `any` and `unknown` if you want to opt out of type safety.
+But basically you shouldn't need to care about how it works internally, it makes typescript strongly typed\*. You can still use `any` and `unknown` if you want to opt out of type safety.
 
-* sort of. probably. something like it anyway.
+- sort of. probably. something like it anyway.
 
 ## Flow Analysis
 
@@ -332,7 +331,7 @@ class Client {
 ```
 
 ## Credits
+
 The actual validation work is done by [typia](https://github.com/samchon/typia). This package just generates the necessary code to call typia's functions based on your TypeScript types.
 
-> NOTE: The whole package was all mostly LLM. Feel free to improve it without care for the author's feelings. 
-
+> NOTE: The whole package was all mostly LLM. Feel free to improve it without care for the author's feelings.

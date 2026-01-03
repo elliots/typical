@@ -1,31 +1,33 @@
-import * as path from 'path';
-import { minimatch } from 'minimatch';
-import type { TypicalConfig } from './config.js';
+import * as path from 'path'
+import { minimatch } from 'minimatch'
+import type { TypicalConfig } from './config.js'
 
 /**
  * Determines if a file should be transformed based on include/exclude patterns
  */
 export function shouldTransformFile(fileName: string, config: TypicalConfig): boolean {
-  const relativePath = path.relative(process.cwd(), fileName);
+  const relativePath = path.relative(process.cwd(), fileName)
 
   // Exclude files outside the project directory (e.g., resolved symlinks to parent dirs)
   if (relativePath.startsWith('..')) {
-    return false;
+    return false
   }
 
   // Check include patterns
-  const isIncluded = config.include?.some(pattern => {
-    return minimatch(relativePath, pattern);
-  }) ?? true;
+  const isIncluded =
+    config.include?.some(pattern => {
+      return minimatch(relativePath, pattern)
+    }) ?? true
 
-  if (!isIncluded) return false;
+  if (!isIncluded) return false
 
   // Check exclude patterns
-  const isExcluded = config.exclude?.some(pattern => {
-    return minimatch(relativePath, pattern);
-  }) ?? false;
+  const isExcluded =
+    config.exclude?.some(pattern => {
+      return minimatch(relativePath, pattern)
+    }) ?? false
 
-  return !isExcluded;
+  return !isExcluded
 }
 
 /**
@@ -33,17 +35,17 @@ export function shouldTransformFile(fileName: string, config: TypicalConfig): bo
  */
 export function isTransformableTypeScriptFile(fileName: string): boolean {
   // Only transform TypeScript files
-  if (!/\.(ts|tsx)$/.test(fileName)) return false;
-  
+  if (!/\.(ts|tsx)$/.test(fileName)) return false
+
   // Skip declaration files
-  if (fileName.endsWith('.d.ts')) return false;
-  
-  return true;
+  if (fileName.endsWith('.d.ts')) return false
+
+  return true
 }
 
 /**
  * Combined check for both file type and include/exclude patterns
  */
 export function shouldIncludeFile(fileName: string, config: TypicalConfig): boolean {
-  return isTransformableTypeScriptFile(fileName) && shouldTransformFile(fileName, config);
+  return isTransformableTypeScriptFile(fileName) && shouldTransformFile(fileName, config)
 }

@@ -25,7 +25,7 @@ export function ApiDemo() {
       const stringified = stringifyForApi(parsed)
       setResult({
         type: 'success',
-        message: `Parsed successfully!\nID: ${parsed.id}\nName: ${parsed.name}\nActive: ${parsed.active}\n\nStringified: ${stringified}`
+        message: `Parsed successfully!\nID: ${parsed.id}\nName: ${parsed.name}\nActive: ${parsed.active}\n\nStringified: ${stringified}`,
       })
     } catch (err) {
       console.log(err)
@@ -48,10 +48,7 @@ export function ApiDemo() {
   return (
     <div>
       <h2>JSON.parse / JSON.stringify Demo</h2>
-      <p>
-        Typical automatically validates JSON.parse results against the expected type
-        and ensures JSON.stringify only includes declared properties.
-      </p>
+      <p>Typical automatically validates JSON.parse results against the expected type and ensures JSON.stringify only includes declared properties.</p>
 
       <div style={{ marginBottom: 15 }}>
         <button onClick={setValidJson} style={{ marginRight: 10, padding: '5px 10px' }}>
@@ -69,7 +66,7 @@ export function ApiDemo() {
         <label style={{ display: 'block', marginBottom: 5 }}>JSON Input:</label>
         <textarea
           value={jsonInput}
-          onChange={(e) => setJsonInput(e.target.value)}
+          onChange={e => setJsonInput(e.target.value)}
           data-testid="json-input"
           style={{
             width: '100%',
@@ -77,7 +74,7 @@ export function ApiDemo() {
             padding: 8,
             borderRadius: 4,
             border: '1px solid #ccc',
-            fontFamily: 'monospace'
+            fontFamily: 'monospace',
           }}
         />
       </div>
@@ -91,7 +88,7 @@ export function ApiDemo() {
           color: 'white',
           border: 'none',
           borderRadius: 4,
-          cursor: 'pointer'
+          cursor: 'pointer',
         }}
       >
         Parse & Stringify
@@ -109,7 +106,7 @@ export function ApiDemo() {
             color: result.type === 'success' ? '#155724' : '#721c24',
             border: `1px solid ${result.type === 'success' ? '#c3e6cb' : '#f5c6cb'}`,
             whiteSpace: 'pre-wrap',
-            overflow: 'auto'
+            overflow: 'auto',
           }}
         >
           {result.message}

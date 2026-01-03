@@ -4,15 +4,7 @@
   "reusableValidators": false,
   "validateCasts": true,
   "validateFunctions": false,
-  "ignoreTypes": [
-    "ts.*",
-    "TransformerExtras",
-    "PluginConfig",
-    "DecodedSourceMap",
-    "EncodedSourceMap",
-    "SourceMapSegment",
-    "TransformContext"
-  ],
+  "ignoreTypes": ["ts.*", "TransformerExtras", "PluginConfig", "DecodedSourceMap", "EncodedSourceMap", "SourceMapSegment", "TransformContext"],
   "debug": {
     "writeIntermediateFiles": false
   }

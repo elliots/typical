@@ -33,7 +33,7 @@ export function UserForm() {
       const user = createUser({
         name,
         email: email as Email,
-        age: parseInt(age, 10)
+        age: parseInt(age, 10),
       })
       const message = validateAndSaveUser(user)
       setResult({ type: 'success', message })
@@ -45,22 +45,12 @@ export function UserForm() {
   return (
     <div>
       <h2>Form Validation Demo</h2>
-      <p>
-        This form validates user input at runtime using TypeScript types.
-        Try entering an invalid email (without @ and .) to see validation in action.
-      </p>
+      <p>This form validates user input at runtime using TypeScript types. Try entering an invalid email (without @ and .) to see validation in action.</p>
 
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 15, maxWidth: 400 }}>
         <div>
           <label style={{ display: 'block', marginBottom: 5 }}>Name:</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="John Doe"
-            data-testid="name-input"
-            style={{ width: '100%', padding: 8, borderRadius: 4, border: '1px solid #ccc' }}
-          />
+          <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="John Doe" data-testid="name-input" style={{ width: '100%', padding: 8, borderRadius: 4, border: '1px solid #ccc' }} />
         </div>
 
         <div>
@@ -68,7 +58,7 @@ export function UserForm() {
           <input
             type="text"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={e => setEmail(e.target.value)}
             placeholder="john@example.com"
             data-testid="email-input"
             style={{ width: '100%', padding: 8, borderRadius: 4, border: '1px solid #ccc' }}
@@ -77,14 +67,7 @@ export function UserForm() {
 
         <div>
           <label style={{ display: 'block', marginBottom: 5 }}>Age (positive number):</label>
-          <input
-            type="number"
-            value={age}
-            onChange={(e) => setAge(e.target.value)}
-            placeholder="25"
-            data-testid="age-input"
-            style={{ width: '100%', padding: 8, borderRadius: 4, border: '1px solid #ccc' }}
-          />
+          <input type="number" value={age} onChange={e => setAge(e.target.value)} placeholder="25" data-testid="age-input" style={{ width: '100%', padding: 8, borderRadius: 4, border: '1px solid #ccc' }} />
         </div>
 
         <button
@@ -96,7 +79,7 @@ export function UserForm() {
             color: 'white',
             border: 'none',
             borderRadius: 4,
-            cursor: 'pointer'
+            cursor: 'pointer',
           }}
         >
           Submit
@@ -113,7 +96,7 @@ export function UserForm() {
             borderRadius: 4,
             background: result.type === 'success' ? '#d4edda' : '#f8d7da',
             color: result.type === 'success' ? '#155724' : '#721c24',
-            border: `1px solid ${result.type === 'success' ? '#c3e6cb' : '#f5c6cb'}`
+            border: `1px solid ${result.type === 'success' ? '#c3e6cb' : '#f5c6cb'}`,
           }}
         >
           {result.message}

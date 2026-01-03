@@ -7,7 +7,7 @@
   },
   "dependencies": {
     "@elliots/typical": "file:../../..",
-    "typia": "^8.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "typia": "^8.0.0"
   }
 }

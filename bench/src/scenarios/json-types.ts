@@ -1,47 +1,47 @@
 // JSON parse/stringify validation benchmarks
-import { z } from "zod";
+import { z } from 'zod'
 
 // Template literal types for realistic data
-type Email = `${string}@${string}.${string}`;
-type UUID = `${string}-${string}-${string}-${string}-${string}`;
+type Email = `${string}@${string}.${string}`
+type UUID = `${string}-${string}-${string}-${string}-${string}`
 
 // Small object for JSON operations
 export interface SmallPayload {
-  id: number;
-  name: string;
-  active: boolean;
+  id: number
+  name: string
+  active: boolean
 }
 
 // Medium object with template literals
 export interface MediumPayload {
-  id: UUID;
-  email: Email;
-  name: string;
-  age: number;
-  tags: string[];
+  id: UUID
+  email: Email
+  name: string
+  age: number
+  tags: string[]
 }
 
 // Large nested object
 export interface LargePayload {
-  id: UUID;
+  id: UUID
   users: Array<{
-    id: UUID;
-    email: Email;
-    name: string;
+    id: UUID
+    email: Email
+    name: string
     profile: {
-      bio: string;
-      website: `https://${string}`;
+      bio: string
+      website: `https://${string}`
       social: {
-        twitter?: string;
-        github?: string;
-      };
-    };
-  }>;
+        twitter?: string
+        github?: string
+      }
+    }
+  }>
   metadata: {
-    createdAt: string;
-    updatedAt: string;
-    version: number;
-  };
+    createdAt: string
+    updatedAt: string
+    version: number
+  }
 }
 
 // Zod schemas - exported for direct use in benchmarks
@@ -49,7 +49,7 @@ export const zodSmallPayload = z.object({
   id: z.number(),
   name: z.string(),
   active: z.boolean(),
-});
+})
 
 export const zodMediumPayload = z.object({
   id: z.string().regex(/^.+-.+-.+-.+-.+$/),
@@ -57,49 +57,51 @@ export const zodMediumPayload = z.object({
   name: z.string(),
   age: z.number(),
   tags: z.array(z.string()),
-});
+})
 
 export const zodLargePayload = z.object({
   id: z.string().regex(/^.+-.+-.+-.+-.+$/),
-  users: z.array(z.object({
-    id: z.string().regex(/^.+-.+-.+-.+-.+$/),
-    email: z.string().regex(/^.+@.+\..+$/),
-    name: z.string(),
-    profile: z.object({
-      bio: z.string(),
-      website: z.string().regex(/^https:\/\/.+$/),
-      social: z.object({
-        twitter: z.string().optional(),
-        github: z.string().optional(),
+  users: z.array(
+    z.object({
+      id: z.string().regex(/^.+-.+-.+-.+-.+$/),
+      email: z.string().regex(/^.+@.+\..+$/),
+      name: z.string(),
+      profile: z.object({
+        bio: z.string(),
+        website: z.string().regex(/^https:\/\/.+$/),
+        social: z.object({
+          twitter: z.string().optional(),
+          github: z.string().optional(),
+        }),
       }),
     }),
-  })),
+  ),
   metadata: z.object({
     createdAt: z.string(),
     updatedAt: z.string(),
     version: z.number(),
   }),
-});
+})
 
-export const zodLargeArray = z.array(zodLargePayload);
+export const zodLargeArray = z.array(zodLargePayload)
 
 // Test data
 export const testSmallPayload: SmallPayload = {
   id: 1,
-  name: "Test Item",
+  name: 'Test Item',
   active: true,
-};
+}
 
 export const testMediumPayload: MediumPayload = {
-  id: "550e8400-e29b-41d4-a716-446655440000",
-  email: "user@example.com",
-  name: "John Doe",
+  id: '550e8400-e29b-41d4-a716-446655440000',
+  email: 'user@example.com',
+  name: 'John Doe',
   age: 30,
-  tags: ["developer", "typescript", "nodejs"],
-};
+  tags: ['developer', 'typescript', 'nodejs'],
+}
 
 export const testLargePayload: LargePayload = {
-  id: "550e8400-e29b-41d4-a716-446655440000",
+  id: '550e8400-e29b-41d4-a716-446655440000',
   users: Array.from({ length: 10 }, (_, i) => ({
     id: `user-${i}-uuid-part-here`,
     email: `user${i}@example.com`,
@@ -114,11 +116,11 @@ export const testLargePayload: LargePayload = {
     },
   })),
   metadata: {
-    createdAt: "2024-01-01T00:00:00Z",
-    updatedAt: "2024-06-15T12:30:00Z",
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-06-15T12:30:00Z',
     version: 42,
   },
-};
+}
 
 // Large array of 1000 LargePayload items
 export const testLargeArrayPayload: LargePayload[] = Array.from({ length: 1000 }, (_, i) => ({
@@ -137,30 +139,30 @@ export const testLargeArrayPayload: LargePayload[] = Array.from({ length: 1000 }
     },
   })),
   metadata: {
-    createdAt: "2024-01-01T00:00:00Z",
-    updatedAt: "2024-06-15T12:30:00Z",
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-06-15T12:30:00Z',
     version: i,
   },
-}));
+}))
 
 // Small payload with 10 extra fields not in the type
 export const testSmallPayloadWithExtras: SmallPayload = {
   ...testSmallPayload,
-  extra1: "extra value 1",
+  extra1: 'extra value 1',
   extra2: 12345,
   extra3: true,
-  extra4: ["a", "b", "c"],
-  extra5: { nested: "object" },
-  extra6: "another string",
+  extra4: ['a', 'b', 'c'],
+  extra5: { nested: 'object' },
+  extra6: 'another string',
   extra7: 99999,
   extra8: false,
   extra9: null,
-  extra10: "final extra",
-} as unknown as SmallPayload;
+  extra10: 'final extra',
+} as unknown as SmallPayload
 
 // Pre-stringified JSON for parse benchmarks
-export const testSmallJson = JSON.stringify(testSmallPayload);
-export const testMediumJson = JSON.stringify(testMediumPayload);
-export const testLargeJson = JSON.stringify(testLargePayload);
-export const testLargeArrayJson = JSON.stringify(testLargeArrayPayload);
-export const testSmallWithExtrasJson = JSON.stringify(testSmallPayloadWithExtras);
+export const testSmallJson = JSON.stringify(testSmallPayload)
+export const testMediumJson = JSON.stringify(testMediumPayload)
+export const testLargeJson = JSON.stringify(testLargePayload)
+export const testLargeArrayJson = JSON.stringify(testLargeArrayPayload)
+export const testSmallWithExtrasJson = JSON.stringify(testSmallPayloadWithExtras)

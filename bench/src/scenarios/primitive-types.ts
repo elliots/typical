@@ -1,51 +1,51 @@
 // Primitive type validation benchmarks
-import { z } from "zod";
+import { z } from 'zod'
 
 // Zod schemas
-const zodString = z.string();
-const zodNumber = z.number();
-const zodBoolean = z.boolean();
+const zodString = z.string()
+const zodNumber = z.number()
+const zodBoolean = z.boolean()
 
 // Typical validation - transformed by typical to add runtime validation
 export function validateString(value: string): string {
-  return value;
+  return value
 }
 
 export function validateNumber(value: number): number {
-  return value;
+  return value
 }
 
 export function validateBoolean(value: boolean): boolean {
-  return value;
+  return value
 }
 
 // No-validation baseline versions - use 'any' type so typical won't add validation
 export function noValidateString(value: any): any {
-  return value;
+  return value
 }
 
 export function noValidateNumber(value: any): any {
-  return value;
+  return value
 }
 
 export function noValidateBoolean(value: any): any {
-  return value;
+  return value
 }
 
 // Zod validation - use 'any' return type so typical won't add validation
 export function zodValidateString(value: any): any {
-  return zodString.parse(value);
+  return zodString.parse(value)
 }
 
 export function zodValidateNumber(value: any): any {
-  return zodNumber.parse(value);
+  return zodNumber.parse(value)
 }
 
 export function zodValidateBoolean(value: any): any {
-  return zodBoolean.parse(value);
+  return zodBoolean.parse(value)
 }
 
 // Test data
-export const testString = "hello world";
-export const testNumber = 42;
-export const testBoolean = true;
+export const testString = 'hello world'
+export const testNumber = 42
+export const testBoolean = true

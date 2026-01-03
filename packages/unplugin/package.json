@@ -1,44 +1,36 @@
 {
   "name": "@elliots/unplugin-typical",
-  "type": "module",
   "version": "0.1.10",
   "description": "Unplugin for typical - runtime safe TypeScript transformer",
-  "author": "Elliot Shepherd <elliot@jarofworms.com>",
-  "license": "MIT",
+  "keywords": [
+    "esbuild",
+    "farm",
+    "rolldown",
+    "rollup",
+    "rspack",
+    "runtime",
+    "typescript",
+    "typical",
+    "unplugin",
+    "validation",
+    "vite",
+    "webpack"
+  ],
   "homepage": "https://github.com/elliots/typical#readme",
+  "bugs": {
+    "url": "https://github.com/elliots/typical/issues"
+  },
+  "license": "MIT",
+  "author": "Elliot Shepherd <elliot@jarofworms.com>",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/elliots/typical.git",
     "directory": "packages/unplugin"
   },
-  "bugs": {
-    "url": "https://github.com/elliots/typical/issues"
-  },
-  "keywords": [
-    "unplugin",
-    "vite",
-    "webpack",
-    "rspack",
-    "rollup",
-    "rolldown",
-    "esbuild",
-    "farm",
-    "typescript",
-    "runtime",
-    "validation",
-    "typical"
+  "files": [
+    "dist"
   ],
-  "exports": {
-    ".": "./dist/index.mjs",
-    "./esbuild": "./dist/esbuild.mjs",
-    "./farm": "./dist/farm.mjs",
-    "./rolldown": "./dist/rolldown.mjs",
-    "./rollup": "./dist/rollup.mjs",
-    "./rspack": "./dist/rspack.mjs",
-    "./vite": "./dist/vite.mjs",
-    "./webpack": "./dist/webpack.mjs",
-    "./package.json": "./package.json"
-  },
+  "type": "module",
   "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
@@ -50,9 +42,17 @@
       ]
     }
   },
-  "files": [
-    "dist"
-  ],
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./esbuild": "./dist/esbuild.mjs",
+    "./farm": "./dist/farm.mjs",
+    "./rolldown": "./dist/rolldown.mjs",
+    "./rollup": "./dist/rollup.mjs",
+    "./rspack": "./dist/rspack.mjs",
+    "./vite": "./dist/vite.mjs",
+    "./webpack": "./dist/webpack.mjs",
+    "./package.json": "./package.json"
+  },
   "publishConfig": {
     "access": "public"
   },

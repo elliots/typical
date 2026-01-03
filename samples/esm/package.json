@@ -2,8 +2,8 @@
   "name": "typical-sample-esm",
   "version": "1.0.0",
   "description": "Sample project using Typical with Node.js ESM loader",
-  "main": "src/index.ts",
   "type": "module",
+  "main": "src/index.ts",
   "scripts": {
     "start": "node --import @elliots/typical/esm src/index.ts",
     "dev": "node --import @elliots/typical/esm --watch src/index.ts"

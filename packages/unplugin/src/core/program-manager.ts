@@ -50,7 +50,7 @@ export class ProgramManager {
       Array.from(rootFileSet),
       this.compilerOptions,
       this.host,
-      this.program // KEY: pass old program for incremental reuse
+      this.program, // KEY: pass old program for incremental reuse
     )
     buildTimer.end('create-program-incremental')
 
@@ -75,11 +75,7 @@ export class ProgramManager {
   }
 
   private loadCompilerOptions(): ts.CompilerOptions {
-    const configPath = ts.findConfigFile(
-      process.cwd(),
-      ts.sys.fileExists,
-      'tsconfig.json'
-    )
+    const configPath = ts.findConfigFile(process.cwd(), f => ts.sys.fileExists(f), 'tsconfig.json')
 
     if (!configPath) {
       return {
@@ -91,16 +87,12 @@ export class ProgramManager {
       }
     }
 
-    const configFile = ts.readConfigFile(configPath, ts.sys.readFile)
+    const configFile = ts.readConfigFile(configPath, f => ts.sys.readFile(f))
     if (configFile.error) {
       throw new Error(ts.flattenDiagnosticMessageText(configFile.error.messageText, '\n'))
     }
 
-    const parsed = ts.parseJsonConfigFileContent(
-      configFile.config,
-      ts.sys,
-      dirname(configPath)
-    )
+    const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, dirname(configPath))
 
     return parsed.options
   }
@@ -124,12 +116,7 @@ export class ProgramManager {
           }
 
           // Create new source file from virtual content
-          const sourceFile = ts.createSourceFile(
-            resolvedFileName,
-            virtualContent,
-            languageVersion,
-            true
-          )
+          const sourceFile = ts.createSourceFile(resolvedFileName, virtualContent, languageVersion, true)
           this.sourceFileCache.set(resolvedFileName, sourceFile)
           return sourceFile
         }
@@ -147,11 +134,11 @@ export class ProgramManager {
         }
         return result
       },
-      fileExists: (fileName) => {
+      fileExists: fileName => {
         const resolvedFileName = resolve(fileName)
         return this.sourceContents.has(resolvedFileName) || baseHost.fileExists(fileName)
       },
-      readFile: (fileName) => {
+      readFile: fileName => {
         const resolvedFileName = resolve(fileName)
         return this.sourceContents.get(resolvedFileName) ?? baseHost.readFile(fileName)
       },

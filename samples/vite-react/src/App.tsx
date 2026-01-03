@@ -8,7 +8,9 @@ export default function App() {
   return (
     <div style={{ fontFamily: 'system-ui, sans-serif', maxWidth: 800, margin: '0 auto', padding: 20 }}>
       <h1>Typical + Vite + React Demo</h1>
-      <p>This demo shows runtime type validation powered by <code>@elliots/typical</code></p>
+      <p>
+        This demo shows runtime type validation powered by <code>@elliots/typical</code>
+      </p>
 
       <div style={{ marginBottom: 20 }}>
         <button
@@ -20,7 +22,7 @@ export default function App() {
             color: activeTab === 'form' ? 'white' : 'black',
             border: 'none',
             borderRadius: 4,
-            cursor: 'pointer'
+            cursor: 'pointer',
           }}
         >
           Form Validation
@@ -33,7 +35,7 @@ export default function App() {
             color: activeTab === 'api' ? 'white' : 'black',
             border: 'none',
             borderRadius: 4,
-            cursor: 'pointer'
+            cursor: 'pointer',
           }}
         >
           API/JSON Demo

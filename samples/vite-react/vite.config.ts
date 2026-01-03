@@ -6,13 +6,13 @@ export default defineConfig({
   plugins: [
     Typical({
       typical: {
-        "reusableValidators": true,
-        "validateCasts": true,
-        "ignoreTypes": ["React.FormEvent"],
+        reusableValidators: true,
+        validateCasts: true,
+        ignoreTypes: ['React.FormEvent'],
         debug: {
-          writeIntermediateFiles: false
-        }
-      }
+          writeIntermediateFiles: false,
+        },
+      },
     }),
     react(),
   ],

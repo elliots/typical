@@ -30,9 +30,7 @@ export class BuildTimer {
     console.log('─'.repeat(60))
 
     // Sort stages by total time (descending) for better readability
-    const sortedStages = Array.from(this.timings.entries()).sort(
-      ([, a], [, b]) => b.reduce((x, y) => x + y, 0) - a.reduce((x, y) => x + y, 0)
-    )
+    const sortedStages = Array.from(this.timings.entries()).sort(([, a], [, b]) => b.reduce((x, y) => x + y, 0) - a.reduce((x, y) => x + y, 0))
 
     let totalTime = 0
     for (const [stage, times] of sortedStages) {

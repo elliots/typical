@@ -1,5 +1,5 @@
 import { resolve, extname } from 'path'
-import type { TypicalConfig, TransformResult } from '@elliots/typical'
+import type { TypicalConfig } from '@elliots/typical'
 import { TypicalTransformer, validateConfig } from '@elliots/typical'
 import { buildTimer } from './timing'
 import type { ProgramManager } from './program-manager'
@@ -21,13 +21,7 @@ export interface TransformTypiaResult {
  * Uses a shared ProgramManager for incremental compilation across files.
  * Returns both code and source map for use with Vite/Rollup/Webpack.
  */
-export function transformTypia(
-  id: string,
-  source: string,
-  config: TypicalConfig,
-  programManager: ProgramManager,
-  options: { sourceMap?: boolean } = {},
-): TransformTypiaResult | undefined {
+export function transformTypia(id: string, source: string, config: TypicalConfig, programManager: ProgramManager, options: { sourceMap?: boolean } = {}): TransformTypiaResult | undefined {
   buildTimer.start('total-transform')
 
   // Only transform TypeScript files (skip virtual modules, JS files, etc.)
@@ -63,7 +57,7 @@ export function transformTypia(
 
   // Determine if source maps should be generated
   // Default to true for bundlers since they typically want source maps
-  const generateSourceMap = options.sourceMap ?? (config.sourceMap?.enabled ?? true)
+  const generateSourceMap = options.sourceMap ?? config.sourceMap?.enabled ?? true
 
   // Transform the file with source map support
   buildTimer.start('transform')

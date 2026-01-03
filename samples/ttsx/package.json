@@ -2,8 +2,8 @@
   "name": "typical-sample-ttsx",
   "version": "1.0.0",
   "description": "Sample project using Typical TSX",
-  "main": "src/index.ts",
   "type": "module",
+  "main": "src/index.ts",
   "scripts": {
     "start": "ttsx src/index.ts",
     "dev": "ttsx --watch src/index.ts"

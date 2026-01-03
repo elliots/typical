@@ -71,6 +71,7 @@ npm run sample:vite-react
 ## Testing Requirements
 
 **IMPORTANT**: Always run `npm test` after modifying:
+
 - `src/transformer.ts`
 - `src/config.ts`
 - Any file in `packages/unplugin/src/`
@@ -106,6 +107,7 @@ Located in `src/config.ts`.
 ## Common Tasks
 
 ### Adding a new config option:
+
 1. Add to `TypicalConfig` interface in `src/config.ts`
 2. Add default value to `defaultConfig`
 3. Check the option in `src/transformer.ts` where needed
@@ -113,14 +115,18 @@ Located in `src/config.ts`.
 5. Document in README.md
 
 ### Skipping validation for a type:
+
 The transformer skips validation for:
+
 - `any` and `unknown` types
 - Type parameters (generics like `T`)
 - Types matching `ignoreTypes` patterns
 - DOM types when `ignoreDOMTypes: true`
 
 ### Adding a test case:
+
 Add to the `testCases` array in `test/transformer.test.ts`:
+
 ```typescript
 {
   name: "description of what you're testing",
@@ -154,11 +160,13 @@ The package has multiple entry points:
 ## Debugging
 
 Set `DEBUG=1` environment variable for verbose logging:
+
 ```bash
 DEBUG=1 npm run build
 ```
 
 For intermediate files (see code before typia transform):
+
 ```json
 {
   "debug": {
@@ -170,6 +178,7 @@ For intermediate files (see code before typia transform):
 ## Flow Analysis
 
 The transformer implements flow analysis to skip redundant return validations:
+
 - If returning a validated parameter directly, skip return validation
 - If returning a property of a validated parameter, skip return validation
 - If the value was "tainted" (passed to function, mutated, awaited), DO validate
