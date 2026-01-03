@@ -1,15 +1,20 @@
 {
-  "name": "@elliots/typical-tsc-plugin",
+  "name": "@elliots/unplugin-typical",
   "version": "0.2.0-beta.1",
-  "description": "TSC plugin for typical - runtime safe TypeScript transformer",
+  "description": "Unplugin for typical - runtime safe TypeScript transformer",
   "keywords": [
+    "esbuild",
+    "farm",
+    "rolldown",
+    "rollup",
+    "rspack",
     "runtime",
-    "transformer",
-    "ts-patch",
-    "tsc",
     "typescript",
     "typical",
-    "validation"
+    "unplugin",
+    "validation",
+    "vite",
+    "webpack"
   ],
   "homepage": "https://github.com/elliots/typical#readme",
   "bugs": {
@@ -20,22 +25,32 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/elliots/typical.git",
-    "directory": "packages/tsc-plugin"
-  },
-  "bin": {
-    "ttsc": "bin/ttsc"
+    "directory": "packages/unplugin"
   },
   "files": [
-    "bin",
-    "dist",
-    "src/patch-tsconfig.cjs"
+    "dist"
   ],
   "type": "module",
   "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
+  "typesVersions": {
+    "*": {
+      "*": [
+        "./dist/*.d.mts",
+        "./*"
+      ]
+    }
+  },
   "exports": {
     ".": "./dist/index.mjs",
+    "./esbuild": "./dist/esbuild.mjs",
+    "./farm": "./dist/farm.mjs",
+    "./rolldown": "./dist/rolldown.mjs",
+    "./rollup": "./dist/rollup.mjs",
+    "./rspack": "./dist/rspack.mjs",
+    "./vite": "./dist/vite.mjs",
+    "./webpack": "./dist/webpack.mjs",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -49,16 +64,13 @@
   },
   "dependencies": {
     "@elliots/typical": "workspace:*",
-    "deasync": "0.1.30",
-    "strip-json-comments": "5.0.3"
+    "unplugin": "^2.3.11"
   },
   "devDependencies": {
-    "@types/deasync": "0.1.5",
     "@types/node": "^22.0.0",
     "tsdown": "^0.18.3"
   },
   "peerDependencies": {
-    "ts-patch": "^3.0.0",
     "typescript": "^5.0.0"
   }
 }

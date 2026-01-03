@@ -80,6 +80,25 @@ importers:
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
+    optionalDependencies:
+      '@elliots/typical-compiler-darwin-arm64':
+        specifier: workspace:*
+        version: link:../compiler-darwin-arm64
+      '@elliots/typical-compiler-darwin-x64':
+        specifier: workspace:*
+        version: link:../compiler-darwin-x64
+      '@elliots/typical-compiler-linux-arm64':
+        specifier: workspace:*
+        version: link:../compiler-linux-arm64
+      '@elliots/typical-compiler-linux-x64':
+        specifier: workspace:*
+        version: link:../compiler-linux-x64
+      '@elliots/typical-compiler-win32-arm64':
+        specifier: workspace:*
+        version: link:../compiler-win32-arm64
+      '@elliots/typical-compiler-win32-x64':
+        specifier: workspace:*
+        version: link:../compiler-win32-x64
 
   packages/compiler-darwin-arm64: {}
 

@@ -1,12 +1,10 @@
 {
-  "name": "@elliots/typical-tsc-plugin",
+  "name": "@elliots/bun-plugin-typical",
   "version": "0.2.0-beta.1",
-  "description": "TSC plugin for typical - runtime safe TypeScript transformer",
+  "description": "Bun plugin for typical - runtime safe TypeScript transformer",
   "keywords": [
+    "bun",
     "runtime",
-    "transformer",
-    "ts-patch",
-    "tsc",
     "typescript",
     "typical",
     "validation"
@@ -20,15 +18,10 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/elliots/typical.git",
-    "directory": "packages/tsc-plugin"
-  },
-  "bin": {
-    "ttsc": "bin/ttsc"
+    "directory": "packages/bun-plugin"
   },
   "files": [
-    "bin",
-    "dist",
-    "src/patch-tsconfig.cjs"
+    "dist"
   ],
   "type": "module",
   "main": "./dist/index.mjs",
@@ -36,6 +29,7 @@
   "types": "./dist/index.d.mts",
   "exports": {
     ".": "./dist/index.mjs",
+    "./preload": "./dist/preload.mjs",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -48,17 +42,14 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@elliots/typical": "workspace:*",
-    "deasync": "0.1.30",
-    "strip-json-comments": "5.0.3"
+    "@elliots/typical": "workspace:*"
   },
   "devDependencies": {
-    "@types/deasync": "0.1.5",
+    "@types/bun": "^1.0.0",
     "@types/node": "^22.0.0",
     "tsdown": "^0.18.3"
   },
   "peerDependencies": {
-    "ts-patch": "^3.0.0",
     "typescript": "^5.0.0"
   }
 }

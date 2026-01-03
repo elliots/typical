@@ -1,6 +1,6 @@
 {
   "name": "@elliots/typical-compiler",
-  "version": "0.0.1",
+  "version": "0.2.0-beta.1",
   "description": "TypeScript compiler powered by tsgo for typical validation",
   "keywords": [
     "compiler",
@@ -31,11 +31,11 @@
     "typescript": "^5.7.0"
   },
   "optionalDependencies": {
-    "@elliots/typical-compiler-darwin-arm64": "0.0.1",
-    "@elliots/typical-compiler-darwin-x64": "0.0.1",
-    "@elliots/typical-compiler-linux-arm64": "0.0.1",
-    "@elliots/typical-compiler-linux-x64": "0.0.1",
-    "@elliots/typical-compiler-win32-arm64": "0.0.1",
-    "@elliots/typical-compiler-win32-x64": "0.0.1"
+    "@elliots/typical-compiler-darwin-arm64": "workspace:*",
+    "@elliots/typical-compiler-darwin-x64": "workspace:*",
+    "@elliots/typical-compiler-linux-arm64": "workspace:*",
+    "@elliots/typical-compiler-linux-x64": "workspace:*",
+    "@elliots/typical-compiler-win32-arm64": "workspace:*",
+    "@elliots/typical-compiler-win32-x64": "workspace:*"
   }
 }
