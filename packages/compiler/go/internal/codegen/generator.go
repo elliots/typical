@@ -11,10 +11,10 @@ import (
 // Generator generates JavaScript validator code from TypeScript types.
 type Generator struct {
 	checker  *checker.Checker
-	ioFuncs  []string          // _io0, _io1, etc. (is-check functions)
-	funcIdx  int               // Counter for generating unique function names
-	visiting map[string]bool   // Track types being visited for circular refs (by symbol name)
-	depth    int               // Current recursion depth
+	ioFuncs  []string        // _io0, _io1, etc. (is-check functions)
+	funcIdx  int             // Counter for generating unique function names
+	visiting map[string]bool // Track types being visited for circular refs (by symbol name)
+	depth    int             // Current recursion depth
 }
 
 // MaxTypeDepth limits how deep we recurse into type hierarchies.
@@ -46,6 +46,7 @@ func NewGenerator(c *checker.Checker) *Generator {
 		depth:    0,
 	}
 }
+
 
 // GenerateValidator generates a validator function for a type.
 // The returned string is a JavaScript function: (value, name) => value
@@ -220,6 +221,19 @@ func (g *Generator) isFunctionType(t *checker.Type) bool {
 		}
 	}
 
+	return false
+}
+
+// isBuiltInWithToJSON checks if a type is a built-in type that has toJSON method
+// and should be passed through to JSON.stringify rather than filtered.
+// Examples: Date, Map, Set, RegExp (though RegExp becomes {} in JSON).
+func (g *Generator) isBuiltInWithToJSON(t *checker.Type) bool {
+	if sym := checker.Type_symbol(t); sym != nil {
+		switch sym.Name {
+		case "Date", "Map", "Set", "RegExp", "Error", "URL", "URLSearchParams":
+			return true
+		}
+	}
 	return false
 }
 
@@ -691,4 +705,12 @@ func escapeJSString(s string) string {
 	s = strings.ReplaceAll(s, "\r", `\r`)
 	s = strings.ReplaceAll(s, "\t", `\t`)
 	return s
+}
+
+// reset resets the generator state for a new generation.
+func (g *Generator) reset() {
+	g.ioFuncs = make([]string, 0)
+	g.funcIdx = 0
+	g.visiting = make(map[string]bool)
+	g.depth = 0
 }

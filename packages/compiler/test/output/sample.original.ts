@@ -42,11 +42,11 @@ function processValue(value: string | null): string {
 }
 
 class UserService {
-  getUser(id: number): User | null {
+  getUser(_id: number): User | null {
     return null
   }
 
-  saveUser(user: User): boolean {
+  saveUser(_user: User): boolean {
     return true
   }
 }

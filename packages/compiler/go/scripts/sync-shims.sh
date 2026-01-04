@@ -28,21 +28,12 @@ git submodule update --init
 TSGO_COMMIT=$(cd typescript-go && git rev-parse HEAD)
 echo "==> tsgolint uses typescript-go commit: $TSGO_COMMIT"
 
-# Copy shims to our project (preserving our extensions)
+# Copy shims to our project
 echo "==> Copying shims..."
-# Save our custom extensions
-EXTENSIONS_BACKUP=""
-if [ -f "$GO_DIR/shim/checker/typical_extensions.go" ]; then
-    EXTENSIONS_BACKUP=$(mktemp)
-    cp "$GO_DIR/shim/checker/typical_extensions.go" "$EXTENSIONS_BACKUP"
-fi
 rm -rf "$GO_DIR/shim"
 cp -r "$TSGOLINT_DIR/shim" "$GO_DIR/shim"
-# Restore our custom extensions
-if [ -n "$EXTENSIONS_BACKUP" ] && [ -f "$EXTENSIONS_BACKUP" ]; then
-    cp "$EXTENSIONS_BACKUP" "$GO_DIR/shim/checker/typical_extensions.go"
-    rm "$EXTENSIONS_BACKUP"
-fi
+# Create symlink to our custom extensions (stored in internal/shim/)
+ln -sf ../../internal/shim/checker_extensions.go "$GO_DIR/shim/checker/typical_extensions.go"
 
 # Clone or update typescript-go to the same commit (no submodules!)
 echo "==> Updating typescript-go to $TSGO_COMMIT..."

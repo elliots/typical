@@ -174,6 +174,11 @@ func buildSourceMap(fileName, originalText string, insertions []insertion) (stri
 				genCol++
 			}
 		}
+
+		// If this insertion has a skipTo, advance srcPos to skip original text
+		if ins.skipTo > srcPos {
+			srcPos = ins.skipTo
+		}
 	}
 
 	// Copy remaining original text

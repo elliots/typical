@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/build.js",
+    "build": "ttsc",
     "start": "node dist/runtime-bench.js",
-    "bench": "node scripts/build.js && node dist/runtime-bench.js"
+    "bench": "ttsc && node dist/runtime-bench.js"
   },
   "dependencies": {
     "@elliots/typical": "workspace:*",
+    "@elliots/typical-tsc-plugin": "workspace:*",
     "tinybench": "^6.0.0",
     "zod": "^4.2.1"
   },

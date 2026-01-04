@@ -286,12 +286,56 @@ Create a `typical.json` file in your project root (optional):
 
 ### Options
 
-| Option              | Default                                                   | Description                                   |
-| ------------------- | --------------------------------------------------------- | --------------------------------------------- |
-| `include`           | `["**/*.ts", "**/*.tsx"]`                                 | Files to transform                            |
-| `exclude`           | `["node_modules/**", "**/*.d.ts", "dist/**", "build/**"]` | Files to skip                                 |
-| `validateFunctions` | `true`                                                    | Validate function parameters and return types |
-| `validateCasts`     | `false`                                                   | Validate type assertions (`as Type`)          |
+| Option                 | Default                                                   | Description                                                      |
+| ---------------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
+| `include`              | `["**/*.ts", "**/*.tsx"]`                                 | Files to transform                                               |
+| `exclude`              | `["node_modules/**", "**/*.d.ts", "dist/**", "build/**"]` | Files to skip                                                    |
+| `validateFunctions`    | `true`                                                    | Validate function parameters and return types                    |
+| `validateCasts`        | `false`                                                   | Validate type assertions (`as Type`)                             |
+| `transformJSONParse`   | `true`                                                    | Transform `JSON.parse` to validate and filter to typed properties |
+| `transformJSONStringify` | `true`                                                  | Transform `JSON.stringify` to only include typed properties      |
+
+---
+
+## JSON Transformations
+
+Typical automatically transforms `JSON.parse` and `JSON.stringify` calls when type information is available.
+
+### JSON.parse
+
+When you cast the result of `JSON.parse`, Typical validates the parsed data and filters it to only include properties defined in your type:
+
+```ts
+interface User {
+  name: string;
+  age: number;
+}
+
+// Input: '{"name":"Alice","age":30,"password":"secret"}'
+const user = JSON.parse(jsonString) as User;
+// Result: { name: "Alice", age: 30 } - password is filtered out!
+// Throws TypeError if name isn't a string or age isn't a number
+```
+
+### JSON.stringify
+
+When you use a type assertion with `JSON.stringify`, only properties defined in your type are included - preventing accidental data leaks:
+
+```ts
+interface PublicUser {
+  name: string;
+  age: number;
+}
+
+const user = { name: "Alice", age: 30, password: "secret", ssn: "123-45-6789" };
+const json = JSON.stringify(user as PublicUser);
+// Result: '{"name":"Alice","age":30}' - sensitive data excluded!
+```
+
+Both patterns detect type information from:
+- Type assertions: `JSON.parse(str) as User` or `JSON.stringify(obj as User)`
+- Variable declarations: `const user: User = JSON.parse(str)`
+- Function return types: `function getUser(): User { return JSON.parse(str) }`
 
 ---
 

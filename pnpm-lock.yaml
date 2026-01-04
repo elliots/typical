@@ -39,6 +39,9 @@ importers:
       '@elliots/typical':
         specifier: workspace:*
         version: link:..
+      '@elliots/typical-tsc-plugin':
+        specifier: workspace:*
+        version: link:../packages/tsc-plugin
       tinybench:
         specifier: ^6.0.0
         version: 6.0.0
