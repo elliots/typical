@@ -372,12 +372,37 @@ func (g *Generator) primitiveValidation(t *checker.Type, expr string, nameExpr s
 		check, nameExpr, expected, expr)
 }
 
-// unionValidation generates validation for union types.
+// unionValidation generates validation for union types using if-else chain.
+// This provides early bail-out: once a matching type is found, validation succeeds immediately.
 func (g *Generator) unionValidation(t *checker.Type, expr string, nameExpr string) string {
-	isCheck := g.unionCheck(t, expr)
+	members := t.Types()
+	if len(members) == 0 {
+		return ""
+	}
+
+	// Single member union - just validate that member directly
+	if len(members) == 1 {
+		return g.generateValidation(members[0], expr, nameExpr)
+	}
+
+	var sb strings.Builder
+
+	// Generate if-else chain for each member
+	for i, member := range members {
+		check := g.generateCheck(member, expr)
+		if i == 0 {
+			sb.WriteString(fmt.Sprintf("if (%s) { } ", check))
+		} else {
+			sb.WriteString(fmt.Sprintf("else if (%s) { } ", check))
+		}
+	}
+
+	// Final else: throw error
 	expected := g.getUnionDescription(t)
-	return fmt.Sprintf(`if (!(%s)) throw new TypeError("Expected " + %s + " to be %s, got " + typeof %s); `,
-		isCheck, nameExpr, expected, expr)
+	sb.WriteString(fmt.Sprintf(`else throw new TypeError("Expected " + %s + " to be %s, got " + (%s === null ? "null" : typeof %s)); `,
+		nameExpr, expected, expr, expr))
+
+	return sb.String()
 }
 
 // intersectionValidation generates validation for intersection types.

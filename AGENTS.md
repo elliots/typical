@@ -1,5 +1,7 @@
 # CLAUDE.md - Typical Package Guide
 
+Important: Use Australian english spelling and grammar conventions.
+
 ## What is Typical?
 
 Typical is a TypeScript transformer that adds runtime validation to TypeScript code automatically. It uses a Go-based compiler that leverages the TypeScript type checker to generate validation code at build time.

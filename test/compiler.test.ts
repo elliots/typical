@@ -233,13 +233,17 @@ void describe('Array and Tuple Types', () => {
 // =============================================================================
 
 void describe('Union Types', () => {
-  void test('primitive union', async () => {
-    await transformAndCheck(
+  void test('primitive union - if-else chain', async () => {
+    // Union validation uses if-else chain for early bail-out
+    const code = await transformAndCheck(
       `function processValue(value: string | number): string {
         return String(value);
       }`,
-      ['||', '"string" === typeof', '"number" === typeof'],
+      ['"string" === typeof', '"number" === typeof', 'if (', 'else if (', 'else throw'],
     )
+    // Verify it's using if-else chain, not combined OR for the union check
+    assert.ok(code.includes('if ("string" === typeof value)'), 'Should use if-else chain')
+    assert.ok(code.includes('else if ("number" === typeof value)'), 'Should have else if')
   })
 
   void test('union with null', async () => {
@@ -247,7 +251,7 @@ void describe('Union Types', () => {
       `function maybeString(value: string | null): string {
         return value ?? "default";
       }`,
-      ['null', '"string" === typeof'],
+      ['null === value', '"string" === typeof', 'if (', 'else if ('],
     )
   })
 
@@ -256,7 +260,7 @@ void describe('Union Types', () => {
       `function optional(value: string | undefined): string {
         return value ?? "default";
       }`,
-      ['undefined', '"string" === typeof'],
+      ['undefined === value', '"string" === typeof', 'if (', 'else if ('],
     )
   })
 
@@ -268,12 +272,28 @@ void describe('Union Types', () => {
       function area(shape: Shape): number {
         return shape.kind === "circle" ? Math.PI * shape.radius ** 2 : shape.size ** 2;
       }`,
-      ['||', 'object'],
+      ['if (', 'else if (', 'object'],
     )
   })
 
   void test('union of literal types', async () => {
-    await transformAndCheck(`function direction(dir: "north" | "south" | "east" | "west"): void {}`, ['"north"', '"south"', '"east"', '"west"', '||'])
+    await transformAndCheck(
+      `function direction(dir: "north" | "south" | "east" | "west"): void {}`,
+      ['"north"', '"south"', '"east"', '"west"', 'if (', 'else if ('],
+    )
+  })
+
+  void test('mixed union - literal, primitive, and object', async () => {
+    // Test union with string literal, number, and object type
+    const code = await transformAndCheck(
+      `interface Config { port: number; }
+      function processConfig(value: "default" | number | Config): void {}`,
+      ['"default" === value', '"number" === typeof value', '"object" === typeof value', 'if (', 'else if ('],
+    )
+    // Verify the if-else chain structure
+    assert.ok(code.includes('if ('), 'Should have if')
+    assert.ok(code.includes('else if ('), 'Should have else if')
+    assert.ok(code.includes('else throw'), 'Should have else throw')
   })
 })
 
