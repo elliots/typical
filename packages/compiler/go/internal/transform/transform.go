@@ -91,15 +91,18 @@ func TransformFileWithSourceMap(sourceFile *ast.SourceFile, c *checker.Checker, 
 							paramType := checker.Checker_getTypeFromTypeNode(c, param.Type)
 							if paramType != nil && !shouldSkipType(paramType) {
 								paramName := getParamName(param)
-								validator := gen.GenerateValidatorFromNode(paramType, param.Type, "")
-								// Map to the parameter name (start of the param declaration)
-								// This covers "name: Type" so errors point to the full param
-								paramPos := param.Name().Pos()
-								insertions = append(insertions, insertion{
-									pos:       ctx.bodyStart,
-									text:      " " + validator + "(" + paramName + ", \"" + paramName + "\");",
-									sourcePos: paramPos,
-								})
+								// Generate inline validation without IIFE wrapper
+								validation := gen.GenerateInlineValidationFromNode(paramType, param.Type, paramName)
+								if validation != "" {
+									// Map to the parameter name (start of the param declaration)
+									// This covers "name: Type" so errors point to the full param
+									paramPos := param.Name().Pos()
+									insertions = append(insertions, insertion{
+										pos:       ctx.bodyStart,
+										text:      " " + validation,
+										sourcePos: paramPos,
+									})
+								}
 							}
 						}
 					}

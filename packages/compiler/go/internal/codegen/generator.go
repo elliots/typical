@@ -123,6 +123,20 @@ func (g *Generator) GenerateIsCheck(t *checker.Type) string {
 	return g.generateCheck(t, "input")
 }
 
+// GenerateInlineValidation generates validation statements for a parameter without IIFE wrapper.
+// The paramName is substituted directly into the validation code.
+// Returns validation statements that can be inserted directly at function body start.
+func (g *Generator) GenerateInlineValidation(t *checker.Type, paramName string) string {
+	g.reset()
+	return g.generateValidation(t, paramName, `"`+paramName+`"`)
+}
+
+// GenerateInlineValidationFromNode generates inline validation using the type node.
+func (g *Generator) GenerateInlineValidationFromNode(t *checker.Type, typeNode *ast.Node, paramName string) string {
+	g.reset()
+	return g.generateValidationFromNode(t, typeNode, paramName, `"`+paramName+`"`)
+}
+
 // GenerateIsCheckFromNode generates an is-check using the type node to detect arrays.
 func (g *Generator) GenerateIsCheckFromNode(t *checker.Type, typeNode *ast.Node) string {
 	g.ioFuncs = make([]string, 0)
@@ -467,7 +481,7 @@ func (g *Generator) arrayValidation(t *checker.Type, expr string, nameExpr strin
 			g.funcIdx++
 			iVar := fmt.Sprintf("_i%d", idx)
 			eVar := fmt.Sprintf("_e%d", idx)
-			elemValidation := g.generateValidation(elemType, eVar, fmt.Sprintf(`_n + "[" + %s + "]"`, iVar))
+			elemValidation := g.generateValidation(elemType, eVar, fmt.Sprintf(`%s + "[" + %s + "]"`, nameExpr, iVar))
 			if elemValidation != "" {
 				// Use 'any' type for element to satisfy strict mode
 				sb.WriteString(fmt.Sprintf(`for (let %s = 0; %s < %s.length; %s++) { const %s: any = %s[%s]; %s} `,
@@ -500,7 +514,7 @@ func (g *Generator) arrayValidationFromNode(t *checker.Type, typeNode *ast.Node,
 					g.funcIdx++
 					iVar := fmt.Sprintf("_i%d", idx)
 					eVar := fmt.Sprintf("_e%d", idx)
-					elemValidation := g.generateValidationFromNode(elemType, arrayType.ElementType, eVar, fmt.Sprintf(`_n + "[" + %s + "]"`, iVar))
+					elemValidation := g.generateValidationFromNode(elemType, arrayType.ElementType, eVar, fmt.Sprintf(`%s + "[" + %s + "]"`, nameExpr, iVar))
 					if elemValidation != "" {
 						// Use 'any' type for element to satisfy strict mode
 						sb.WriteString(fmt.Sprintf(`for (let %s = 0; %s < %s.length; %s++) { const %s: any = %s[%s]; %s} `,

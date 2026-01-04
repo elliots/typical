@@ -27,8 +27,8 @@ func TestTransformFile(t *testing.T) {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`"string" === typeof _v`,
-				`(name, "name")`,
+				`"string" === typeof name`,      // Uses param name directly (inline)
+				`"name" + " to be string`,       // Error message uses param name
 				`throw new TypeError`,
 			},
 		},
@@ -39,8 +39,8 @@ func TestTransformFile(t *testing.T) {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`"number" === typeof _v`,
-				`(x, "x")`,
+				`"number" === typeof x`, // Uses param name directly (inline)
+				`"x" + " to be number`,  // Error message uses param name
 			},
 		},
 		{
@@ -72,8 +72,8 @@ func TestTransformFile(t *testing.T) {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: true, ValidateCasts: false},
 			expectedParts: []string{
-				`"string" === typeof _v`,
-				`(x, "x")`,
+				`"string" === typeof x`,  // Parameter validation (inline)
+				`"string" === typeof _v`, // Return validation (IIFE)
 				`"return value"`,
 			},
 		},
@@ -114,7 +114,7 @@ func TestTransformFile(t *testing.T) {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: true, ValidateCasts: false},
 			expectedParts: []string{
-				`(msg, "msg")`, // Parameter should be validated
+				`"string" === typeof msg`, // Parameter should be validated (inline)
 			},
 		},
 		{
@@ -132,8 +132,8 @@ func TestTransformFile(t *testing.T) {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`(a, "a")`,
-				`(b, "b")`,
+				`"number" === typeof a`, // Inline validation for a
+				`"number" === typeof b`, // Inline validation for b
 			},
 		},
 		{
@@ -144,10 +144,10 @@ function greet(user: User): void {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`typeof _v !== "object"`,
-				`_v === null`,
-				`(user, "user")`,
-				`_n + ".name"`, // Property path in error message
+				`typeof user !== "object"`,  // Uses param name directly
+				`user === null`,             // Uses param name directly
+				`user.name`,                 // Property access on param
+				`"user" + ".name"`,          // Error message with param name
 			},
 		},
 		{
@@ -157,9 +157,9 @@ function greet(user: User): void {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`Array.isArray(_v)`,
-				`(nums, "nums")`,
-				`_n + "[" + _i + "]"`, // Array index in error message
+				`Array.isArray(nums)`,           // Uses param name directly
+				`nums.length`,                   // Loop over array using param name
+				`"nums" + "[" + _i0 + "]"`,      // Array index in error message
 			},
 		},
 		{
@@ -169,7 +169,7 @@ function greet(user: User): void {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`Expected " + _n + " to be string`,
+				`Expected " + "name" + " to be string`, // Inline uses literal param name
 			},
 		},
 	}
@@ -246,10 +246,10 @@ const user = JSON.parse<User>(jsonStr);`,
 const str = JSON.stringify<User>(userObj);`,
 			config: Config{TransformJSONStringify: true},
 			expectedParts: []string{
-				`"\"name\""`,               // Property key in output (escaped)
-				`"\"age\""`,                // Property key in output (escaped)
-				`JSON.stringify(_v.name)`,  // Uses JSON.stringify for property values
-				`"JSON.stringify"`,         // Uses label for error messages
+				`_r.name = _v.name`,   // Filter copies properties
+				`_r.age = _v.age`,     // Filter copies properties
+				`JSON.stringify(_r)`,  // Calls JSON.stringify on filtered object
+				`"JSON.stringify"`,    // Uses label for error messages
 			},
 			unexpectedParts: []string{
 				`JSON.stringify<User>`, // Type argument should be consumed
@@ -333,10 +333,10 @@ const user = JSON.parse(jsonStr) as User;`,
 const str = JSON.stringify(userObj) as User;`,
 			config: Config{TransformJSONStringify: true},
 			expectedParts: []string{
-				`"\"name\""`,               // Property key in output (escaped)
-				`"\"age\""`,                // Property key in output (escaped)
-				`JSON.stringify(_v.name)`,  // Uses JSON.stringify for property values
-				`"JSON.stringify"`,         // Uses label for error messages
+				`_r.name = _v.name`,   // Filter copies properties
+				`_r.age = _v.age`,     // Filter copies properties
+				`JSON.stringify(_r)`,  // Calls JSON.stringify on filtered object
+				`"JSON.stringify"`,    // Uses label for error messages
 			},
 			unexpectedParts: []string{
 				`as User`, // "as T" should be consumed
@@ -363,9 +363,9 @@ const person = JSON.parse(jsonStr) as Person;`,
 const str = JSON.stringify(userObj as User);`,
 			config: Config{TransformJSONStringify: true},
 			expectedParts: []string{
-				`"\"name\""`,               // Property key in output
-				`"\"age\""`,                // Property key in output
-				`JSON.stringify(_v.name)`,  // Uses JSON.stringify for property values
+				`_r.name = _v.name`,   // Filter copies properties
+				`_r.age = _v.age`,     // Filter copies properties
+				`JSON.stringify(_r)`,  // Calls JSON.stringify on filtered object
 			},
 			unexpectedParts: []string{
 				`as User`, // "as T" should be consumed
