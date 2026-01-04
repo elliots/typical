@@ -1,6 +1,6 @@
 {
   "name": "@elliots/unplugin-typical",
-  "version": "0.2.0-beta.1",
+  "version": "0.2.0",
   "description": "Unplugin for typical - runtime safe TypeScript transformer",
   "keywords": [
     "esbuild",

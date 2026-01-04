@@ -277,10 +277,7 @@ void describe('Union Types', () => {
   })
 
   void test('union of literal types', async () => {
-    await transformAndCheck(
-      `function direction(dir: "north" | "south" | "east" | "west"): void {}`,
-      ['"north"', '"south"', '"east"', '"west"', 'if (', 'else if ('],
-    )
+    await transformAndCheck(`function direction(dir: "north" | "south" | "east" | "west"): void {}`, ['"north"', '"south"', '"east"', '"west"', 'if (', 'else if ('])
   })
 
   void test('mixed union - literal, primitive, and object', async () => {
@@ -939,10 +936,13 @@ async function transformAndRun<T>(source: string, input: T): Promise<string> {
   })
 
   // Wrap in a function and execute
-  const fn = new Function('input', `
+  const fn = new Function(
+    'input',
+    `
     ${transpiled.outputText}
     return run(input);
-  `)
+  `,
+  )
 
   return fn(input) as string
 }

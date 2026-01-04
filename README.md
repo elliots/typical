@@ -286,14 +286,14 @@ Create a `typical.json` file in your project root (optional):
 
 ### Options
 
-| Option                 | Default                                                   | Description                                                      |
-| ---------------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
-| `include`              | `["**/*.ts", "**/*.tsx"]`                                 | Files to transform                                               |
-| `exclude`              | `["node_modules/**", "**/*.d.ts", "dist/**", "build/**"]` | Files to skip                                                    |
-| `validateFunctions`    | `true`                                                    | Validate function parameters and return types                    |
-| `validateCasts`        | `false`                                                   | Validate type assertions (`as Type`)                             |
-| `transformJSONParse`   | `true`                                                    | Transform `JSON.parse` to validate and filter to typed properties |
-| `transformJSONStringify` | `true`                                                  | Transform `JSON.stringify` to only include typed properties      |
+| Option                   | Default                                                   | Description                                                       |
+| ------------------------ | --------------------------------------------------------- | ----------------------------------------------------------------- |
+| `include`                | `["**/*.ts", "**/*.tsx"]`                                 | Files to transform                                                |
+| `exclude`                | `["node_modules/**", "**/*.d.ts", "dist/**", "build/**"]` | Files to skip                                                     |
+| `validateFunctions`      | `true`                                                    | Validate function parameters and return types                     |
+| `validateCasts`          | `false`                                                   | Validate type assertions (`as Type`)                              |
+| `transformJSONParse`     | `true`                                                    | Transform `JSON.parse` to validate and filter to typed properties |
+| `transformJSONStringify` | `true`                                                    | Transform `JSON.stringify` to only include typed properties       |
 
 ---
 
@@ -333,6 +333,7 @@ const json = JSON.stringify(user as PublicUser);
 ```
 
 Both patterns detect type information from:
+
 - Type assertions: `JSON.parse(str) as User` or `JSON.stringify(obj as User)`
 - Variable declarations: `const user: User = JSON.parse(str)`
 - Function return types: `function getUser(): User { return JSON.parse(str) }`
