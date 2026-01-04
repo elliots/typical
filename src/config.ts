@@ -46,6 +46,18 @@ export interface TypicalConfig {
    */
   validateFunctions?: boolean
   /**
+   * Transform JSON.parse<T>() calls to validate and filter the parsed result
+   * to only include properties defined in type T.
+   * Default: true
+   */
+  transformJSONParse?: boolean
+  /**
+   * Transform JSON.stringify<T>() calls to only stringify properties defined
+   * in type T, preventing accidental data leaks.
+   * Default: true
+   */
+  transformJSONStringify?: boolean
+  /**
    * Source map generation settings.
    * Controls whether and how source maps are generated for transformed code.
    */
@@ -71,6 +83,8 @@ export const defaultConfig: TypicalConfig = {
   reusableValidators: false, // Off by default for accurate source maps (set to true for production)
   validateCasts: false,
   validateFunctions: true,
+  transformJSONParse: true,
+  transformJSONStringify: true,
   hoistRegex: true,
   ignoreDOMTypes: true,
   debug: {

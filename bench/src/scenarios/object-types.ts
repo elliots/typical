@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 // Template literal types
 type Email = `${string}@${string}.${string}`
-type PhoneNumber = `+${number}`
+type PhoneNumber = `+${bigint}`
 
 export interface SimpleUser {
   name: string

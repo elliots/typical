@@ -57,7 +57,7 @@ func TestTemplateLiteralTypes(t *testing.T) {
 			description: "Simple prefix with ${string}",
 			expectedContain: []string{
 				`"string" === typeof`,
-				`startsWith("hello-")`,
+				`/^hello-.*?$/.test`,
 			},
 		},
 		{
@@ -65,7 +65,7 @@ func TestTemplateLiteralTypes(t *testing.T) {
 			description: "Simple suffix with ${string}",
 			expectedContain: []string{
 				`"string" === typeof`,
-				`endsWith("-world")`,
+				`/^.*?-world$/.test`,
 			},
 		},
 		{
@@ -73,8 +73,7 @@ func TestTemplateLiteralTypes(t *testing.T) {
 			description: "Prefix and suffix with ${string}",
 			expectedContain: []string{
 				`"string" === typeof`,
-				`startsWith("hello-")`,
-				`endsWith("-world")`,
+				`/^hello-.*?-world$/.test`,
 			},
 		},
 		{
@@ -82,7 +81,6 @@ func TestTemplateLiteralTypes(t *testing.T) {
 			description: "Template with ${number}",
 			expectedContain: []string{
 				`"string" === typeof`,
-				// Should use regex for number validation
 				`/^`,
 				`$/.test`,
 			},
@@ -194,8 +192,8 @@ func TestTemplateLiteralIsCheck(t *testing.T) {
 		check := gen.GenerateIsCheck(paramType)
 		t.Logf("Is-check: %s", check)
 
-		if !strings.Contains(check, `startsWith("hello-")`) {
-			t.Error("Expected startsWith check for simple case")
+		if !strings.Contains(check, `/^hello-.*?$/.test`) {
+			t.Error("Expected regex check")
 		}
 	})
 
@@ -216,7 +214,7 @@ func TestTemplateLiteralIsCheck(t *testing.T) {
 
 // TestTemplatePatternParsing tests the intermediate representation parsing.
 func TestTemplatePatternParsing(t *testing.T) {
-	// Test the TemplatePattern rendering directly
+	// Test the TemplatePattern rendering directly - all patterns use regex now
 	tests := []struct {
 		name     string
 		pattern  *TemplatePattern
@@ -230,7 +228,7 @@ func TestTemplatePatternParsing(t *testing.T) {
 					{Kind: PartKindString},
 				},
 			},
-			expected: `startsWith("hello-")`,
+			expected: `/^hello-.*?$/.test`,
 		},
 		{
 			name: "suffix only",
@@ -240,7 +238,7 @@ func TestTemplatePatternParsing(t *testing.T) {
 					{Kind: PartKindStatic, Text: "-world"},
 				},
 			},
-			expected: `endsWith("-world")`,
+			expected: `/^.*?-world$/.test`,
 		},
 		{
 			name: "number pattern uses regex",
@@ -343,92 +341,3 @@ func TestRegexPatternGeneration(t *testing.T) {
 	}
 }
 
-// TestSimplePatternDetection tests that simple patterns are correctly identified.
-func TestSimplePatternDetection(t *testing.T) {
-	tests := []struct {
-		name     string
-		pattern  *TemplatePattern
-		isSimple bool
-	}{
-		{
-			name: "prefix + string is simple",
-			pattern: &TemplatePattern{
-				Parts: []TemplatePart{
-					{Kind: PartKindStatic, Text: "hello-"},
-					{Kind: PartKindString},
-				},
-			},
-			isSimple: true,
-		},
-		{
-			name: "string + suffix is simple",
-			pattern: &TemplatePattern{
-				Parts: []TemplatePart{
-					{Kind: PartKindString},
-					{Kind: PartKindStatic, Text: "-world"},
-				},
-			},
-			isSimple: true,
-		},
-		{
-			name: "prefix + string + suffix is simple",
-			pattern: &TemplatePattern{
-				Parts: []TemplatePart{
-					{Kind: PartKindStatic, Text: "hello-"},
-					{Kind: PartKindString},
-					{Kind: PartKindStatic, Text: "-world"},
-				},
-			},
-			isSimple: true,
-		},
-		{
-			name: "only string is simple",
-			pattern: &TemplatePattern{
-				Parts: []TemplatePart{
-					{Kind: PartKindString},
-				},
-			},
-			isSimple: true,
-		},
-		{
-			name: "prefix + number is NOT simple",
-			pattern: &TemplatePattern{
-				Parts: []TemplatePart{
-					{Kind: PartKindStatic, Text: "id_"},
-					{Kind: PartKindNumber},
-				},
-			},
-			isSimple: false,
-		},
-		{
-			name: "two dynamic parts is NOT simple",
-			pattern: &TemplatePattern{
-				Parts: []TemplatePart{
-					{Kind: PartKindString},
-					{Kind: PartKindStatic, Text: "-"},
-					{Kind: PartKindString},
-				},
-			},
-			isSimple: false,
-		},
-		{
-			name: "union is NOT simple",
-			pattern: &TemplatePattern{
-				Parts: []TemplatePart{
-					{Kind: PartKindStatic, Text: "type_"},
-					{Kind: PartKindUnion},
-				},
-			},
-			isSimple: false,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := tc.pattern.isSimple()
-			if got != tc.isSimple {
-				t.Errorf("isSimple() = %v, want %v", got, tc.isSimple)
-			}
-		})
-	}
-}

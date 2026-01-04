@@ -166,69 +166,8 @@ func (g *Generator) typeToTemplatePart(t *checker.Type) TemplatePart {
 	return TemplatePart{Kind: PartKindAny}
 }
 
-// isSimple returns true if this pattern is simple enough for string manipulation.
-// Simple means: exactly one non-static part that is PartKindString, with optional prefix/suffix.
-func (tp *TemplatePattern) isSimple() bool {
-	dynamicCount := 0
-	var dynamicPart *TemplatePart
-
-	for i := range tp.Parts {
-		if tp.Parts[i].Kind != PartKindStatic {
-			dynamicCount++
-			dynamicPart = &tp.Parts[i]
-		}
-	}
-
-	// Simple = exactly one ${string} with optional prefix/suffix
-	return dynamicCount == 1 && dynamicPart != nil && dynamicPart.Kind == PartKindString
-}
-
-// RenderAsCheck generates a JavaScript boolean expression for validation.
-// Uses string manipulation for simple cases, regex for complex cases.
+// RenderAsCheck generates a JavaScript boolean expression for validation using regex.
 func (tp *TemplatePattern) RenderAsCheck(expr string) string {
-	if tp.isSimple() {
-		return tp.renderAsStringCheck(expr)
-	}
-	return tp.renderAsRegexCheck(expr)
-}
-
-// renderAsStringCheck generates validation using string methods.
-// Only used for simple cases: `prefix${string}`, `${string}suffix`, `prefix${string}suffix`
-func (tp *TemplatePattern) renderAsStringCheck(expr string) string {
-	checks := []string{
-		fmt.Sprintf(`"string" === typeof %s`, expr),
-	}
-
-	// Find prefix and suffix
-	var prefix, suffix string
-
-	if len(tp.Parts) > 0 && tp.Parts[0].Kind == PartKindStatic {
-		prefix = tp.Parts[0].Text
-	}
-
-	if len(tp.Parts) > 1 && tp.Parts[len(tp.Parts)-1].Kind == PartKindStatic {
-		suffix = tp.Parts[len(tp.Parts)-1].Text
-	}
-
-	if prefix != "" {
-		checks = append(checks, fmt.Sprintf(`%s.startsWith(%q)`, expr, prefix))
-	}
-
-	if suffix != "" {
-		checks = append(checks, fmt.Sprintf(`%s.endsWith(%q)`, expr, suffix))
-	}
-
-	// Check length constraint if both prefix and suffix
-	if prefix != "" && suffix != "" {
-		minLen := len(prefix) + len(suffix)
-		checks = append(checks, fmt.Sprintf(`%s.length >= %d`, expr, minLen))
-	}
-
-	return "(" + strings.Join(checks, " && ") + ")"
-}
-
-// renderAsRegexCheck generates validation using regex.
-func (tp *TemplatePattern) renderAsRegexCheck(expr string) string {
 	pattern := tp.toRegexPattern()
 	return fmt.Sprintf(`("string" === typeof %s && /^%s$/.test(%s))`, expr, pattern, expr)
 }
@@ -273,9 +212,12 @@ func (part *TemplatePart) toRegexPart() string {
 	}
 }
 
-// escapeRegex escapes special regex characters in a string.
+// escapeRegex escapes special regex characters in a string for JavaScript regex literals.
 func escapeRegex(s string) string {
-	return regexp.QuoteMeta(s)
+	// First escape regex special chars
+	escaped := regexp.QuoteMeta(s)
+	// Then escape forward slash for JavaScript regex literal syntax /pattern/
+	return strings.ReplaceAll(escaped, "/", "\\/")
 }
 
 // getExpectedDescription returns a human-readable description of the template pattern.

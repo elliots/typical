@@ -207,6 +207,217 @@ func TestDefaultConfig(t *testing.T) {
 	if !config.ValidateCasts {
 		t.Error("Default config should have ValidateCasts = true")
 	}
+	if !config.TransformJSONParse {
+		t.Error("Default config should have TransformJSONParse = true")
+	}
+	if !config.TransformJSONStringify {
+		t.Error("Default config should have TransformJSONStringify = true")
+	}
+}
+
+func TestJSONTransformations(t *testing.T) {
+	tests := []struct {
+		name            string
+		input           string
+		config          Config
+		expectedParts   []string
+		unexpectedParts []string
+	}{
+		{
+			name: "JSON.parse with type argument",
+			input: `interface User { name: string; age: number; }
+const user = JSON.parse<User>(jsonStr);`,
+			config: Config{TransformJSONParse: true},
+			expectedParts: []string{
+				`const _r: any = {}`,      // Creates filtered result object
+				`_r.name = _v.name`,       // Copies name property
+				`_r.age = _v.age`,         // Copies age property
+				`return _r`,               // Returns filtered object
+				`JSON.parse(`,             // Calls JSON.parse
+				`"JSON.parse"`,            // Uses label for error messages
+			},
+			unexpectedParts: []string{
+				`JSON.parse<User>`, // Type argument should be consumed
+			},
+		},
+		{
+			name: "JSON.stringify with type argument",
+			input: `interface User { name: string; age: number; }
+const str = JSON.stringify<User>(userObj);`,
+			config: Config{TransformJSONStringify: true},
+			expectedParts: []string{
+				`"\"name\""`,               // Property key in output (escaped)
+				`"\"age\""`,                // Property key in output (escaped)
+				`JSON.stringify(_v.name)`,  // Uses JSON.stringify for property values
+				`"JSON.stringify"`,         // Uses label for error messages
+			},
+			unexpectedParts: []string{
+				`JSON.stringify<User>`, // Type argument should be consumed
+			},
+		},
+		{
+			name: "JSON.parse disabled",
+			input: `interface User { name: string; }
+const user = JSON.parse<User>(jsonStr);`,
+			config: Config{TransformJSONParse: false},
+			expectedParts: []string{
+				`JSON.parse<User>`, // Original call preserved
+			},
+			unexpectedParts: []string{
+				`const _r`, // No filtering
+			},
+		},
+		{
+			name: "JSON.stringify disabled",
+			input: `interface User { name: string; }
+const str = JSON.stringify<User>(userObj);`,
+			config: Config{TransformJSONStringify: false},
+			expectedParts: []string{
+				`JSON.stringify<User>`, // Original call preserved
+			},
+		},
+		{
+			name: "JSON.parse with nested object",
+			input: `interface Address { city: string; }
+interface Person { name: string; address: Address; }
+const person = JSON.parse<Person>(jsonStr);`,
+			config: Config{TransformJSONParse: true},
+			expectedParts: []string{
+				`_r.name`,           // Top level property
+				`_r.address`,        // Nested object property
+				`.city`,             // Nested property
+			},
+		},
+		{
+			name: "JSON.parse with array type",
+			input: `interface User { name: string; }
+const users = JSON.parse<User[]>(jsonStr);`,
+			config: Config{TransformJSONParse: true},
+			expectedParts: []string{
+				`Array.isArray`,     // Checks for array
+				`const _r: any[] = []`, // Creates array result
+				`.push(`,            // Pushes filtered elements
+			},
+		},
+		{
+			name: "JSON.parse without type argument - no transform",
+			input: `const data = JSON.parse(jsonStr);`,
+			config: Config{TransformJSONParse: true},
+			expectedParts: []string{
+				`JSON.parse(jsonStr)`, // Original call unchanged
+			},
+			unexpectedParts: []string{
+				`const _r`, // No filtering
+			},
+		},
+		{
+			name: "JSON.parse with as T pattern",
+			input: `interface User { name: string; age: number; }
+const user = JSON.parse(jsonStr) as User;`,
+			config: Config{TransformJSONParse: true},
+			expectedParts: []string{
+				`const _r: any = {}`,      // Creates filtered result object
+				`_r.name = _v.name`,       // Copies name property
+				`_r.age = _v.age`,         // Copies age property
+				`return _r`,               // Returns filtered object
+				`JSON.parse(`,             // Calls JSON.parse
+				`"JSON.parse"`,            // Uses label for error messages
+			},
+			unexpectedParts: []string{
+				`as User`, // "as T" should be consumed
+			},
+		},
+		{
+			name: "JSON.stringify with as T pattern",
+			input: `interface User { name: string; age: number; }
+const str = JSON.stringify(userObj) as User;`,
+			config: Config{TransformJSONStringify: true},
+			expectedParts: []string{
+				`"\"name\""`,               // Property key in output (escaped)
+				`"\"age\""`,                // Property key in output (escaped)
+				`JSON.stringify(_v.name)`,  // Uses JSON.stringify for property values
+				`"JSON.stringify"`,         // Uses label for error messages
+			},
+			unexpectedParts: []string{
+				`as User`, // "as T" should be consumed
+			},
+		},
+		{
+			name: "JSON.parse as T with nested object",
+			input: `interface Address { city: string; }
+interface Person { name: string; address: Address; }
+const person = JSON.parse(jsonStr) as Person;`,
+			config: Config{TransformJSONParse: true},
+			expectedParts: []string{
+				`_r.name`,           // Top level property
+				`_r.address`,        // Nested object property
+				`.city`,             // Nested property
+			},
+			unexpectedParts: []string{
+				`as Person`, // "as T" should be consumed
+			},
+		},
+		{
+			name: "JSON.stringify with argument as T pattern",
+			input: `interface User { name: string; age: number; }
+const str = JSON.stringify(userObj as User);`,
+			config: Config{TransformJSONStringify: true},
+			expectedParts: []string{
+				`"\"name\""`,               // Property key in output
+				`"\"age\""`,                // Property key in output
+				`JSON.stringify(_v.name)`,  // Uses JSON.stringify for property values
+			},
+			unexpectedParts: []string{
+				`as User`, // "as T" should be consumed
+			},
+		},
+		{
+			name: "const x: T = JSON.parse(string) pattern",
+			input: `interface User { name: string; age: number; }
+const user: User = JSON.parse(jsonStr);`,
+			config: Config{TransformJSONParse: true},
+			expectedParts: []string{
+				`const _r: any = {}`,      // Creates filtered result object
+				`_r.name = _v.name`,       // Copies name property
+				`_r.age = _v.age`,         // Copies age property
+				`JSON.parse(`,             // Calls JSON.parse
+			},
+		},
+		{
+			name: "return JSON.parse(string) with return type",
+			input: `interface User { name: string; age: number; }
+function loadUser(json: string): User {
+	return JSON.parse(json);
+}`,
+			config: Config{TransformJSONParse: true},
+			expectedParts: []string{
+				`const _r: any = {}`,      // Creates filtered result object
+				`_r.name = _v.name`,       // Copies name property
+				`_r.age = _v.age`,         // Copies age property
+				`JSON.parse(`,             // Calls JSON.parse
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := transformTestCode(t, tt.input, tt.config)
+
+			// Check expected parts
+			for _, part := range tt.expectedParts {
+				if !strings.Contains(result, part) {
+					t.Errorf("Expected output to contain %q\nGot:\n%s", part, result)
+				}
+			}
+
+			// Check unexpected parts
+			for _, part := range tt.unexpectedParts {
+				if strings.Contains(result, part) {
+					t.Errorf("Expected output NOT to contain %q\nGot:\n%s", part, result)
+				}
+			}
+		})
+	}
 }
 
 // transformTestCode is a helper that sets up a TypeScript project and transforms the code

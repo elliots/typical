@@ -739,3 +739,294 @@ void describe('Edge Cases', () => {
     )
   })
 })
+
+// =============================================================================
+// JSON TRANSFORMATIONS
+// =============================================================================
+
+/**
+ * Helper to transform, transpile, and execute code returning a result.
+ * The source should export a function called `run` that takes input and returns JSON string.
+ */
+async function transformAndRun<T>(source: string, input: T): Promise<string> {
+  const result = await compiler.transformSource('test.ts', source)
+
+  // Transpile TypeScript to JavaScript
+  const ts = await import('typescript')
+  const transpiled = ts.default.transpileModule(result.code, {
+    compilerOptions: {
+      module: ts.default.ModuleKind.CommonJS,
+      target: ts.default.ScriptTarget.ES2022,
+      esModuleInterop: true,
+    },
+  })
+
+  // Wrap in a function and execute
+  const fn = new Function('input', `
+    ${transpiled.outputText}
+    return run(input);
+  `)
+
+  return fn(input) as string
+}
+
+void describe('JSON.stringify Transformations', () => {
+  void test('strips extra properties from object', async () => {
+    const source = `
+      interface User { name: string; age: number }
+      function run(input: any): string {
+        return JSON.stringify(input as User);
+      }
+    `
+    const input = { name: 'Alice', age: 30, password: 'secret', extra: true }
+    const result = await transformAndRun(source, input)
+
+    // Compare parsed results
+    const parsed: Record<string, unknown> = JSON.parse(result)
+    assert.strictEqual(parsed.password, undefined)
+    assert.strictEqual(parsed.extra, undefined)
+    assert.deepStrictEqual(parsed, { name: 'Alice', age: 30 })
+  })
+
+  void test('handles string escaping correctly', async () => {
+    const source = `
+      interface User { name: string; age: number }
+      function run(input: any): string {
+        return JSON.stringify(input as User);
+      }
+    `
+    const input = { name: 'Al"ice\nBob\\Charlie\ttab', age: 30 }
+    const result = await transformAndRun(source, input)
+
+    // Must parse back to original values
+    const parsed = JSON.parse(result)
+    assert.strictEqual(parsed.name, input.name)
+    assert.strictEqual(parsed.age, input.age)
+  })
+
+  void test('handles unicode correctly', async () => {
+    const source = `
+      interface User { name: string; age: number }
+      function run(input: any): string {
+        return JSON.stringify(input as User);
+      }
+    `
+    const input = { name: '\u0000\u001f\u2028\u2029emoji:🎉', age: 30 }
+    const result = await transformAndRun(source, input)
+
+    const parsed = JSON.parse(result)
+    assert.strictEqual(parsed.name, input.name)
+  })
+
+  void test('handles null values', async () => {
+    const source = `
+      interface Nullable { name: string | null; age: number }
+      function run(input: any): string {
+        return JSON.stringify(input as Nullable);
+      }
+    `
+    const input = { name: null, age: 30 }
+    const result = await transformAndRun(source, input)
+
+    const parsed = JSON.parse(result)
+    assert.deepStrictEqual(parsed, { name: null, age: 30 })
+  })
+
+  void test('handles undefined properties (omitted)', async () => {
+    const source = `
+      interface Opt { name?: string; age: number }
+      function run(input: any): string {
+        return JSON.stringify(input as Opt);
+      }
+    `
+    const input = { age: 30 }
+    const result = await transformAndRun(source, input)
+
+    const parsed = JSON.parse(result)
+    assert.deepStrictEqual(parsed, { age: 30 })
+    assert.ok(!('name' in parsed))
+  })
+
+  void test('handles NaN (becomes null)', async () => {
+    const source = `
+      interface Nums { value: number }
+      function run(input: any): string {
+        return JSON.stringify(input as Nums);
+      }
+    `
+    const input = { value: NaN }
+    const result = await transformAndRun(source, input)
+
+    const parsed = JSON.parse(result)
+    assert.strictEqual(parsed.value, null)
+  })
+
+  void test('handles Infinity (becomes null)', async () => {
+    const source = `
+      interface Nums { value: number }
+      function run(input: any): string {
+        return JSON.stringify(input as Nums);
+      }
+    `
+    const input = { value: Infinity }
+    const result = await transformAndRun(source, input)
+    assert.strictEqual(JSON.parse(result).value, null)
+
+    const input2 = { value: -Infinity }
+    const result2 = await transformAndRun(source, input2)
+    assert.strictEqual(JSON.parse(result2).value, null)
+  })
+
+  void test('handles nested objects', async () => {
+    const source = `
+      interface Address { city: string }
+      interface Person { name: string; address: Address }
+      function run(input: any): string {
+        return JSON.stringify(input as Person);
+      }
+    `
+    const input = { name: 'Bob', address: { city: 'NYC', zip: '10001' }, extra: true }
+    const result = await transformAndRun(source, input)
+
+    const parsed = JSON.parse(result)
+    assert.deepStrictEqual(parsed, { name: 'Bob', address: { city: 'NYC' } })
+  })
+
+  void test('handles arrays of objects', async () => {
+    const source = `
+      interface User { name: string; age: number }
+      function run(input: any): string {
+        return JSON.stringify(input as User[]);
+      }
+    `
+    const input = [
+      { name: 'A', age: 1, extra: 'x' },
+      { name: 'B', age: 2 },
+    ]
+    const result = await transformAndRun(source, input)
+
+    const parsed = JSON.parse(result)
+    assert.deepStrictEqual(parsed, [
+      { name: 'A', age: 1 },
+      { name: 'B', age: 2 },
+    ])
+  })
+
+  void test('handles Date objects (via toJSON)', async () => {
+    const source = `
+      interface Dated { date: Date }
+      function run(input: any): string {
+        return JSON.stringify(input as Dated);
+      }
+    `
+    const d = new Date('2024-01-01T00:00:00.000Z')
+    const input = { date: d }
+    const result = await transformAndRun(source, input)
+
+    const parsed = JSON.parse(result)
+    assert.strictEqual(parsed.date, '2024-01-01T00:00:00.000Z')
+  })
+
+  void test('matches native JSON.stringify for basic object', async () => {
+    const source = `
+      interface User { name: string; age: number }
+      function run(input: any): string {
+        return JSON.stringify(input as User);
+      }
+    `
+    const input = { name: 'Alice', age: 30 }
+    const result = await transformAndRun(source, input)
+    const native = JSON.stringify(input)
+
+    // Both should produce identical output for objects with only typed properties
+    assert.strictEqual(result, native)
+  })
+})
+
+void describe('JSON.parse Transformations', () => {
+  void test('validates and filters parsed JSON', async () => {
+    const source = `
+      interface User { name: string; age: number }
+      function run(input: any): string {
+        const parsed = JSON.parse(input) as User;
+        return JSON.stringify(parsed as any);
+      }
+    `
+    const json = JSON.stringify({ name: 'Alice', age: 30, extra: 'ignored' })
+    const result = await transformAndRun(source, json)
+
+    const parsed: Record<string, unknown> = JSON.parse(result)
+    assert.strictEqual(parsed.extra, undefined)
+    assert.deepStrictEqual(parsed, { name: 'Alice', age: 30 })
+  })
+
+  void test('throws on type mismatch - wrong type', async () => {
+    const source = `
+      interface User { name: string; age: number }
+      function run(input: any): string {
+        try {
+          const parsed = JSON.parse(input) as User;
+          return JSON.stringify(parsed as any);
+        } catch (e) {
+          return 'ERROR: ' + (e as Error).message;
+        }
+      }
+    `
+    const json = JSON.stringify({ name: 123, age: 'string' })
+    const result = await transformAndRun(source, json)
+
+    assert.ok(result.startsWith('ERROR:'), `Expected error but got: ${result}`)
+  })
+
+  void test('handles optional properties', async () => {
+    const source = `
+      interface Opt { name: string; nickname?: string }
+      function run(input: any): string {
+        const parsed = JSON.parse(input) as Opt;
+        return JSON.stringify(parsed as any);
+      }
+    `
+    const json = JSON.stringify({ name: 'Alice' })
+    const result = await transformAndRun(source, json)
+
+    const parsed = JSON.parse(result)
+    assert.deepStrictEqual(parsed, { name: 'Alice' })
+  })
+
+  void test('handles nested objects', async () => {
+    const source = `
+      interface Address { city: string }
+      interface Person { name: string; address: Address }
+      function run(input: any): string {
+        const parsed = JSON.parse(input) as Person;
+        return JSON.stringify(parsed as any);
+      }
+    `
+    const json = JSON.stringify({ name: 'Bob', address: { city: 'NYC', zip: '10001' }, extra: true })
+    const result = await transformAndRun(source, json)
+
+    const parsed = JSON.parse(result)
+    assert.deepStrictEqual(parsed, { name: 'Bob', address: { city: 'NYC' } })
+  })
+
+  void test('handles arrays', async () => {
+    const source = `
+      interface User { name: string; age: number }
+      function run(input: any): string {
+        const parsed = JSON.parse(input) as User[];
+        return JSON.stringify(parsed as any);
+      }
+    `
+    const json = JSON.stringify([
+      { name: 'A', age: 1, x: 1 },
+      { name: 'B', age: 2 },
+    ])
+    const result = await transformAndRun(source, json)
+
+    const parsed = JSON.parse(result)
+    assert.deepStrictEqual(parsed, [
+      { name: 'A', age: 1 },
+      { name: 'B', age: 2 },
+    ])
+  })
+})
