@@ -455,12 +455,10 @@ function testClassWithPrivate(account: Account): void {}
 		validator := gen.GenerateValidator(paramType, "param")
 		t.Logf("Generated validator for class:\n%s", validator)
 
-		// For now, classes are validated as objects with their public properties
-		// Ideally we'd use instanceof, but that's runtime-specific
+		// Classes use instanceof check
 		expectedContain := []string{
-			"object",
-			"name",
-			"age",
+			"instanceof User",
+			"User instance",
 		}
 
 		for _, expected := range expectedContain {

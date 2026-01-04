@@ -268,10 +268,10 @@ func TestUnionPatterns(t *testing.T) {
 // TestValidatorStructure tests that the generated validator has the correct structure
 func TestValidatorStructure(t *testing.T) {
 	expectedParts := []string{
-		"((_v, _n) => {",   // Validator function start with value and name params
-		"throw new TypeError", // Should throw TypeError on validation failure
-		"return _v;",       // Return the value
-		"})",               // Function end
+		"((_v: any, _n: string) => {", // Validator function start with typed params
+		"throw new TypeError",          // Should throw TypeError on validation failure
+		"return _v;",                   // Return the value
+		"})",                           // Function end
 	}
 
 	t.Run("Validator structure", func(t *testing.T) {
@@ -569,10 +569,10 @@ function validate(user: SimpleUser): void {}
 
 	// Check validator structure
 	expectedParts := []string{
-		"((_v, _n) => {",       // Validator function with value and name params
-		"throw new TypeError",   // Should throw TypeError on failure
-		"return _v;",           // Return the value
-		"})",                   // Function end
+		"((_v: any, _n: string) => {", // Validator function with typed params
+		"throw new TypeError",          // Should throw TypeError on failure
+		"return _v;",                   // Return the value
+		"})",                           // Function end
 	}
 
 	for _, part := range expectedParts {

@@ -311,7 +311,7 @@ func TestRegexPatternGeneration(t *testing.T) {
 					{Kind: PartKindStatic, Text: ".txt"},
 				},
 			},
-			want: `path/to/.*?\.txt`,
+			want: `path\/to\/.*?\.txt`, // Forward slashes escaped for JS regex literals
 		},
 		{
 			name: "union alternatives",
