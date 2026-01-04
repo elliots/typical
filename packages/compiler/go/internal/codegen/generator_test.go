@@ -563,7 +563,8 @@ function validate(user: SimpleUser): void {}
 	}
 
 	// Generate the full validator
-	validator := gen.GenerateValidator(userType, "SimpleUser")
+	result := gen.GenerateValidator(userType, "SimpleUser")
+	validator := result.Code
 
 	t.Logf("Generated validator:\n%s", validator)
 

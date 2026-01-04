@@ -91,8 +91,8 @@ func (a *API) LoadProject(configFileName string) (*ProjectResponse, error) {
 	}, nil
 }
 
-func (a *API) TransformFile(projectId, fileName string) (*TransformResponse, error) {
-	debugf("[DEBUG] TransformFile called: project=%s file=%s\n", projectId, fileName)
+func (a *API) TransformFile(projectId, fileName string, ignoreTypes []string, maxGeneratedFunctions int) (*TransformResponse, error) {
+	debugf("[DEBUG] TransformFile called: project=%s file=%s ignoreTypes=%v maxFuncs=%d\n", projectId, fileName, ignoreTypes, maxGeneratedFunctions)
 
 	a.mu.Lock()
 	info, ok := a.projects[projectId]
@@ -105,6 +105,7 @@ func (a *API) TransformFile(projectId, fileName string) (*TransformResponse, err
 	fileName = a.toAbsolutePath(fileName)
 	debugf("[DEBUG] Absolute path: %s\n", fileName)
 
+	debugf("[DEBUG] Getting program...\n")
 	program := info.project.GetProgram()
 	debugf("[DEBUG] Got program\n")
 
@@ -120,9 +121,19 @@ func (a *API) TransformFile(projectId, fileName string) (*TransformResponse, err
 	defer release()
 	debugf("[DEBUG] Got type checker\n")
 
+	// Build config with ignore patterns and max functions limit
+	config := transform.DefaultConfig()
+	config.IgnoreTypes = transform.CompileIgnorePatterns(ignoreTypes)
+	if maxGeneratedFunctions > 0 {
+		config.MaxGeneratedFunctions = maxGeneratedFunctions
+	}
+
 	// Transform the file with source map
 	debugf("[DEBUG] Starting transform...\n")
-	code, sourceMap := transform.TransformFileWithSourceMap(sourceFile, checker, transform.DefaultConfig())
+	code, sourceMap, err := transform.TransformFileWithSourceMapAndError(sourceFile, checker, program, config)
+	if err != nil {
+		return nil, err
+	}
 	debugf("[DEBUG] Transform complete, code length: %d\n", len(code))
 
 	return &TransformResponse{
@@ -133,8 +144,8 @@ func (a *API) TransformFile(projectId, fileName string) (*TransformResponse, err
 
 // TransformSource transforms a standalone TypeScript source string without needing a project.
 // It creates a temporary directory with tsconfig.json and the source file to enable type checking.
-func (a *API) TransformSource(fileName, source string) (*TransformResponse, error) {
-	debugf("[DEBUG] TransformSource called: fileName=%s sourceLen=%d\n", fileName, len(source))
+func (a *API) TransformSource(fileName, source string, ignoreTypes []string, maxGeneratedFunctions int) (*TransformResponse, error) {
+	debugf("[DEBUG] TransformSource called: fileName=%s sourceLen=%d ignoreTypes=%v maxFuncs=%d\n", fileName, len(source), ignoreTypes, maxGeneratedFunctions)
 
 	// Create a temporary directory for this transformation
 	tmpDir, err := os.MkdirTemp("", "typical-transform-*")
@@ -183,7 +194,17 @@ func (a *API) TransformSource(fileName, source string) (*TransformResponse, erro
 	checker, release := program.GetTypeChecker(ctx)
 	defer release()
 
-	code, sourceMap := transform.TransformFileWithSourceMap(sourceFile, checker, transform.DefaultConfig())
+	// Build config with ignore patterns and max functions limit
+	config := transform.DefaultConfig()
+	config.IgnoreTypes = transform.CompileIgnorePatterns(ignoreTypes)
+	if maxGeneratedFunctions > 0 {
+		config.MaxGeneratedFunctions = maxGeneratedFunctions
+	}
+
+	code, sourceMap, err := transform.TransformFileWithSourceMapAndError(sourceFile, checker, program, config)
+	if err != nil {
+		return nil, err
+	}
 	debugf("[DEBUG] TransformSource complete, code length: %d\n", len(code))
 
 	return &TransformResponse{

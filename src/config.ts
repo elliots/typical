@@ -34,12 +34,6 @@ export interface TypicalConfig {
    */
   ignoreTypes?: string[]
   /**
-   * Skip validation for DOM types (Document, Element, Node, etc.) and their subclasses.
-   * These types have complex Window intersections that typia cannot process.
-   * Default: true
-   */
-  ignoreDOMTypes?: boolean
-  /**
    * Validate function parameters and return types at runtime.
    * When enabled, typed function parameters get runtime validation calls injected.
    * Default: true
@@ -62,19 +56,14 @@ export interface TypicalConfig {
    * Controls whether and how source maps are generated for transformed code.
    */
   sourceMap?: TypicalSourceMapConfig
-}
-
-/**
- * Pre-compiled regex patterns for ignore type matching.
- * This is populated during config loading for performance.
- */
-export interface CompiledIgnorePatterns {
-  /** Compiled patterns from user ignoreTypes config */
-  userPatterns: RegExp[]
-  /** Compiled patterns from DOM_TYPES_TO_IGNORE (when ignoreDOMTypes is true) */
-  domPatterns: RegExp[]
-  /** All patterns combined for quick checking */
-  allPatterns: RegExp[]
+  /**
+   * Maximum number of helper functions (_io0, _io1, etc.) that can be generated
+   * for a single type before erroring. Complex DOM types or library types can
+   * generate hundreds of functions which indicates a type that should be excluded.
+   * Set to 0 to disable the limit.
+   * Default: 50
+   */
+  maxGeneratedFunctions?: number
 }
 
 export const defaultConfig: TypicalConfig = {
@@ -86,7 +75,6 @@ export const defaultConfig: TypicalConfig = {
   transformJSONParse: true,
   transformJSONStringify: true,
   hoistRegex: true,
-  ignoreDOMTypes: true,
   debug: {
     writeIntermediateFiles: false,
   },
@@ -97,119 +85,8 @@ export const defaultConfig: TypicalConfig = {
   },
 }
 
-// FIXME: find a better way to work out which types to ignore
-/**
- * DOM types that typia cannot process due to Window global intersections.
- * These are the base DOM types - classes extending them are checked separately.
- */
-export const DOM_TYPES_TO_IGNORE = [
-  // Core DOM types
-  'Document',
-  'DocumentFragment',
-  'Element',
-  'Node',
-  'ShadowRoot',
-  'Window',
-  'EventTarget',
-  // HTML Elements
-  'HTML*Element',
-  'HTMLElement',
-  'HTMLCollection',
-  // SVG Elements
-  'SVG*Element',
-  'SVGElement',
-  // Events
-  '*Event',
-  // Other common DOM types
-  'NodeList',
-  'DOMTokenList',
-  'NamedNodeMap',
-  'CSSStyleDeclaration',
-  'Selection',
-  'Range',
-  'Text',
-  'Comment',
-  'CDATASection',
-  'ProcessingInstruction',
-  'DocumentType',
-  'Attr',
-  'Table',
-  'TableRow',
-  'TableCell',
-  'StyleSheet',
-]
-
 import fs from 'fs'
 import path from 'path'
-
-/**
- * Convert a glob pattern to a RegExp for type matching.
- * Supports wildcards: "React.*" -> /^React\..*$/
- */
-export function compileIgnorePattern(pattern: string): RegExp | null {
-  try {
-    const regexStr =
-      '^' +
-      pattern
-        .replace(/[.+^${}()|[\]\\]/g, '\\$&') // Escape special regex chars except *
-        .replace(/\*/g, '.*') +
-      '$'
-    return new RegExp(regexStr)
-  } catch (error) {
-    console.warn(`TYPICAL: Invalid ignoreTypes pattern "${pattern}": ${(error as Error).message}`)
-    return null
-  }
-}
-
-/**
- * Pre-compile all ignore patterns for efficient matching.
- */
-export function compileIgnorePatterns(config: TypicalConfig): CompiledIgnorePatterns {
-  const userPatterns: RegExp[] = []
-  const domPatterns: RegExp[] = []
-
-  // Compile user patterns
-  for (const pattern of config.ignoreTypes ?? []) {
-    const compiled = compileIgnorePattern(pattern)
-    if (compiled) {
-      userPatterns.push(compiled)
-    }
-  }
-
-  // Compile DOM patterns if enabled (default: true)
-  if (config.ignoreDOMTypes !== false) {
-    for (const pattern of DOM_TYPES_TO_IGNORE) {
-      const compiled = compileIgnorePattern(pattern)
-      if (compiled) {
-        domPatterns.push(compiled)
-      }
-    }
-  }
-
-  return {
-    userPatterns,
-    domPatterns,
-    allPatterns: [...userPatterns, ...domPatterns],
-  }
-}
-
-// Cache for compiled patterns, keyed by config identity
-let cachedPatterns: CompiledIgnorePatterns | null = null
-let cachedConfig: TypicalConfig | null = null
-
-/**
- * Get compiled ignore patterns, using cache if config hasn't changed.
- */
-export function getCompiledIgnorePatterns(config: TypicalConfig): CompiledIgnorePatterns {
-  // Simple identity check - if same config object, use cache
-  if (cachedConfig === config && cachedPatterns) {
-    return cachedPatterns
-  }
-
-  cachedConfig = config
-  cachedPatterns = compileIgnorePatterns(config)
-  return cachedPatterns
-}
 
 export function loadConfig(configPath?: string): TypicalConfig {
   const configFile = configPath || path.join(process.cwd(), 'typical.json')

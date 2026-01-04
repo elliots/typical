@@ -155,7 +155,8 @@ func TestTemplateLiteralTypes(t *testing.T) {
 				t.Fatalf("Could not find type for %s", tc.funcName)
 			}
 
-			validator := gen.GenerateValidator(paramType, "param")
+			result := gen.GenerateValidator(paramType, "param")
+			validator := result.Code
 			t.Logf("%s - Generated validator:\n%s", tc.description, validator)
 
 			for _, expected := range tc.expectedContain {

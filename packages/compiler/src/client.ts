@@ -103,11 +103,13 @@ export class TypicalCompiler {
     return this.request<ProjectHandle>('loadProject', { configFileName })
   }
 
-  async transformFile(project: ProjectHandle | string, fileName: string): Promise<TransformResult> {
+  async transformFile(project: ProjectHandle | string, fileName: string, ignoreTypes?: string[], maxGeneratedFunctions?: number): Promise<TransformResult> {
     const projectId = typeof project === 'string' ? project : project.id
     return this.request<TransformResult>('transformFile', {
       project: projectId,
       fileName,
+      ignoreTypes,
+      maxGeneratedFunctions,
     })
   }
 
@@ -122,12 +124,16 @@ export class TypicalCompiler {
    *
    * @param fileName - Virtual filename for error messages (e.g., "test.ts")
    * @param source - TypeScript source code
+   * @param ignoreTypes - Glob patterns for types to skip validation (e.g., ["FieldConfig", "React.*"])
+   * @param maxGeneratedFunctions - Max helper functions before error (0 = default 50)
    * @returns Transformed code with validation
    */
-  async transformSource(fileName: string, source: string): Promise<TransformResult> {
+  async transformSource(fileName: string, source: string, ignoreTypes?: string[], maxGeneratedFunctions?: number): Promise<TransformResult> {
     return this.request<TransformResult>('transformSource', {
       fileName,
       source,
+      ignoreTypes,
+      maxGeneratedFunctions,
     })
   }
 

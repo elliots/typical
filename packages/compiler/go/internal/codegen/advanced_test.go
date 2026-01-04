@@ -189,7 +189,8 @@ function testRecord(data: Record<string, number>): void {}
 				t.Fatalf("Could not find type for %s", tc.funcName)
 			}
 
-			validator := gen.GenerateValidator(paramType, "param")
+			result := gen.GenerateValidator(paramType, "param")
+			validator := result.Code
 			t.Logf("Generated validator for %s:\n%s", tc.funcName, validator)
 
 			for _, expected := range tc.expectedContain {
@@ -271,7 +272,8 @@ function testMixedUnion(value: "error" | number): void {}
 				t.Fatalf("Could not find type for %s", tc.funcName)
 			}
 
-			validator := gen.GenerateValidator(paramType, "param")
+			result := gen.GenerateValidator(paramType, "param")
+			validator := result.Code
 			t.Logf("Generated validator for %s:\n%s", tc.funcName, validator)
 
 			for _, expected := range tc.expectedContain {
@@ -334,7 +336,8 @@ function testRestTuple(value: [string, ...number[]]): void {}
 				t.Fatalf("Could not find type for %s", tc.funcName)
 			}
 
-			validator := gen.GenerateValidator(paramType, "param")
+			result := gen.GenerateValidator(paramType, "param")
+			validator := result.Code
 			t.Logf("Generated validator for %s:\n%s", tc.funcName, validator)
 
 			for _, expected := range tc.expectedContain {
@@ -408,7 +411,8 @@ function testConstEnum(size: Size): void {}
 				t.Fatalf("Could not find type for %s", tc.funcName)
 			}
 
-			validator := gen.GenerateValidator(paramType, "param")
+			result := gen.GenerateValidator(paramType, "param")
+			validator := result.Code
 			t.Logf("Generated validator for %s:\n%s", tc.funcName, validator)
 
 			for _, expected := range tc.expectedContain {
@@ -452,7 +456,8 @@ function testClassWithPrivate(account: Account): void {}
 			t.Fatal("Could not find type for testClassParam")
 		}
 
-		validator := gen.GenerateValidator(paramType, "param")
+		result := gen.GenerateValidator(paramType, "param")
+		validator := result.Code
 		t.Logf("Generated validator for class:\n%s", validator)
 
 		// Classes use instanceof check
@@ -504,7 +509,8 @@ function testDiscriminatedUnion(shape: Shape): void {}
 			t.Fatal("Could not find type for testDiscriminatedUnion")
 		}
 
-		validator := gen.GenerateValidator(paramType, "param")
+		result := gen.GenerateValidator(paramType, "param")
+		validator := result.Code
 		t.Logf("Generated validator for discriminated union:\n%s", validator)
 
 		// Should contain checks for each variant
@@ -589,7 +595,8 @@ function testArrayOfUnions(values: (string | number)[]): void {}
 				t.Fatalf("Could not find type for %s", tc.funcName)
 			}
 
-			validator := gen.GenerateValidator(paramType, "param")
+			result := gen.GenerateValidator(paramType, "param")
+			validator := result.Code
 			t.Logf("Generated validator for %s:\n%s", tc.funcName, validator)
 
 			for _, expected := range tc.expectedContain {
@@ -654,7 +661,8 @@ function testComplexIntersection(employee: Employee): void {}
 				t.Fatalf("Could not find type for %s", tc.funcName)
 			}
 
-			validator := gen.GenerateValidator(paramType, "param")
+			result := gen.GenerateValidator(paramType, "param")
+			validator := result.Code
 			t.Logf("Generated validator for %s:\n%s", tc.funcName, validator)
 
 			for _, expected := range tc.expectedContain {

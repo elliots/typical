@@ -32,8 +32,15 @@ export const Typical: UnpluginInstance<Options | undefined, false> = createUnplu
       filter: {
         id: { include: options.include, exclude: options.exclude },
       },
-      handler(code, id) {
-        return transformTypia(id, code, typicalConfig)
+      async handler(code, id) {
+        const result = await transformTypia(id, code, typicalConfig)
+        if (process.env.DEBUG && result) {
+          console.log(`[unplugin-typical] Transformed ${id}:`)
+          console.log(`  - Input length: ${code.length}`)
+          console.log(`  - Output length: ${result.code.length}`)
+          console.log(`  - Changed: ${code !== result.code}`)
+        }
+        return result
       },
     },
   }

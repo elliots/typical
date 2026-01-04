@@ -6,6 +6,11 @@ import { TypicalTransformer, buildTimer } from '@elliots/typical'
 // Extensions that we should transform
 const TRANSFORM_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts'])
 
+// Errors that indicate a file should be skipped (not transformed)
+const SKIP_ERROR_PATTERNS = [
+  'source file not found', // File is outside the TypeScript project
+]
+
 /**
  * Result of transformTypia function - compatible with unplugin transform hook.
  */
@@ -48,7 +53,27 @@ export async function transformTypia(
 
   // Transform the file
   buildTimer.start('transform')
-  const result = await transformer.transform(resolvedId, 'ts')
+  let result
+  try {
+    result = await transformer.transform(resolvedId, 'ts')
+  } catch (error) {
+    buildTimer.end('transform')
+    buildTimer.end('total-transform')
+
+    // Check if this is an error we should skip (e.g., file outside project)
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    const shouldSkip = SKIP_ERROR_PATTERNS.some(pattern => errorMessage.includes(pattern))
+
+    if (shouldSkip) {
+      if (process.env.DEBUG) {
+        console.log(`[unplugin-typical] Skipping file (not in project): ${resolvedId}`)
+      }
+      return undefined
+    }
+
+    // Re-throw other errors
+    throw error
+  }
   buildTimer.end('transform')
 
   buildTimer.end('total-transform')

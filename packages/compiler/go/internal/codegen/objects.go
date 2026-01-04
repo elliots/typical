@@ -6,12 +6,118 @@ import (
 
 	"github.com/microsoft/typescript-go/shim/ast"
 	"github.com/microsoft/typescript-go/shim/checker"
+	"github.com/elliots/typical/packages/compiler/internal/utils"
 )
+
+// isBuiltinClassType checks if a type is a built-in class from the default library.
+// If a type is from lib.*.d.ts and has a constructor, it's a class at runtime
+// and should use instanceof checks (e.g., Set, Map, Date, HTMLElement, Request, etc.)
+// This also checks base types recursively - if MyElement extends HTMLElement,
+// it will still be detected as a builtin class.
+func (g *Generator) isBuiltinClassType(t *checker.Type) string {
+	if g.program == nil {
+		return ""
+	}
+
+	// Get the symbol name to use for instanceof (use the original type's name, not base)
+	sym := checker.Type_symbol(t)
+	if sym == nil {
+		return ""
+	}
+	typeName := sym.Name
+
+	// Check this type and its base types recursively
+	if g.isBuiltinClassTypeRecursive(t, make(map[*checker.Type]bool)) {
+		return typeName
+	}
+
+	return ""
+}
+
+// isBuiltinClassTypeRecursive checks if a type or any of its base types is a builtin class.
+func (g *Generator) isBuiltinClassTypeRecursive(t *checker.Type, visited map[*checker.Type]bool) bool {
+	if visited[t] {
+		return false
+	}
+	visited[t] = true
+
+	// Handle union types - all parts must be builtin classes
+	if utils.IsUnionType(t) {
+		for _, part := range utils.UnionTypeParts(t) {
+			if !g.isBuiltinClassTypeRecursive(part, visited) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Handle intersection types - any part can be a builtin class
+	if utils.IsIntersectionType(t) {
+		for _, part := range utils.IntersectionTypeParts(t) {
+			if g.isBuiltinClassTypeRecursive(part, visited) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Handle type parameters - check the constraint
+	if utils.IsTypeParameter(t) {
+		constraint := checker.Checker_getBaseConstraintOfType(g.checker, t)
+		if constraint != nil {
+			return g.isBuiltinClassTypeRecursive(constraint, visited)
+		}
+		return false
+	}
+
+	// Check if this specific type is a builtin class
+	sym := checker.Type_symbol(t)
+	if sym == nil {
+		return false
+	}
+
+	// If from default library and has constructor, it's a builtin class
+	if utils.IsSymbolFromDefaultLibrary(g.program, sym) {
+		// Check for construct signatures
+		staticType := checker.Checker_getTypeOfSymbol(g.checker, sym)
+		if staticType != nil {
+			if len(utils.GetConstructSignatures(g.checker, staticType)) > 0 {
+				return true
+			}
+		}
+		// Also check if the symbol itself is a class
+		if sym.Flags&ast.SymbolFlagsClass != 0 {
+			return true
+		}
+	}
+
+	// Check base types recursively
+	if sym.Flags&(ast.SymbolFlagsClass|ast.SymbolFlagsInterface) != 0 {
+		declaredType := checker.Checker_getDeclaredTypeOfSymbol(g.checker, sym)
+		for _, baseType := range checker.Checker_getBaseTypes(g.checker, declaredType) {
+			if g.isBuiltinClassTypeRecursive(baseType, visited) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
 
 // objectTypeCheck generates a JavaScript expression for object type checks.
 // This handles both regular objects (interfaces) and arrays.
 // Note: cycle detection is handled by generateCheck which calls this.
 func (g *Generator) objectTypeCheck(t *checker.Type, expr string) string {
+	// Function types can only be checked with typeof - we can't validate signatures at runtime
+	if g.isFunctionType(t) {
+		return fmt.Sprintf(`("function" === typeof %s)`, expr)
+	}
+
+	// Built-in classes use instanceof check - they're classes at runtime
+	if className := g.isBuiltinClassType(t); className != "" {
+		return fmt.Sprintf(`(%s instanceof %s)`, expr, className)
+	}
+
 	// Get object flags to check the kind of object
 	objFlags := checker.Type_objectFlags(t)
 
@@ -89,6 +195,23 @@ func (g *Generator) arrayCheckFromAnonymous(t *checker.Type, expr string) string
 func (g *Generator) objectCheck(t *checker.Type, expr string) string {
 	// Note: cycle detection is handled by objectTypeCheck which calls this
 
+	// Get type name for error messages
+	typeName := "anonymous"
+	if sym := checker.Type_symbol(t); sym != nil && sym.Name != "" {
+		typeName = sym.Name
+	}
+
+	// Check complexity limit before creating another _io function
+	// Use the richer error reporting version that includes source file and properties
+	if g.checkComplexityLimitWithType(t) {
+		// Return a simple check that will pass - the error will be propagated up
+		return "true"
+	}
+
+	// Push type onto stack for error context
+	g.pushType(typeName)
+	defer g.popType()
+
 	// Create a new _io function for this object type
 	funcName := fmt.Sprintf("_io%d", g.funcIdx)
 	g.funcIdx++
@@ -107,8 +230,13 @@ func (g *Generator) objectCheck(t *checker.Type, expr string) string {
 			accessor = fmt.Sprintf(`input[%q]`, propName)
 		}
 
+		// Push property name for context
+		g.pushType(propName)
+
 		// Generate check for this property
 		check := g.generateCheck(propType, accessor)
+
+		g.popType()
 
 		// Handle optional properties
 		if isOptionalProperty(prop) {

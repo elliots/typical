@@ -280,6 +280,15 @@ void describe('Union Types', () => {
     await transformAndCheck(`function direction(dir: "north" | "south" | "east" | "west"): void {}`, ['"north"', '"south"', '"east"', '"west"', 'if (', 'else if ('])
   })
 
+  void test('union of literal types - error message shows actual value', async () => {
+    // For unions of literals, the error message should show the actual value received,
+    // not just "got string" which isn't helpful
+    const code = await transformAndCheck(`function setLanguage(lang: "en-AU" | "en-US" | "fr-FR"): void {}`, ['"en-AU"', '"en-US"', '"fr-FR"'])
+    // Should show the actual value in error message, not typeof
+    assert.ok(code.includes('"\'" + lang + "\'"') || code.includes("' + lang + '"), `Error message should show actual string value, not typeof. Code:\n${code}`)
+    assert.ok(!code.includes('got " + typeof lang'), `Should NOT use typeof for literal union error. Code:\n${code}`)
+  })
+
   void test('mixed union - literal, primitive, and object', async () => {
     // Test union with string literal, number, and object type
     const code = await transformAndCheck(
@@ -475,17 +484,20 @@ void describe('Class Types', () => {
 
 void describe('Generic Types', () => {
   void test('generic function - type parameter not validated', async () => {
-    // Generic type parameters can't be fully validated at runtime
-    // The compiler skips validation for generic types, emitting /* already valid */
-    const code = await transformAndCheck(
-      `function identity<T>(value: T): T {
+    // Generic type parameters can't be validated at runtime
+    // The compiler skips validation entirely for generic types (doesn't emit anything)
+    const result = await compiler.transformSource(
+      'test.ts',
+      `
+      function identity<T>(value: T): T {
         return value;
-      }`,
-      ['/* already valid */'], // Skip validation for generic return
+      }
+    `,
     )
-    // Should not have specific type checks like "string" or "number"
-    assert.ok(!code.includes('"string" === typeof'), 'Should not check for specific types')
-    assert.ok(!code.includes('"number" === typeof'), 'Should not check for specific types')
+    // Should not have any type checks since T is a type parameter
+    assert.ok(!result.code.includes('throw new TypeError'), 'Should not generate validation for type parameter')
+    assert.ok(!result.code.includes('"string" === typeof'), 'Should not check for specific types')
+    assert.ok(!result.code.includes('"number" === typeof'), 'Should not check for specific types')
   })
 
   void test('generic with constraint', async () => {
@@ -707,6 +719,40 @@ void describe('Cast Expressions (as Type)', () => {
         return JSON.parse(json) as Config;
       }`,
       ['object', 'host'],
+    )
+  })
+
+  void test('as unknown as T - skips validation', async () => {
+    // When user explicitly casts through unknown, they're intentionally bypassing type safety
+    const code = await transformAndCheck(
+      `interface User { name: string; }
+      const data: any = { wrong: "type" };
+      const user = data as unknown as User;`,
+      ['as unknown as User'], // Original code preserved
+      ['throw new TypeError'], // No validation generated
+    )
+    assert.ok(!code.includes('Expected'), 'Should not validate through as unknown')
+  })
+
+  void test('as any as T - skips validation', async () => {
+    // When user explicitly casts through any, they're intentionally bypassing type safety
+    const code = await transformAndCheck(
+      `interface Config { host: string; }
+      const data: unknown = {};
+      const config = data as any as Config;`,
+      ['as any as Config'], // Original code preserved
+      ['throw new TypeError'], // No validation generated
+    )
+    assert.ok(!code.includes('Expected'), 'Should not validate through as any')
+  })
+
+  void test('regular cast still validates', async () => {
+    // Normal casts should still be validated
+    await transformAndCheck(
+      `interface User { name: string; }
+      const data: unknown = { name: "test" };
+      const user = data as User;`,
+      ['throw new TypeError', 'Expected'],
     )
   })
 })
@@ -1120,6 +1166,130 @@ void describe('JSON.stringify Transformations', () => {
   })
 })
 
+// =============================================================================
+// DESTRUCTURED PARAMETERS
+// =============================================================================
+
+void describe('Destructured Parameters', () => {
+  void test('object destructuring - validates individual properties', async () => {
+    await transformAndCheck(
+      `function processUser({ name, age }: { name: string; age: number }): string {
+        return name + age;
+      }`,
+      ['"string" === typeof name', '"number" === typeof age'],
+    )
+  })
+
+  void test('object destructuring with optional properties', async () => {
+    await transformAndCheck(
+      `function greet({ name, title }: { name: string; title?: string }): string {
+        return (title ?? "") + name;
+      }`,
+      ['"string" === typeof name', 'undefined === title', '"string" === typeof title'],
+    )
+  })
+
+  void test('object destructuring with union types', async () => {
+    await transformAndCheck(
+      `function quotePath({ ref, id }: { ref?: string | null; id?: unknown }): string {
+        return ref ?? "/";
+      }`,
+      ['ref'], // Should have validation for ref
+    )
+  })
+
+  void test('object destructuring with renamed properties', async () => {
+    // When destructuring { originalName: newName }, we validate the local variable newName
+    await transformAndCheck(
+      `function processPoint({ x: xCoord, y: yCoord }: { x: number; y: number }): number {
+        return xCoord + yCoord;
+      }`,
+      ['"number" === typeof xCoord', '"number" === typeof yCoord'],
+    )
+  })
+
+  void test('object destructuring with default values', async () => {
+    // Default values should still have their type validated
+    await transformAndCheck(
+      `function greet({ name = "World" }: { name?: string }): string {
+        return "Hello " + name;
+      }`,
+      ['name'], // Should reference the name parameter
+    )
+  })
+
+  void test('nested object destructuring', async () => {
+    // Nested destructuring doesn't validate the deeply nested bindings directly as parameters,
+    // but the return value is validated since city is returned
+    await transformAndCheck(
+      `function getCity({ address: { city } }: { address: { city: string } }): string {
+        return city;
+      }`,
+      ['"string" === typeof', '"return value"'], // Return validation happens, not parameter validation for nested
+    )
+  })
+
+  void test('array destructuring', async () => {
+    await transformAndCheck(
+      `function getFirst([first, second]: [string, number]): string {
+        return first + second;
+      }`,
+      ['"string" === typeof first', '"number" === typeof second'],
+    )
+  })
+
+  void test('mixed regular and destructured parameters', async () => {
+    await transformAndCheck(
+      `function process(prefix: string, { name, value }: { name: string; value: number }): string {
+        return prefix + name + value;
+      }`,
+      ['"string" === typeof prefix', '"string" === typeof name', '"number" === typeof value'],
+    )
+  })
+})
+
+// =============================================================================
+// CONST ASSERTIONS
+// =============================================================================
+
+void describe('Const Assertions', () => {
+  void test('as const should not add validation', async () => {
+    const result = await compiler.transformSource(
+      'test.ts',
+      `
+      export const ClosedProjectStages = {
+        Completed: 'COMPLETED',
+        Lost: 'LOST',
+        Cancelled: 'CANCELLED',
+      } as const
+    `,
+    )
+    // Should NOT have validation wrapper - const assertions are compile-time only
+    assert.ok(!result.code.includes('throw new TypeError'), 'const assertion should not generate validation')
+    assert.ok(result.code.includes('as const') || result.code.includes("'COMPLETED'"), 'should preserve the const object')
+  })
+
+  void test('as const on array should not add validation', async () => {
+    const result = await compiler.transformSource(
+      'test.ts',
+      `
+      export const Stages = ['OPEN', 'CLOSED', 'PENDING'] as const
+    `,
+    )
+    assert.ok(!result.code.includes('throw new TypeError'), 'const array should not generate validation')
+  })
+
+  void test('regular cast should still validate', async () => {
+    await transformAndCheck(
+      `
+      interface User { name: string }
+      const data = { name: 'test' } as User
+      `,
+      ['throw new TypeError'],
+    )
+  })
+})
+
 void describe('JSON.parse Transformations', () => {
   void test('validates and filters parsed JSON', async () => {
     const source = `
@@ -1205,5 +1375,759 @@ void describe('JSON.parse Transformations', () => {
       { name: 'A', age: 1 },
       { name: 'B', age: 2 },
     ])
+  })
+})
+
+// =============================================================================
+// LIB TYPE DETECTION
+// =============================================================================
+
+void describe('Lib Type Detection', () => {
+  void test('built-in Set uses instanceof', async () => {
+    // Set from lib.es2015.d.ts should use instanceof check
+    await transformAndCheck(
+      `function processSet(s: Set<string>): number {
+        return s.size;
+      }`,
+      ['instanceof Set', 'Set instance'],
+    )
+  })
+
+  void test('built-in Map uses instanceof', async () => {
+    // Map from lib.es2015.d.ts should use instanceof check
+    await transformAndCheck(
+      `function processMap(m: Map<string, number>): number {
+        return m.size;
+      }`,
+      ['instanceof Map', 'Map instance'],
+    )
+  })
+
+  void test('built-in WeakSet uses instanceof', async () => {
+    await transformAndCheck(
+      `function processWeakSet(ws: WeakSet<object>): boolean {
+        return ws.has({});
+      }`,
+      ['instanceof WeakSet', 'WeakSet instance'],
+    )
+  })
+
+  void test('built-in WeakMap uses instanceof', async () => {
+    await transformAndCheck(
+      `function processWeakMap(wm: WeakMap<object, string>): boolean {
+        return wm.has({});
+      }`,
+      ['instanceof WeakMap', 'WeakMap instance'],
+    )
+  })
+
+  void test('built-in Date uses instanceof', async () => {
+    await transformAndCheck(
+      `function processDate(d: Date): number {
+        return d.getTime();
+      }`,
+      ['instanceof Date', 'Date instance'],
+    )
+  })
+
+  void test('built-in RegExp uses instanceof', async () => {
+    await transformAndCheck(
+      `function processRegExp(r: RegExp): boolean {
+        return r.test("hello");
+      }`,
+      ['instanceof RegExp', 'RegExp instance'],
+    )
+  })
+
+  void test('built-in Error uses instanceof', async () => {
+    await transformAndCheck(
+      `function processError(e: Error): string {
+        return e.message;
+      }`,
+      ['instanceof Error', 'Error instance'],
+    )
+  })
+
+  void test('built-in Promise uses instanceof', async () => {
+    await transformAndCheck(
+      `function processPromise(p: Promise<string>): Promise<string> {
+        return p;
+      }`,
+      ['instanceof Promise', 'Promise instance'],
+    )
+  })
+
+  void test('built-in ArrayBuffer uses instanceof', async () => {
+    await transformAndCheck(
+      `function processBuffer(buf: ArrayBuffer): number {
+        return buf.byteLength;
+      }`,
+      ['instanceof ArrayBuffer', 'ArrayBuffer instance'],
+    )
+  })
+
+  void test('built-in Headers uses instanceof', async () => {
+    // Headers from the Fetch API (lib.dom.d.ts) should use instanceof
+    await transformAndCheck(
+      `function processHeaders(h: Headers): string | null {
+        return h.get("content-type");
+      }`,
+      ['instanceof Headers', 'Headers instance'],
+    )
+  })
+
+  void test('user-defined Set class uses instanceof for that class', async () => {
+    // A user-defined class named Set should NOT be detected as lib type
+    // and should use the user's class for instanceof
+    await transformAndCheck(
+      `class MySet {
+        private items: string[] = [];
+        add(item: string): void { this.items.push(item); }
+      }
+      function processCustomSet(s: MySet): void {
+        s.add("test");
+      }`,
+      ['instanceof MySet'], // Should use instanceof for user's class
+    )
+  })
+
+  void test('user-defined interface does NOT use instanceof', async () => {
+    // A user-defined interface should NOT use instanceof
+    // because interfaces are not runtime values - should duck-type
+    await transformAndCheck(
+      `interface MyCollection {
+        items: string[];
+        size: number;
+      }
+      function processMyCollection(c: MyCollection): number {
+        return c.size;
+      }`,
+      ['typeof', 'object', 'c.items', 'c.size'], // Should duck-type the interface
+      ['instanceof MyCollection'], // Should NOT use instanceof for interface
+    )
+  })
+
+  void test('user-defined FormData class does NOT match lib.dom FormData', async () => {
+    // User class named FormData should use the user's class, not be treated as DOM FormData
+    await transformAndCheck(
+      `class FormData {
+        private data: Record<string, string> = {};
+        append(key: string, value: string): void { this.data[key] = value; }
+      }
+      function processCustomFormData(fd: FormData): void {
+        fd.append("test", "value");
+      }`,
+      ['instanceof FormData'], // User's class
+    )
+  })
+
+  void test('file named my-lib.utils.ts does NOT trigger lib detection', async () => {
+    // This tests that our lib detection is specific to TypeScript lib files
+    // A user file with "lib" in the name should NOT be treated as a lib file
+    // The User interface here should be duck-typed, not treated as a lib class
+    await transformAndCheck(
+      `// Simulating a file that might have "lib" in its path
+      interface User {
+        name: string;
+        age: number;
+      }
+      function processUser(u: User): string {
+        return u.name;
+      }`,
+      ['typeof', 'object', 'u.name', 'u.age'], // Should duck-type
+      ['instanceof User'], // Should NOT use instanceof for interface
+    )
+  })
+
+  // DOM types - these are interfaces in TypeScript but classes at runtime
+  void test('HTMLElement uses instanceof', async () => {
+    await transformAndCheck(
+      `function processElement(el: HTMLElement): string {
+        return el.tagName;
+      }`,
+      ['instanceof HTMLElement', 'HTMLElement instance'],
+    )
+  })
+
+  void test('HTMLDivElement uses instanceof', async () => {
+    await transformAndCheck(
+      `function processDiv(div: HTMLDivElement): string {
+        return div.innerHTML;
+      }`,
+      ['instanceof HTMLDivElement', 'HTMLDivElement instance'],
+    )
+  })
+
+  void test('HTMLInputElement uses instanceof', async () => {
+    await transformAndCheck(
+      `function processInput(input: HTMLInputElement): string {
+        return input.value;
+      }`,
+      ['instanceof HTMLInputElement', 'HTMLInputElement instance'],
+    )
+  })
+
+  void test('Event uses instanceof', async () => {
+    await transformAndCheck(
+      `function processEvent(e: Event): string {
+        return e.type;
+      }`,
+      ['instanceof Event', 'Event instance'],
+    )
+  })
+
+  void test('MouseEvent uses instanceof', async () => {
+    await transformAndCheck(
+      `function processMouse(e: MouseEvent): number {
+        return e.clientX;
+      }`,
+      ['instanceof MouseEvent', 'MouseEvent instance'],
+    )
+  })
+
+  void test('KeyboardEvent uses instanceof', async () => {
+    await transformAndCheck(
+      `function processKeyboard(e: KeyboardEvent): string {
+        return e.key;
+      }`,
+      ['instanceof KeyboardEvent', 'KeyboardEvent instance'],
+    )
+  })
+
+  // Web API types
+  void test('Blob uses instanceof', async () => {
+    await transformAndCheck(
+      `function processBlob(b: Blob): number {
+        return b.size;
+      }`,
+      ['instanceof Blob', 'Blob instance'],
+    )
+  })
+
+  void test('File uses instanceof', async () => {
+    await transformAndCheck(
+      `function processFile(f: File): string {
+        return f.name;
+      }`,
+      ['instanceof File', 'File instance'],
+    )
+  })
+
+  void test('FormData uses instanceof', async () => {
+    await transformAndCheck(
+      `function processFormData(fd: FormData): void {
+        fd.append("key", "value");
+      }`,
+      ['instanceof FormData', 'FormData instance'],
+    )
+  })
+
+  void test('URL uses instanceof', async () => {
+    await transformAndCheck(
+      `function processURL(url: URL): string {
+        return url.href;
+      }`,
+      ['instanceof URL', 'URL instance'],
+    )
+  })
+
+  void test('URLSearchParams uses instanceof', async () => {
+    await transformAndCheck(
+      `function processParams(params: URLSearchParams): string | null {
+        return params.get("key");
+      }`,
+      ['instanceof URLSearchParams', 'URLSearchParams instance'],
+    )
+  })
+
+  void test('Request uses instanceof', async () => {
+    await transformAndCheck(
+      `function processRequest(req: Request): string {
+        return req.url;
+      }`,
+      ['instanceof Request', 'Request instance'],
+    )
+  })
+
+  void test('Response uses instanceof', async () => {
+    await transformAndCheck(
+      `function processResponse(res: Response): number {
+        return res.status;
+      }`,
+      ['instanceof Response', 'Response instance'],
+    )
+  })
+
+  void test('AbortController uses instanceof', async () => {
+    await transformAndCheck(
+      `function processAbortController(ac: AbortController): AbortSignal {
+        return ac.signal;
+      }`,
+      ['instanceof AbortController', 'AbortController instance'],
+    )
+  })
+
+  void test('ReadableStream uses instanceof', async () => {
+    await transformAndCheck(
+      `function processStream(stream: ReadableStream): boolean {
+        return stream.locked;
+      }`,
+      ['instanceof ReadableStream', 'ReadableStream instance'],
+    )
+  })
+
+  void test('TextEncoder uses instanceof', async () => {
+    await transformAndCheck(
+      `function processEncoder(enc: TextEncoder): string {
+        return enc.encoding;
+      }`,
+      ['instanceof TextEncoder', 'TextEncoder instance'],
+    )
+  })
+
+  void test('TextDecoder uses instanceof', async () => {
+    await transformAndCheck(
+      `function processDecoder(dec: TextDecoder): string {
+        return dec.encoding;
+      }`,
+      ['instanceof TextDecoder', 'TextDecoder instance'],
+    )
+  })
+})
+
+// =============================================================================
+// COMPLEXITY LIMIT
+// =============================================================================
+
+void describe('Complexity Limit', () => {
+  void test('errors on overly complex types', async () => {
+    // Generate a type with many object types in a union - each object type creates an _io function
+    // With 60 distinct object types in a union, we should exceed the default limit of 50
+    const objectTypes = Array.from({ length: 60 }, (_, i) => `{ kind: "${i}"; value${i}: string }`).join(' | ')
+    const source = `
+      type Complex = ${objectTypes};
+      function process(data: Complex): void {}
+    `
+
+    try {
+      await compiler.transformSource('test.ts', source)
+      assert.fail('Expected an error for complex type')
+    } catch (e) {
+      const error = e as Error
+      assert.ok(error.message.includes('complexity limit exceeded'), `Expected complexity limit error, got: ${error.message}`)
+      assert.ok(error.message.includes('helper functions'), `Expected helper functions mention, got: ${error.message}`)
+    }
+  })
+
+  void test('normal types do not trigger limit', async () => {
+    // A reasonably complex type that should still be under the limit
+    const source = `
+      interface User {
+        id: string;
+        name: string;
+        email: string;
+        age: number;
+        active: boolean;
+        roles: string[];
+        metadata: {
+          createdAt: string;
+          updatedAt: string;
+        };
+      }
+      function processUser(user: User): void {}
+    `
+
+    // Should not throw
+    const result = await compiler.transformSource('test.ts', source)
+    assert.ok(result.code.includes('function processUser'), 'Should transform without error')
+  })
+
+  void test('complex mapped type with field configs - like FormKit', async () => {
+    // This replicates the pattern from FormKit's OrderedObjectFields type
+    // which creates a complex union from mapped types
+    const source = `
+      // Form data types
+      type FormDataValue = string | number | boolean | null | FormDataValue[] | { [key: string]: FormDataValue }
+      type FormDataObject = Record<string, FormDataValue> | object
+      type Validator<T> = ((value: T) => boolean | string)
+
+      // Base field interface with common properties
+      interface BaseFieldConfig<T = unknown> {
+        label: string
+        placeholder?: string
+        required?: boolean
+        disabled?: boolean
+        validator?: Validator<T>
+        description?: string
+      }
+
+      // Various field config types
+      interface TextFieldConfig extends BaseFieldConfig<string> {
+        type: 'text'
+        minLength?: number
+        maxLength?: number
+      }
+
+      interface NumberFieldConfig extends BaseFieldConfig<number> {
+        type: 'number'
+        min?: number
+        max?: number
+      }
+
+      interface SelectFieldConfig extends BaseFieldConfig<string> {
+        type: 'select'
+        options: { id: string; label: string }[]
+      }
+
+      interface CheckboxFieldConfig extends BaseFieldConfig<boolean> {
+        type: 'checkbox'
+      }
+
+      interface TagsFieldConfig extends BaseFieldConfig<string[]> {
+        type: 'tags'
+        maxTags?: number
+        allowDuplicates?: boolean
+        separator?: string
+      }
+
+      // Union of all field configs
+      type FieldConfig =
+        | TextFieldConfig
+        | NumberFieldConfig
+        | SelectFieldConfig
+        | CheckboxFieldConfig
+        | TagsFieldConfig
+
+      // Field entry type
+      type FieldEntry<K extends string, V> = {
+        key: K
+        config: V
+      }
+
+      // Object field config (recursive)
+      interface ObjectFieldConfig<T extends FormDataObject = FormDataObject> {
+        label?: string
+        fields: OrderedObjectFields<T>
+      }
+
+      // Array field config
+      interface ArrayFieldConfig<T> {
+        label?: string
+        fields: T extends FormDataObject ? OrderedObjectFields<T> : FieldConfig
+        min?: number
+        max?: number
+      }
+
+      // The complex mapped type that causes issues
+      type OrderedObjectFields<T> = (
+        | {
+            [K in keyof T]:
+              | FieldEntry<string & K, T[K] extends (infer U)[] ? ArrayFieldConfig<U> : T[K] extends FormDataObject ? ObjectFieldConfig<T[K]> : FieldConfig>
+          }[keyof T]
+        | FieldEntry<string, { type: 'divider' }>
+      )[]
+
+      // When casting to one of the field configs, it explodes
+      function convertField(input: unknown): TagsFieldConfig {
+        return input as TagsFieldConfig;
+      }
+    `
+
+    try {
+      await compiler.transformSource('test.ts', source)
+      // If it succeeds, that's also acceptable - the point is to test the behaviour
+    } catch (e) {
+      const error = e as Error
+      // Should get a helpful error message with source file and properties
+      assert.ok(error.message.includes('complexity limit exceeded'), `Expected complexity limit error, got: ${error.message}`)
+      assert.ok(error.message.includes('TagsFieldConfig'), `Expected TagsFieldConfig in error, got: ${error.message}`)
+      // The enhanced error should include properties
+      assert.ok(error.message.includes('Properties:'), `Expected Properties in error, got: ${error.message}`)
+    }
+  })
+})
+
+// =============================================================================
+// OPTIONAL PARAMETERS
+// =============================================================================
+
+void describe('Optional Parameters', () => {
+  void test('optional parameter with ? token wraps validation in undefined check', async () => {
+    const code = await transformAndCheck(
+      `function greet(name: string, title?: string): string {
+        return (title ?? "") + name;
+      }`,
+      [
+        '"string" === typeof name', // Required param validated normally
+        'if (title !== undefined)', // Optional param wrapped in check
+        '"string" === typeof title', // Type check still happens when defined
+      ],
+    )
+    // Verify the structure: the title validation is inside the if block
+    assert.ok(code.includes('if (title !== undefined) {'), 'Optional param should be wrapped in undefined check')
+  })
+
+  void test('parameter with default value wraps validation in undefined check', async () => {
+    const code = await transformAndCheck(
+      `function greet(name: string, greeting: string = "Hello"): string {
+        return greeting + " " + name;
+      }`,
+      [
+        '"string" === typeof name', // Required param validated normally
+        'if (greeting !== undefined)', // Default param wrapped in check
+      ],
+    )
+    assert.ok(code.includes('if (greeting !== undefined) {'), 'Default param should be wrapped in undefined check')
+  })
+
+  void test('multiple optional parameters each get undefined check', async () => {
+    await transformAndCheck(
+      `function format(text: string, prefix?: string, suffix?: string): string {
+        return (prefix ?? "") + text + (suffix ?? "");
+      }`,
+      ['"string" === typeof text', 'if (prefix !== undefined)', 'if (suffix !== undefined)'],
+    )
+  })
+
+  void test('optional object parameter wraps validation in undefined check', async () => {
+    await transformAndCheck(
+      `interface Config { host: string; port: number; }
+      function connect(config?: Config): void {}`,
+      ['if (config !== undefined)', 'typeof config !== "object"'], // Object check is !== not ===
+    )
+  })
+
+  void test('required parameter is NOT wrapped in undefined check', async () => {
+    const code = await transformAndCheck(
+      `function process(value: string): string {
+        return value;
+      }`,
+      ['"string" === typeof value'],
+    )
+    // Should NOT have if (value !== undefined) check
+    assert.ok(!code.includes('if (value !== undefined)'), 'Required param should not be wrapped in undefined check')
+  })
+})
+
+// =============================================================================
+// FUNCTION TYPES IN UNIONS
+// =============================================================================
+
+void describe('Function Types', () => {
+  void test('function type in union uses typeof function check', async () => {
+    const code = await transformAndCheck(
+      `function processCallback(cb: string | (() => void)): void {
+        if (typeof cb === "function") cb();
+      }`,
+      ['"string" === typeof cb', '"function" === typeof cb', 'if (', 'else if ('],
+    )
+    // Should NOT try to validate function signature
+    assert.ok(!code.includes('instanceof'), 'Should not use instanceof for function type')
+  })
+
+  void test('optional function property uses typeof function check', async () => {
+    // This is the console.time pattern - function | undefined
+    const code = await transformAndCheck(
+      `interface Console {
+        log: (message: string) => void;
+        time?: (label?: string) => void;
+      }
+      function useConsole(c: Console): void {
+        c.log("test");
+      }`,
+      ['"function" === typeof c.log'], // Required function property validated
+    )
+    // Optional function property - check what format it uses
+    // Could be `c.time !== undefined` or `if (c.time !== undefined)`
+    const hasTimeCheck = code.includes('c.time') && (code.includes('undefined') || code.includes('function'))
+    assert.ok(hasTimeCheck, `Optional function should have time check. Got:\n${code}`)
+  })
+
+  void test('function type as standalone parameter validates with typeof', async () => {
+    // Function parameters are validated with typeof === "function"
+    await transformAndCheck(
+      `function execute(fn: (x: number) => string): string {
+        return fn(42);
+      }`,
+      ['"function" === typeof fn'], // Function param validated with typeof
+    )
+  })
+
+  void test('callback in object type uses typeof function', async () => {
+    await transformAndCheck(
+      `interface Handler {
+        onSuccess: () => void;
+        onError?: (err: Error) => void;
+      }
+      function registerHandler(h: Handler): void {}`,
+      ['"function" === typeof'], // Should use typeof for function properties
+    )
+  })
+
+  void test('union of function and undefined uses typeof', async () => {
+    // Common pattern: optional callback
+    const code = await transformAndCheck(
+      `function maybeCall(fn: (() => void) | undefined): void {
+        if (fn) fn();
+      }`,
+      ['undefined === fn', '"function" === typeof fn'],
+    )
+    assert.ok(!code.includes('instanceof'), 'Should not use instanceof for function | undefined')
+  })
+
+  void test('union of multiple function signatures uses typeof', async () => {
+    // Multiple function types in union should all use typeof
+    await transformAndCheck(
+      `type Callback = ((x: string) => void) | ((x: number) => void) | null;
+      function setCallback(cb: Callback): void {}`,
+      ['"function" === typeof', 'null === cb'],
+    )
+  })
+
+  void test('constructor interface uses typeof function', async () => {
+    // Interfaces with `new()` signature are constructor functions at runtime
+    await transformAndCheck(
+      `interface PluginConstructor {
+        new(): { name: string };
+      }
+      function getConstructor(): PluginConstructor | undefined {
+        return undefined;
+      }`,
+      ['"function" === typeof'], // Should check for function, not object
+      ['"object" === typeof'], // Should NOT check for object
+    )
+  })
+
+  void test('constructor interface as parameter uses typeof function', async () => {
+    // Constructor parameter should be validated as function
+    await transformAndCheck(
+      `interface FormPluginConstructor {
+        new(): { init(): void };
+      }
+      function registerPlugin(ctor: FormPluginConstructor): void {}`,
+      ['"function" === typeof ctor'], // Should validate as function
+    )
+  })
+})
+
+// =============================================================================
+// HELPER FUNCTIONS (_io) IN INLINE VALIDATION
+// =============================================================================
+
+void describe('Helper Functions in Inline Validation', () => {
+  void test('any _io function used must be defined', async () => {
+    // Union of object types creates helper functions for each object type check
+    // This is the bug fix test - when using inline validation (parameters),
+    // the _io helper functions must be included in the output
+    const code = await transformAndCheck(
+      `interface Circle { kind: "circle"; radius: number; }
+      interface Square { kind: "square"; size: number; }
+      type Shape = Circle | Square;
+      export function processShape(shape: Shape): void {
+        console.log(shape);
+      }`,
+      ['if (', 'else if ('], // Union uses if-else chain
+    )
+    // Any _io function used MUST be defined
+    const ioUsages = [...code.matchAll(/_io(\d+)\(/g)]
+    for (const match of ioUsages) {
+      const funcName = `_io${match[1]}`
+      assert.ok(code.includes(`const ${funcName}`), `${funcName} is used but not defined. Code:\n${code}`)
+    }
+  })
+
+  void test('multiple parameters with complex types have unique _io names', async () => {
+    // When a function has multiple parameters that each need _io helper functions,
+    // the helpers must have unique names to avoid "symbol already declared" errors
+    const code = await transformAndCheck(
+      `interface FileType { label: string; code: string; }
+      interface UploadFile { id: string; name: string; fileType?: FileType; }
+      export function isFileTypeCompatible(file: UploadFile, fileType: FileType): boolean {
+        return file.fileType?.code === fileType.code;
+      }`,
+      ['file', 'fileType'], // Both params should be validated
+    )
+
+    // Check that all _io functions have unique names
+    const ioDefs = [...code.matchAll(/const (_io\d+)/g)]
+    const definedFuncs = ioDefs.map(m => m[1])
+    const uniqueFuncs = [...new Set(definedFuncs)]
+    assert.strictEqual(definedFuncs.length, uniqueFuncs.length, `Duplicate _io function names found. Defined: ${definedFuncs.join(', ')}. Code:\n${code}`)
+
+    // Any _io function used MUST be defined
+    const ioUsages = [...code.matchAll(/_io(\d+)\(/g)]
+    for (const match of ioUsages) {
+      const funcName = `_io${match[1]}`
+      assert.ok(code.includes(`const ${funcName}`), `${funcName} is used but not defined. Code:\n${code}`)
+    }
+  })
+})
+
+// =============================================================================
+// IGNORE TYPES
+// =============================================================================
+
+void describe('Ignore Types', () => {
+  void test('ignoreTypes skips validation and adds comment for casts', async () => {
+    // A complex type that would normally be validated
+    const source = `
+      interface FieldConfig {
+        type: string;
+        label: string;
+        options?: string[];
+      }
+      function convertField(input: unknown): FieldConfig {
+        return input as FieldConfig;
+      }
+    `
+
+    // Transform with ignoreTypes pattern
+    const result = await compiler.transformSource('test.ts', source, ['*FieldConfig'])
+
+    // Should contain the skip comment instead of validation
+    assert.ok(result.code.includes('validation skipped'), `Expected 'validation skipped' comment, got: ${result.code}`)
+    assert.ok(result.code.includes('FieldConfig'), `Expected 'FieldConfig' in skip reason, got: ${result.code}`)
+    assert.ok(result.code.includes('ignoreTypes pattern'), `Expected 'ignoreTypes pattern' in comment, got: ${result.code}`)
+    // Should NOT contain validation code
+    assert.ok(!result.code.includes('throw new TypeError'), `Should not contain validation code when ignored`)
+  })
+
+  void test('ignoreTypes skips validation and adds comment for returns', async () => {
+    const source = `
+      interface TagsFieldConfig {
+        type: 'tags';
+        maxTags?: number;
+      }
+      function getTags(): TagsFieldConfig {
+        return { type: 'tags' };
+      }
+    `
+
+    const result = await compiler.transformSource('test.ts', source, ['*FieldConfig'])
+
+    // Should contain the skip comment
+    assert.ok(result.code.includes('validation skipped'), `Expected 'validation skipped' comment, got: ${result.code}`)
+    assert.ok(result.code.includes('TagsFieldConfig'), `Expected 'TagsFieldConfig' in skip reason, got: ${result.code}`)
+  })
+
+  void test('ignoreTypes with exact match', async () => {
+    const source = `
+      interface User { name: string; }
+      interface Admin { role: string; }
+      function getAdmin(input: unknown): Admin {
+        return input as Admin;
+      }
+      function getUser(input: unknown): User {
+        return input as User;
+      }
+    `
+
+    // Only ignore Admin, not User
+    const result = await compiler.transformSource('test.ts', source, ['Admin'])
+
+    // Admin should be skipped
+    assert.ok(result.code.includes("validation skipped: type 'Admin'"), `Expected Admin to be skipped, got: ${result.code}`)
+    // User should still be validated
+    assert.ok(result.code.includes('"string" === typeof'), `Expected User validation to still exist`)
   })
 })

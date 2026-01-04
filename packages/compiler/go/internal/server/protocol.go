@@ -71,13 +71,17 @@ type ProjectResponse struct {
 }
 
 type TransformFileParams struct {
-	Project  string `json:"project"`
-	FileName string `json:"fileName"`
+	Project               string   `json:"project"`
+	FileName              string   `json:"fileName"`
+	IgnoreTypes           []string `json:"ignoreTypes,omitempty"`           // Glob patterns for types to skip
+	MaxGeneratedFunctions int      `json:"maxGeneratedFunctions,omitempty"` // Max helper functions before error (0 = default 50)
 }
 
 type TransformSourceParams struct {
-	FileName string `json:"fileName"` // Virtual filename for error messages
-	Source   string `json:"source"`   // TypeScript source code
+	FileName              string   `json:"fileName"`                        // Virtual filename for error messages
+	Source                string   `json:"source"`                          // TypeScript source code
+	IgnoreTypes           []string `json:"ignoreTypes,omitempty"`           // Glob patterns for types to skip
+	MaxGeneratedFunctions int      `json:"maxGeneratedFunctions,omitempty"` // Max helper functions before error (0 = default 50)
 }
 
 type TransformResponse struct {

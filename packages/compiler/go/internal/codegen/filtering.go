@@ -165,9 +165,10 @@ func (g *Generator) objectFilteringValidation(t *checker.Type, expr string, name
 	var sb strings.Builder
 
 	// Check for class types - use instanceof and return as-is
+	// BUT: skip instanceof for type-only imports (import type { ... }) since they don't exist at runtime
 	if g.isClassType(t) {
 		sym := checker.Type_symbol(t)
-		if sym != nil {
+		if sym != nil && !g.isTypeOnlyImport(sym) {
 			sb.WriteString(fmt.Sprintf(`if (!(%s instanceof %s)) throw new TypeError("Expected " + %s + " to be %s instance, got " + (%s === null ? "null" : %s?.constructor?.name ?? typeof %s)); `,
 				expr, sym.Name, nameExpr, sym.Name, expr, expr, expr))
 			sb.WriteString(fmt.Sprintf("const %s = %s; ", resultExpr, expr))
@@ -175,9 +176,15 @@ func (g *Generator) objectFilteringValidation(t *checker.Type, expr string, name
 		}
 	}
 
+	// Get type name for error message
+	typeName := "object"
+	if sym := checker.Type_symbol(t); sym != nil && isGoodTypeName(sym.Name) {
+		typeName = sym.Name
+	}
+
 	// Check it's an object and not null
-	sb.WriteString(fmt.Sprintf(`if (typeof %s !== "object" || %s === null) throw new TypeError("Expected " + %s + " to be object, got " + (%s === null ? "null" : typeof %s)); `,
-		expr, expr, nameExpr, expr, expr))
+	sb.WriteString(fmt.Sprintf(`if (typeof %s !== "object" || %s === null) throw new TypeError("Expected " + %s + " to be %s, got " + (%s === null ? "null" : typeof %s)); `,
+		expr, expr, nameExpr, typeName, expr, expr))
 
 	// Create result object
 	sb.WriteString(fmt.Sprintf("const %s: any = {}; ", resultExpr))

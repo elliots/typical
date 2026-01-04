@@ -58,7 +58,8 @@ export class TypicalTransformer {
     await this.ensureInitialized()
 
     const resolvedPath = resolve(fileName)
-    const result = await this.compiler.transformFile(this.projectHandle!, resolvedPath)
+    // Pass ignoreTypes and maxGeneratedFunctions from config to the Go compiler
+    const result = await this.compiler.transformFile(this.projectHandle!, resolvedPath, this.config.ignoreTypes, this.config.maxGeneratedFunctions)
 
     return {
       code: result.code,

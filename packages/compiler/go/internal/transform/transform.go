@@ -1,12 +1,23 @@
 package transform
 
 import (
+	"fmt"
+	"os"
 	"strings"
 
 	"github.com/elliots/typical/packages/compiler/internal/codegen"
 	"github.com/microsoft/typescript-go/shim/ast"
 	"github.com/microsoft/typescript-go/shim/checker"
+	"github.com/microsoft/typescript-go/shim/compiler"
 )
+
+var debug = os.Getenv("DEBUG") == "1"
+
+func debugf(format string, args ...interface{}) {
+	if debug {
+		fmt.Fprintf(os.Stderr, format, args...)
+	}
+}
 
 // insertion represents text to insert at a position in the source
 type insertion struct {
@@ -17,21 +28,45 @@ type insertion struct {
 }
 
 // TransformFile transforms a TypeScript source file by adding runtime validators.
-func TransformFile(sourceFile *ast.SourceFile, c *checker.Checker) string {
-	return TransformFileWithConfig(sourceFile, c, DefaultConfig())
+func TransformFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compiler.Program) string {
+	return TransformFileWithConfig(sourceFile, c, program, DefaultConfig())
 }
 
 // TransformFileWithConfig transforms a TypeScript source file with the given configuration.
-func TransformFileWithConfig(sourceFile *ast.SourceFile, c *checker.Checker, config Config) string {
-	code, _ := TransformFileWithSourceMap(sourceFile, c, config)
+func TransformFileWithConfig(sourceFile *ast.SourceFile, c *checker.Checker, program *compiler.Program, config Config) string {
+	code, _ := TransformFileWithSourceMap(sourceFile, c, program, config)
 	return code
 }
 
 // TransformFileWithSourceMap transforms a TypeScript source file and returns both the code and source map.
-func TransformFileWithSourceMap(sourceFile *ast.SourceFile, c *checker.Checker, config Config) (string, *RawSourceMap) {
+// Returns error if a type exceeds the complexity limit.
+func TransformFileWithSourceMap(sourceFile *ast.SourceFile, c *checker.Checker, program *compiler.Program, config Config) (string, *RawSourceMap) {
+	code, sourceMap, _ := TransformFileWithSourceMapAndError(sourceFile, c, program, config)
+	return code, sourceMap
+}
+
+// TransformFileWithSourceMapAndError transforms a TypeScript source file and returns code, source map, and any error.
+// Returns error if a type exceeds the complexity limit (e.g., complex DOM types).
+func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.Checker, program *compiler.Program, config Config) (string, *RawSourceMap, error) {
 	text := sourceFile.Text()
 	fileName := sourceFile.FileName()
-	gen := codegen.NewGenerator(c)
+	debugf("[DEBUG] Starting transform for %s\n", fileName)
+
+	// Compute line starts for position-to-line conversion
+	lineStarts := computeLineStarts(text)
+
+	// Helper to get 1-based line number from position
+	getLineNumber := func(pos int) int {
+		line, _ := posToLineCol(pos, lineStarts)
+		return line + 1 // Convert to 1-based
+	}
+
+	// Create generator with config's max functions limit and ignore patterns
+	maxFuncs := config.MaxGeneratedFunctions
+	if maxFuncs == 0 {
+		maxFuncs = DefaultMaxGeneratedFunctions
+	}
+	gen := codegen.NewGeneratorWithIgnoreTypes(c, program, maxFuncs, config.IgnoreTypes)
 
 	// Collect all insertions (position -> text to insert)
 	var insertions []insertion
@@ -45,10 +80,12 @@ func TransformFileWithSourceMap(sourceFile *ast.SourceFile, c *checker.Checker, 
 		bodyNode   *ast.Node                    // Function body for dirty detection
 	}
 	var funcStack []*funcContext
+	nodeCount := 0
 
 	// Recursive visitor
 	var visit ast.Visitor
 	visit = func(node *ast.Node) bool {
+		nodeCount++
 		switch node.Kind {
 		case ast.KindFunctionDeclaration,
 			ast.KindFunctionExpression,
@@ -90,20 +127,92 @@ func TransformFileWithSourceMap(sourceFile *ast.SourceFile, c *checker.Checker, 
 
 				// Add validators for parameters at the start of function body
 				if config.ValidateParameters && ctx.bodyStart > 0 {
+					// Reset the function index counter for this function scope
+					// This ensures _io0, _io1, etc. start fresh for each function
+					gen.ResetFuncIdx()
+					isFirstParam := true
+
 					for _, param := range fn.Parameters() {
 						if param.Type != nil {
 							paramType := checker.Checker_getTypeFromTypeNode(c, param.Type)
-							if paramType != nil && !shouldSkipType(paramType) {
+							if paramType != nil && !shouldSkipType(paramType) && !shouldSkipComplexType(paramType, c) {
 								paramName := getParamName(param)
+								// Handle destructuring patterns - validate each binding element
+								if paramName == "" {
+									// Check for ObjectBindingPattern or ArrayBindingPattern
+									nameNode := param.Name()
+									if nameNode != nil && ast.IsBindingPattern(nameNode) {
+										bindingPattern := nameNode.AsBindingPattern()
+										if bindingPattern != nil && bindingPattern.Elements != nil {
+											for _, element := range bindingPattern.Elements.Nodes {
+												if element.Kind == ast.KindBindingElement {
+													bindingElement := element.AsBindingElement()
+													if bindingElement != nil {
+														elemName := bindingElement.Name()
+														if elemName != nil && elemName.Kind == ast.KindIdentifier {
+															elemNameStr := elemName.AsIdentifier().Text
+															// Get the type of this binding element from its symbol
+															elemSym := element.Symbol()
+															if elemSym != nil {
+																elemType := checker.Checker_getTypeOfSymbol(c, elemSym)
+																if elemType != nil && !shouldSkipType(elemType) && !shouldSkipComplexType(elemType, c) {
+																	// Use continued validation after first param to avoid duplicate _io names
+																	var validation string
+																	if isFirstParam {
+																		validation = gen.GenerateInlineValidation(elemType, elemNameStr)
+																		isFirstParam = false
+																	} else {
+																		validation = gen.GenerateInlineValidationContinued(elemType, nil, elemNameStr)
+																	}
+																	if validation != "" {
+																		insertions = append(insertions, insertion{
+																			pos:       ctx.bodyStart,
+																			text:      " " + validation,
+																			sourcePos: elemName.Pos(),
+																		})
+																	}
+																	ctx.validated[elemNameStr] = append(ctx.validated[elemNameStr], elemType)
+																}
+															}
+														}
+													}
+												}
+											}
+										}
+									}
+									continue
+								}
+								// Set context for error messages (line number and parameter name)
+								paramPos := param.Name().Pos()
+								lineNum := getLineNumber(paramPos)
+								gen.SetContext(fmt.Sprintf("param '%s' at line %d", paramName, lineNum))
+
 								// Generate inline validation without IIFE wrapper
-								validation := gen.GenerateInlineValidationFromNode(paramType, param.Type, paramName)
+								// Use continued validation after first param to avoid duplicate _io names
+								var validation string
+								if isFirstParam {
+									validation = gen.GenerateInlineValidationFromNode(paramType, param.Type, paramName)
+									isFirstParam = false
+								} else {
+									validation = gen.GenerateInlineValidationContinued(paramType, param.Type, paramName)
+								}
 								if validation != "" {
+									// Check if parameter is optional (has ? token or default value)
+									isOptional := param.QuestionToken != nil || param.Initializer != nil
+
+									var validationText string
+									if isOptional {
+										// Wrap in undefined check for optional params
+										validationText = fmt.Sprintf(" if (%s !== undefined) { %s}", paramName, validation)
+									} else {
+										validationText = " " + validation
+									}
+
 									// Map to the parameter name (start of the param declaration)
 									// This covers "name: Type" so errors point to the full param
-									paramPos := param.Name().Pos()
 									insertions = append(insertions, insertion{
 										pos:       ctx.bodyStart,
-										text:      " " + validation,
+										text:      validationText,
 										sourcePos: paramPos,
 									})
 								}
@@ -131,7 +240,7 @@ func TransformFileWithSourceMap(sourceFile *ast.SourceFile, c *checker.Checker, 
 							if isJSON && methodName == "parse" {
 								// Get the actual return type (unwrap Promise for async)
 								actualType, _ := unwrapReturnType(returnType, ctx.returnType, ctx.isAsync, c)
-								if actualType != nil && !shouldSkipType(actualType) {
+								if actualType != nil && !shouldSkipType(actualType) && !shouldSkipComplexType(actualType, c) {
 									filteringValidator := gen.GenerateFilteringValidator(actualType, "")
 
 									if callExpr.Arguments != nil && len(callExpr.Arguments.Nodes) > 0 {
@@ -153,11 +262,15 @@ func TransformFileWithSourceMap(sourceFile *ast.SourceFile, c *checker.Checker, 
 					}
 
 					// Regular return statement validation
-					if config.ValidateReturns && returnType != nil && !shouldSkipType(returnType) {
+					debugf("[DEBUG] Checking return type validation...\n")
+					if config.ValidateReturns && returnType != nil && !shouldSkipType(returnType) && !shouldSkipComplexType(returnType, c) {
+						debugf("[DEBUG] Return type not skipped, unwrapping...\n")
 						// Get the actual return type (unwrap Promise for async functions)
 						actualType, actualTypeNode := unwrapReturnType(returnType, ctx.returnType, ctx.isAsync, c)
+						debugf("[DEBUG] Unwrapped return type, checking if skippable...\n")
 
-						if !shouldSkipType(actualType) {
+						if !shouldSkipType(actualType) && !shouldSkipComplexType(actualType, c) {
+							debugf("[DEBUG] Actual return type not skipped, validating...\n")
 							// Check if the return expression is already validated
 							vs := &validationState{validated: ctx.validated, checker: c}
 							skipValidation := false
@@ -185,54 +298,68 @@ func TransformFileWithSourceMap(sourceFile *ast.SourceFile, c *checker.Checker, 
 									sourcePos: -1,
 								})
 							} else {
-								validator := gen.GenerateValidatorFromNode(actualType, actualTypeNode, "")
+								// Set context for error messages
+								returnPos := returnStmt.Pos()
+								lineNum := getLineNumber(returnPos)
+								gen.SetContext(fmt.Sprintf("return at line %d", lineNum))
 
-								// Get expression positions
-								exprStart := returnStmt.Expression.Pos()
-								exprEnd := returnStmt.Expression.End()
+								result := gen.GenerateValidatorFromNode(actualType, actualTypeNode, "")
 
-								// Get the source position of the return type annotation
-								returnTypePos := ctx.returnType.Pos()
+								if result.Ignored {
+									// Type was ignored - add a comment explaining why
+									insertions = append(insertions, insertion{
+										pos:       returnStmt.Expression.Pos(),
+										text:      "/* validation skipped: " + result.IgnoredReason + " */",
+										sourcePos: -1,
+									})
+								} else if result.Code != "" {
+									// Get expression positions
+									exprStart := returnStmt.Expression.Pos()
+									exprEnd := returnStmt.Expression.End()
 
-								if ctx.isAsync {
-									// Async function: Promise is automatically unwrapped
-									// return expr; -> return validator(expr, "return value");
-									insertions = append(insertions, insertion{
-										pos:       exprStart,
-										text:      validator + "(",
-										sourcePos: returnTypePos,
-									})
-									insertions = append(insertions, insertion{
-										pos:       exprEnd,
-										text:      `, "return value")`,
-										sourcePos: returnTypePos,
-									})
-								} else if isPromiseType(returnType, c) {
-									// Sync function returning Promise: add .then()
-									// return expr; -> return (expr).then(_v => validator(_v, "return value"));
-									insertions = append(insertions, insertion{
-										pos:       exprStart,
-										text:      "(",
-										sourcePos: returnTypePos,
-									})
-									insertions = append(insertions, insertion{
-										pos:       exprEnd,
-										text:      ").then(_v => " + validator + `(_v, "return value"))`,
-										sourcePos: returnTypePos,
-									})
-								} else {
-									// Normal sync function
-									// return expr; -> return validator(expr, "return value");
-									insertions = append(insertions, insertion{
-										pos:       exprStart,
-										text:      validator + "(",
-										sourcePos: returnTypePos,
-									})
-									insertions = append(insertions, insertion{
-										pos:       exprEnd,
-										text:      `, "return value")`,
-										sourcePos: returnTypePos,
-									})
+									// Get the source position of the return type annotation
+									returnTypePos := ctx.returnType.Pos()
+
+									if ctx.isAsync {
+										// Async function: Promise is automatically unwrapped
+										// return expr; -> return validator(expr, "return value");
+										insertions = append(insertions, insertion{
+											pos:       exprStart,
+											text:      result.Code + "(",
+											sourcePos: returnTypePos,
+										})
+										insertions = append(insertions, insertion{
+											pos:       exprEnd,
+											text:      `, "return value")`,
+											sourcePos: returnTypePos,
+										})
+									} else if isPromiseType(returnType, c) {
+										// Sync function returning Promise: add .then()
+										// return expr; -> return (expr).then(_v => validator(_v, "return value"));
+										insertions = append(insertions, insertion{
+											pos:       exprStart,
+											text:      "(",
+											sourcePos: returnTypePos,
+										})
+										insertions = append(insertions, insertion{
+											pos:       exprEnd,
+											text:      ").then(_v => " + result.Code + `(_v, "return value"))`,
+											sourcePos: returnTypePos,
+										})
+									} else {
+										// Normal sync function
+										// return expr; -> return validator(expr, "return value");
+										insertions = append(insertions, insertion{
+											pos:       exprStart,
+											text:      result.Code + "(",
+											sourcePos: returnTypePos,
+										})
+										insertions = append(insertions, insertion{
+											pos:       exprEnd,
+											text:      `, "return value")`,
+											sourcePos: returnTypePos,
+										})
+									}
 								}
 							}
 						}
@@ -245,8 +372,30 @@ func TransformFileWithSourceMap(sourceFile *ast.SourceFile, c *checker.Checker, 
 			// Also handle JSON.parse(x) as T and JSON.stringify(x) as T patterns
 			asExpr := node.AsAsExpression()
 			if asExpr != nil && asExpr.Type != nil {
+				// Skip "as const" assertions - they're compile-time only
+				// Check by looking at the source text since the AST node type varies
+				if strings.TrimSpace(text[asExpr.Type.Pos():asExpr.Type.End()]) == "const" {
+					return true // Continue visiting children but don't generate validation
+				}
+
+				// Skip "as unknown as T" or "as any as T" patterns - these are intentional type escapes
+				// The inner expression is cast to any/unknown first, meaning the user is intentionally
+				// bypassing type checking, so we shouldn't validate the final type either
+				if asExpr.Expression.Kind == ast.KindAsExpression {
+					innerAs := asExpr.Expression.AsAsExpression()
+					if innerAs != nil && innerAs.Type != nil {
+						innerTypeText := strings.TrimSpace(text[innerAs.Type.Pos():innerAs.Type.End()])
+						if innerTypeText == "unknown" || innerTypeText == "any" {
+							return true // Continue visiting but skip validation for this cast
+						}
+					}
+				}
 				castType := checker.Checker_getTypeFromTypeNode(c, asExpr.Type)
-				if castType != nil && !shouldSkipType(castType) {
+				skipType := castType == nil || shouldSkipType(castType)
+				if !skipType {
+					skipType = shouldSkipComplexType(castType, c)
+				}
+				if !skipType {
 					castTypePos := asExpr.Type.Pos()
 
 					// Check if inner expression is JSON.parse() or JSON.stringify()
@@ -302,32 +451,48 @@ func TransformFileWithSourceMap(sourceFile *ast.SourceFile, c *checker.Checker, 
 
 					// Regular cast validation (not JSON)
 					if config.ValidateCasts {
-						validator := gen.GenerateValidatorFromNode(castType, asExpr.Type, "")
+						// Set context for error messages
+						castPos := node.Pos()
+						lineNum := getLineNumber(castPos)
+						gen.SetContext(fmt.Sprintf("cast at line %d", lineNum))
 
-						// Get the expression text for error messages
-						exprStart := asExpr.Expression.Pos()
-						exprEnd := asExpr.Expression.End()
-						exprText := text[exprStart:exprEnd]
+						debugf("[DEBUG] Generating validator for cast type...\n")
+						result := gen.GenerateValidatorFromNode(castType, asExpr.Type, "")
+						debugf("[DEBUG] Generated validator, length=%d, ignored=%v\n", len(result.Code), result.Ignored)
 
-						// Wrap the entire as expression
-						// (expr as Type) -> validator(expr, "expr as Type")
-						insertions = append(insertions, insertion{
-							pos:       node.Pos(),
-							text:      validator + "(",
-							sourcePos: castTypePos,
-						})
-						insertions = append(insertions, insertion{
-							pos:       exprEnd,
-							text:      `, "` + escapeString(exprText) + `")`,
-							sourcePos: castTypePos,
-						})
-						// We need to remove " as Type" part
-						// Insert empty to mark for removal
-						insertions = append(insertions, insertion{
-							pos:       exprEnd,
-							text:      "/* as removed */",
-							sourcePos: castTypePos,
-						})
+						if result.Ignored {
+							// Type was ignored - add a comment explaining why
+							insertions = append(insertions, insertion{
+								pos:       node.Pos(),
+								text:      "/* validation skipped: " + result.IgnoredReason + " */",
+								sourcePos: -1,
+							})
+						} else if result.Code != "" {
+							// Get the expression text for error messages
+							exprStart := asExpr.Expression.Pos()
+							exprEnd := asExpr.Expression.End()
+							exprText := text[exprStart:exprEnd]
+
+							// Wrap the entire as expression
+							// (expr as Type) -> validator(expr, "expr as Type")
+							insertions = append(insertions, insertion{
+								pos:       node.Pos(),
+								text:      result.Code + "(",
+								sourcePos: castTypePos,
+							})
+							insertions = append(insertions, insertion{
+								pos:       exprEnd,
+								text:      `, "` + escapeString(exprText) + `")`,
+								sourcePos: castTypePos,
+							})
+							// We need to remove " as Type" part
+							// Insert empty to mark for removal
+							insertions = append(insertions, insertion{
+								pos:       exprEnd,
+								text:      "/* as removed */",
+								sourcePos: castTypePos,
+							})
+						}
 					}
 				}
 			}
@@ -369,7 +534,7 @@ func TransformFileWithSourceMap(sourceFile *ast.SourceFile, c *checker.Checker, 
 							arg := callExpr.Arguments.Nodes[0]
 							// Get the type of the argument from the checker
 							argType := checker.Checker_GetTypeAtLocation(c, arg)
-							if argType != nil && !shouldSkipType(argType) {
+							if argType != nil && !shouldSkipType(argType) && !shouldSkipComplexType(argType, c) {
 								// Only use inferred type if it's a concrete object type (not any/unknown)
 								flags := checker.Type_flags(argType)
 								if flags&checker.TypeFlagsObject != 0 || flags&checker.TypeFlagsUnion != 0 {
@@ -381,7 +546,7 @@ func TransformFileWithSourceMap(sourceFile *ast.SourceFile, c *checker.Checker, 
 					}
 
 					// Apply transformation if we have a target type
-					if targetType != nil && !shouldSkipType(targetType) {
+					if targetType != nil && !shouldSkipType(targetType) && !shouldSkipComplexType(targetType, c) {
 						if methodName == "parse" && config.TransformJSONParse {
 							filteringValidator := gen.GenerateFilteringValidator(targetType, "")
 
@@ -436,7 +601,7 @@ func TransformFileWithSourceMap(sourceFile *ast.SourceFile, c *checker.Checker, 
 							methodName, isJSON := getJSONMethodName(callExpr)
 							if isJSON && methodName == "parse" {
 								targetType := checker.Checker_getTypeFromTypeNode(c, varDecl.Type)
-								if targetType != nil && !shouldSkipType(targetType) {
+								if targetType != nil && !shouldSkipType(targetType) && !shouldSkipComplexType(targetType, c) {
 									filteringValidator := gen.GenerateFilteringValidator(targetType, "")
 
 									if callExpr.Arguments != nil && len(callExpr.Arguments.Nodes) > 0 {
@@ -465,22 +630,149 @@ func TransformFileWithSourceMap(sourceFile *ast.SourceFile, c *checker.Checker, 
 	}
 
 	// Start visiting from the source file
+	debugf("[DEBUG] Starting visitor for %s\n", fileName)
 	sourceFile.AsNode().ForEachChild(visit)
 
+	// Check for complexity errors from the generator
+	if errMsg := gen.GetComplexityError(); errMsg != "" {
+		return "", nil, fmt.Errorf("%s in file %s", errMsg, fileName)
+	}
+
+	debugf("[DEBUG] Visitor complete for %s, building source map with %d insertions...\n", fileName, len(insertions))
 	// Build result with source map
-	return buildSourceMap(fileName, text, insertions)
+	code, sourceMap := buildSourceMap(fileName, text, insertions)
+	return code, sourceMap, nil
 }
+
+// MaxTypeComplexity is the maximum number of properties/constituents a type can have
+// before we skip validation. This prevents hangs on complex generated types (e.g., from GraphQL codegen).
+const MaxTypeComplexity = 50
 
 // shouldSkipType returns true if the type should not be validated
 func shouldSkipType(t *checker.Type) bool {
 	flags := checker.Type_flags(t)
-	// Skip any, unknown, never, void
+	// Skip any, unknown, never, void, type parameters (generics can't be validated at runtime),
+	// conditional types, indexed access types, and substitution types (complex type-level operations)
 	if flags&checker.TypeFlagsAny != 0 ||
 		flags&checker.TypeFlagsUnknown != 0 ||
 		flags&checker.TypeFlagsNever != 0 ||
-		flags&checker.TypeFlagsVoid != 0 {
+		flags&checker.TypeFlagsVoid != 0 ||
+		flags&checker.TypeFlagsTypeParameter != 0 ||
+		flags&checker.TypeFlagsConditional != 0 ||
+		flags&checker.TypeFlagsIndexedAccess != 0 ||
+		flags&checker.TypeFlagsSubstitution != 0 ||
+		flags&checker.TypeFlagsIndex != 0 {
 		return true
 	}
+
+	return false
+}
+
+// shouldSkipComplexType checks if a type is too complex to validate efficiently.
+// This is a more expensive check that requires the checker, so it's separate from shouldSkipType.
+func shouldSkipComplexType(t *checker.Type, c *checker.Checker) bool {
+	// Quick check for type parameters at top level only (no recursion into checker)
+	flags := checker.Type_flags(t)
+	if flags&checker.TypeFlagsTypeParameter != 0 {
+		return true
+	}
+
+	// Skip checking union/intersection members and type arguments to avoid
+	// expensive checker calls that can hang on complex types.
+	// We'll let codegen handle these cases.
+	return false
+}
+
+// containsTypeParameter recursively checks if a type contains any type parameters.
+// Types with unresolved type parameters cannot be validated at runtime.
+func containsTypeParameter(t *checker.Type, c *checker.Checker, depth int) bool {
+	if depth > 10 {
+		// Prevent infinite recursion
+		return false
+	}
+
+	flags := checker.Type_flags(t)
+
+	// Direct type parameter
+	if flags&checker.TypeFlagsTypeParameter != 0 {
+		return true
+	}
+
+	// Check union members
+	if flags&checker.TypeFlagsUnion != 0 {
+		for _, m := range t.Types() {
+			if containsTypeParameter(m, c, depth+1) {
+				return true
+			}
+		}
+	}
+
+	// Check intersection members
+	if flags&checker.TypeFlagsIntersection != 0 {
+		for _, m := range t.Types() {
+			if containsTypeParameter(m, c, depth+1) {
+				return true
+			}
+		}
+	}
+
+	// Check type arguments of generic instantiations (e.g., NullToUndefined<T>)
+	// Only type references have type arguments, not all object types
+	if flags&checker.TypeFlagsObject != 0 {
+		objFlags := checker.Type_objectFlags(t)
+		if objFlags&checker.ObjectFlagsReference != 0 {
+			typeArgs := checker.Checker_getTypeArguments(c, t)
+			for _, arg := range typeArgs {
+				if containsTypeParameter(arg, c, depth+1) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// isTypeComplex checks if a type has too many constituents to validate efficiently.
+// It recursively counts properties and union members up to a limit.
+func isTypeComplex(t *checker.Type, c *checker.Checker, depth int) bool {
+	if depth > 5 {
+		// Don't recurse too deep when checking complexity
+		return false
+	}
+
+	flags := checker.Type_flags(t)
+
+	// Check union types
+	if flags&checker.TypeFlagsUnion != 0 {
+		members := t.Types()
+		if len(members) > MaxTypeComplexity {
+			return true
+		}
+		// Check if any member is complex
+		for _, m := range members {
+			if isTypeComplex(m, c, depth+1) {
+				return true
+			}
+		}
+	}
+
+	// Check intersection types
+	if flags&checker.TypeFlagsIntersection != 0 {
+		members := t.Types()
+		if len(members) > MaxTypeComplexity {
+			return true
+		}
+		for _, m := range members {
+			if isTypeComplex(m, c, depth+1) {
+				return true
+			}
+		}
+	}
+
+	// For object types, we don't call getPropertiesOfType as it can hang
+	// on complex recursive types. Instead, we just accept object types
+	// and let the codegen handle any complexity.
 
 	return false
 }

@@ -64,5 +64,15 @@ echo "==> Copying internal/collections..."
 mkdir -p "$GO_DIR/internal/collections"
 find "$TSGOLINT_DIR/typescript-go/internal/collections" -type f ! -name '*_test.go' -exec cp {} "$GO_DIR/internal/collections/" \;
 
+# Copy selected utils from tsgolint (for IsBuiltinSymbolLike, type helpers, etc.)
+echo "==> Copying internal/utils..."
+rm -rf "$GO_DIR/internal/utils"
+mkdir -p "$GO_DIR/internal/utils"
+cp "$TSGOLINT_DIR/internal/utils/builtin_symbol_likes.go" "$GO_DIR/internal/utils/"
+cp "$TSGOLINT_DIR/internal/utils/set.go" "$GO_DIR/internal/utils/"
+cp "$TSGOLINT_DIR/internal/utils/ts_api_utils.go" "$GO_DIR/internal/utils/"
+cp "$TSGOLINT_DIR/internal/utils/ts_eslint.go" "$GO_DIR/internal/utils/"
+cp "$TSGOLINT_DIR/internal/utils/utils.go" "$GO_DIR/internal/utils/"
+
 echo "==> Sync complete!"
 echo "typescript-go is now at: $TSGO_COMMIT"

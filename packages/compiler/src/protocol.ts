@@ -64,7 +64,7 @@ export function decodeResponse(data: Buffer): DecodedMessage {
 
   // Check array marker
   if (data[offset++] !== MessagePackTypeFixedArray3) {
-    throw new Error(`Expected 0x93, got 0x${data[0].toString(16)}`)
+    throw new Error(`Expected 0x93, got 0x${data[0].toString(16)}: first 200 of data: ${data.subarray(0, 200).toString('utf8')}`)
   }
 
   // Read message type
