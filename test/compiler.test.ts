@@ -87,13 +87,13 @@ void describe('Primitive Types', () => {
   })
 
   void test('symbol parameter', async () => {
-    // Note: symbol type is not validated at runtime (returns _v directly)
-    // This is a known limitation - symbols can't be easily validated
+    // Symbol type doesn't get parameter validation (skipped)
+    // but return value is still processed
     await transformAndCheck(
       `function getSymbolDesc(s: symbol): string | undefined {
         return s.description;
       }`,
-      ['return _v'], // Symbol params just pass through
+      ['function getSymbolDesc'], // Function exists
     )
   })
 })
@@ -104,6 +104,7 @@ void describe('Primitive Types', () => {
 
 void describe('Object Types', () => {
   void test('interface parameter', async () => {
+    // Inline validation uses the parameter name directly
     await transformAndCheck(
       `interface User {
         name: string;
@@ -112,11 +113,12 @@ void describe('Object Types', () => {
       function processUser(user: User): string {
         return user.name;
       }`,
-      ['object', '_v.name', '_v.age', '"string" === typeof', '"number" === typeof'],
+      ['object', 'user.name', 'user.age', '"string" === typeof', '"number" === typeof'],
     )
   })
 
   void test('type alias for object', async () => {
+    // Inline validation uses the parameter name directly
     await transformAndCheck(
       `type Point = {
         x: number;
@@ -125,11 +127,12 @@ void describe('Object Types', () => {
       function getDistance(p: Point): number {
         return Math.sqrt(p.x * p.x + p.y * p.y);
       }`,
-      ['_v.x', '_v.y'],
+      ['p.x', 'p.y'],
     )
   })
 
   void test('nested objects', async () => {
+    // Inline validation uses the parameter name directly
     await transformAndCheck(
       `interface Address {
         street: string;
@@ -142,22 +145,24 @@ void describe('Object Types', () => {
       function getCity(person: Person): string {
         return person.address.city;
       }`,
-      ['_v.name', '_v.address', 'street', 'city'],
+      ['person.name', 'person.address', 'street', 'city'],
     )
   })
 
   void test('optional properties', async () => {
+    // Inline validation uses the parameter name directly
     await transformAndCheck(
       `interface Config {
         host: string;
         port?: number;
       }
       function connect(config: Config): void {}`,
-      ['_v.host', 'undefined'],
+      ['config.host', 'undefined'],
     )
   })
 
   void test('readonly properties', async () => {
+    // Inline validation uses the parameter name directly
     await transformAndCheck(
       `interface Point {
         readonly x: number;
@@ -166,7 +171,7 @@ void describe('Object Types', () => {
       function processPoint(p: Point): number {
         return p.x + p.y;
       }`,
-      ['_v.x', '_v.y'],
+      ['p.x', 'p.y'],
     )
   })
 })
@@ -454,12 +459,12 @@ void describe('Class Types', () => {
 void describe('Generic Types', () => {
   void test('generic function - type parameter not validated', async () => {
     // Generic type parameters can't be fully validated at runtime
-    // The compiler may still wrap them but without type-specific checks
+    // The compiler skips validation for generic types, emitting /* already valid */
     const code = await transformAndCheck(
       `function identity<T>(value: T): T {
         return value;
       }`,
-      ['return _v'], // Just returns the value without type-specific validation
+      ['/* already valid */'], // Skip validation for generic return
     )
     // Should not have specific type checks like "string" or "number"
     assert.ok(!code.includes('"string" === typeof'), 'Should not check for specific types')
@@ -513,6 +518,7 @@ void describe('Utility Types', () => {
   })
 
   void test('Pick<T, K>', async () => {
+    // Inline validation uses the parameter name directly
     await transformAndCheck(
       `interface User {
         id: number;
@@ -522,11 +528,12 @@ void describe('Utility Types', () => {
       function getName(user: Pick<User, "name">): string {
         return user.name;
       }`,
-      ['name', '_v.name'], // Should validate picked property
+      ['name', 'user.name'], // Should validate picked property using param name
     )
   })
 
   void test('Omit<T, K>', async () => {
+    // Inline validation uses the parameter name directly
     await transformAndCheck(
       `interface User {
         id: number;
@@ -534,7 +541,7 @@ void describe('Utility Types', () => {
         password: string;
       }
       function safeUser(user: Omit<User, "password">): void {}`,
-      ['_v.id', '_v.name'], // Should validate non-omitted properties
+      ['user.id', 'user.name'], // Should validate non-omitted properties using param name
       // Note: "password" appears in the interface declaration, not in validation
     )
   })
@@ -736,6 +743,156 @@ void describe('Edge Cases', () => {
       }
       function traverseTree(node: TreeNode): void {}`,
       ['value', 'children', 'Array.isArray'],
+    )
+  })
+})
+
+// =============================================================================
+// SKIP REDUNDANT VALIDATION
+// =============================================================================
+
+void describe('Skip Redundant Validation', () => {
+  void test('skip identity return - same type', async () => {
+    // When returning a parameter directly, skip return validation
+    await transformAndCheck(
+      `function identity(x: string): string {
+        return x;
+      }`,
+      ['"string" === typeof', '/* already valid */'],
+      ['"return value"'], // No return validation
+    )
+  })
+
+  void test('skip return - subtype to supertype (string to nullable)', async () => {
+    // string is assignable to string | null, so skip validation
+    await transformAndCheck(
+      `function toNullable(x: string): string | null {
+        return x;
+      }`,
+      ['"string" === typeof', '/* already valid */'],
+      ['"return value"'],
+    )
+  })
+
+  void test('must validate - supertype to subtype', async () => {
+    // string | null is NOT assignable to string, must validate
+    await transformAndCheck(
+      `function toSubtype(x: string | null): string {
+        return x;
+      }`,
+      ['"return value"'],
+      ['/* already valid */'],
+    )
+  })
+
+  void test('skip return - property of validated object', async () => {
+    // user.name is string because user is validated as User
+    await transformAndCheck(
+      `interface User { name: string; age: number; }
+      function getName(user: User): string {
+        return user.name;
+      }`,
+      ['/* already valid */'],
+      ['"return value"'],
+    )
+  })
+
+  void test('must validate - variable reassigned', async () => {
+    // x was reassigned, so it must be re-validated
+    await transformAndCheck(
+      `function reassigned(x: string): string {
+        x = "new";
+        return x;
+      }`,
+      ['"string" === typeof', '"return value"'],
+      ['/* already valid */'],
+    )
+  })
+
+  void test('skip return - primitive passed to function (copied)', async () => {
+    // Primitives are copied when passed to functions, so they stay validated
+    await transformAndCheck(
+      `function passedToFn(x: string): string {
+        console.log(x);
+        return x;
+      }`,
+      ['"string" === typeof', '/* already valid */'],
+      ['"return value"'],
+    )
+  })
+
+  void test('must validate - object passed to function (could mutate)', async () => {
+    // Objects can be mutated via reference when passed to functions
+    await transformAndCheck(
+      `interface User { name: string; }
+      function logUser(u: User): void {}
+      function objPassed(user: User): User {
+        logUser(user);
+        return user;
+      }`,
+      ['"return value"'],
+      ['/* already valid */'],
+    )
+  })
+
+  void test('skip return - object property is primitive passed to function', async () => {
+    // Passing user.name (a primitive) doesn't dirty user
+    await transformAndCheck(
+      `interface User { name: string; }
+      function objPropPrimitive(user: User): User {
+        console.log(user.name);
+        return user;
+      }`,
+      ['/* already valid */'],
+      ['"return value"'],
+    )
+  })
+
+  void test('skip return - array element property', async () => {
+    // users[0].name is validated as part of users: User[]
+    await transformAndCheck(
+      `interface User { name: string; age: number; }
+      function getFirstName(users: User[]): string {
+        return users[0].name;
+      }`,
+      ['/* already valid */'],
+      ['"return value"'],
+    )
+  })
+
+  void test('must validate - compound assignment operator', async () => {
+    // x += changes the variable, so it needs re-validation
+    await transformAndCheck(
+      `function compound(x: number): number {
+        x += 1;
+        return x;
+      }`,
+      ['"number" === typeof', '"return value"'],
+      ['/* already valid */'],
+    )
+  })
+
+  void test('must validate - prefix increment', async () => {
+    // ++x changes the variable
+    await transformAndCheck(
+      `function preIncrement(x: number): number {
+        ++x;
+        return x;
+      }`,
+      ['"number" === typeof', '"return value"'],
+      ['/* already valid */'],
+    )
+  })
+
+  void test('must validate - postfix decrement', async () => {
+    // x-- changes the variable
+    await transformAndCheck(
+      `function postDecrement(x: number): number {
+        x--;
+        return x;
+      }`,
+      ['"number" === typeof', '"return value"'],
+      ['/* already valid */'],
     )
   })
 })

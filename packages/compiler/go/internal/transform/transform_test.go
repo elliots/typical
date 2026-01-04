@@ -66,15 +66,17 @@ func TestTransformFile(t *testing.T) {
 			},
 		},
 		{
-			name: "both parameter and return validation",
+			name: "both parameter and return validation - skip redundant",
 			input: `function identity(x: string): string {
 	return x;
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: true, ValidateCasts: false},
 			expectedParts: []string{
-				`"string" === typeof x`,  // Parameter validation (inline)
-				`"string" === typeof _v`, // Return validation (IIFE)
-				`"return value"`,
+				`"string" === typeof x`, // Parameter validation (inline)
+				`/* already valid */`,   // Return validation skipped - x already validated as string
+			},
+			unexpectedParts: []string{
+				`"return value"`, // Should NOT have return validation
 			},
 		},
 		{
@@ -212,6 +214,144 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if !config.TransformJSONStringify {
 		t.Error("Default config should have TransformJSONStringify = true")
+	}
+}
+
+func TestSkipRedundantValidation(t *testing.T) {
+	config := Config{ValidateParameters: true, ValidateReturns: true, ValidateCasts: false}
+
+	tests := []struct {
+		name            string
+		input           string
+		expectedParts   []string
+		unexpectedParts []string
+	}{
+		{
+			name: "skip identity return - same type",
+			input: `function identity(x: string): string {
+	return x;
+}`,
+			expectedParts: []string{
+				`"string" === typeof x`, // Parameter validation
+				`/* already valid */`,   // Skip return validation
+			},
+			unexpectedParts: []string{
+				`"return value"`, // No return validation
+			},
+		},
+		{
+			name: "skip return - subtype to supertype (string to nullable)",
+			input: `function toNullable(x: string): string | null {
+	return x;
+}`,
+			expectedParts: []string{
+				`"string" === typeof x`, // Parameter validation
+				`/* already valid */`,   // Skip - string is assignable to string | null
+			},
+			unexpectedParts: []string{
+				`"return value"`,
+			},
+		},
+		{
+			name: "must validate - supertype to subtype",
+			input: `function toSubtype(x: string | null): string {
+	return x;
+}`,
+			expectedParts: []string{
+				`"return value"`, // Must validate - string | null is NOT assignable to string
+			},
+			unexpectedParts: []string{
+				`/* already valid */`,
+			},
+		},
+		{
+			name: "skip return - property of validated object",
+			input: `interface User { name: string; age: number; }
+function getName(user: User): string {
+	return user.name;
+}`,
+			expectedParts: []string{
+				`/* already valid */`, // Skip - user.name is string from validated User
+			},
+			unexpectedParts: []string{
+				`"return value"`,
+			},
+		},
+		{
+			name: "must validate - variable reassigned",
+			input: `function reassigned(x: string): string {
+	x = "new";
+	return x;
+}`,
+			expectedParts: []string{
+				`"string" === typeof x`, // Parameter validation
+				`"return value"`,        // Must validate - x was reassigned
+			},
+			unexpectedParts: []string{
+				`/* already valid */`,
+			},
+		},
+		{
+			name: "skip return - primitive passed to function (copied)",
+			input: `function passedToFn(x: string): string {
+	console.log(x);
+	return x;
+}`,
+			expectedParts: []string{
+				`"string" === typeof x`, // Parameter validation
+				`/* already valid */`,   // Skip - primitives are copied when passed
+			},
+			unexpectedParts: []string{
+				`"return value"`,
+			},
+		},
+		{
+			name: "must validate - object passed to function (could mutate)",
+			input: `interface User { name: string; }
+function logUser(u: User): void {}
+function objPassed(user: User): User {
+	logUser(user);
+	return user;
+}`,
+			expectedParts: []string{
+				`"return value"`, // Must validate - object could have been mutated
+			},
+			unexpectedParts: []string{
+				`/* already valid */`,
+			},
+		},
+		{
+			name: "skip return - object property is primitive passed to function",
+			input: `interface User { name: string; }
+function objPropPrimitive(user: User): User {
+	console.log(user.name);
+	return user;
+}`,
+			expectedParts: []string{
+				`/* already valid */`, // Skip - user.name is primitive, doesn't dirty user
+			},
+			unexpectedParts: []string{
+				`"return value"`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := transformTestCode(t, tt.input, config)
+
+			for _, part := range tt.expectedParts {
+				if !strings.Contains(result, part) {
+					t.Errorf("Expected output to contain %q\nGot:\n%s", part, result)
+				}
+			}
+
+			for _, part := range tt.unexpectedParts {
+				if strings.Contains(result, part) {
+					t.Errorf("Expected output NOT to contain %q\nGot:\n%s", part, result)
+				}
+			}
+		})
 	}
 }
 
