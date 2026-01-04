@@ -345,6 +345,16 @@ Typical uses a Go-based compiler that leverages the TypeScript type checker to a
 
 Types that can't be validated at runtime (like generic type parameters `T`) are skipped. You can still use `any` and `unknown` to opt out of validation.
 
+## Compiler Optimizations
+
+The generated validation code is optimized for runtime performance:
+
+- **Skip redundant validation** - When returning a validated parameter directly, the return validation is skipped (e.g., `return x` where `x: string` was already validated)
+- **Subtype-aware skipping** - If a validated type is assignable to the return type, validation is skipped (e.g., `string` parameter returned as `string | null`)
+- **Property chain tracking** - Accessing properties of validated objects skips re-validation (e.g., `return user.name` when `user: User` was validated)
+- **Type-aware dirty tracking** - Primitives stay validated after being passed to functions (they're copied), but objects are re-validated (they could be mutated)
+- **Union early bail-out** - Union type checks use if-else chains so the first matching type succeeds immediately
+
 ## Debugging
 
 Set `DEBUG=1` for verbose logging:
