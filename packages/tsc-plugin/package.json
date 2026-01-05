@@ -1,6 +1,6 @@
 {
   "name": "@elliots/typical-tsc-plugin",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "TSC plugin for typical - runtime safe TypeScript transformer",
   "keywords": [
     "runtime",

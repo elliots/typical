@@ -1,6 +1,6 @@
 {
   "name": "@elliots/typical-compiler-win32-arm64",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Typical compiler binary for Windows ARM64",
   "license": "MIT",
   "author": "elliots",
