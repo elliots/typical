@@ -33,6 +33,17 @@ type Config struct {
 	// IgnoreTypes is a list of compiled regex patterns for types to skip validation.
 	// Types matching any pattern will not have validators generated.
 	IgnoreTypes []*regexp.Regexp
+
+	// PureFunctions is a list of function names (or patterns) that are considered "pure"
+	// or "readonly" for their arguments. Passing a validated object to these functions
+	// will NOT mark it as dirty (re-validation needed).
+	// Examples: "console.log", "JSON.stringify"
+	PureFunctions []*regexp.Regexp
+
+	// TrustedFunctions is a list of function names (or patterns) whose return values
+	// are trusted to be valid according to their type annotation.
+	// Example: "db.loadUser" -> const user: User = db.loadUser(id) -> user is valid
+	TrustedFunctions []*regexp.Regexp
 }
 
 // DefaultMaxGeneratedFunctions is the default limit for generated helper functions.
@@ -47,6 +58,7 @@ func DefaultConfig() Config {
 		TransformJSONParse:     true,
 		TransformJSONStringify: true,
 		MaxGeneratedFunctions:  DefaultMaxGeneratedFunctions,
+		PureFunctions:          CompileIgnorePatterns([]string{"console.*", "JSON.stringify"}),
 	}
 }
 

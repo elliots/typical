@@ -3,6 +3,7 @@ package transform
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/elliots/typical/packages/compiler/internal/codegen"
@@ -12,6 +13,8 @@ import (
 )
 
 var debug = os.Getenv("DEBUG") == "1"
+
+var ignoreCommentRegex = regexp.MustCompile(`(//.*@typical-ignore)|(/\*[\s\S]*?@typical-ignore)`)
 
 func debugf(format string, args ...interface{}) {
 	if debug {
@@ -75,9 +78,9 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 	type funcContext struct {
 		returnType *ast.Node
 		isAsync    bool
-		bodyStart  int                          // Position after opening brace
-		validated  map[string][]*checker.Type   // varName -> list of validated types
-		bodyNode   *ast.Node                    // Function body for dirty detection
+		bodyStart  int                        // Position after opening brace
+		validated  map[string][]*checker.Type // varName -> list of validated types
+		bodyNode   *ast.Node                  // Function body for dirty detection
 	}
 	var funcStack []*funcContext
 	nodeCount := 0
@@ -85,6 +88,11 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 	// Recursive visitor
 	var visit ast.Visitor
 	visit = func(node *ast.Node) bool {
+		// Check for @typical-ignore comment
+		if hasIgnoreComment(node, text) {
+			return false
+		}
+
 		nodeCount++
 		switch node.Kind {
 		case ast.KindFunctionDeclaration,
@@ -280,7 +288,8 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 								// Check if any variables in the expression have been dirtied
 								rootVar := getRootIdentifier(returnStmt.Expression)
 								if rootVar != "" {
-									if !isDirty(c, ctx.validated, rootVar, ctx.bodyStart, node.Pos(), ctx.bodyNode) {
+									if !isDirty(c, ctx.validated, rootVar, ctx.bodyStart, node.Pos(), ctx.bodyNode, config.PureFunctions) {
+										debugf("[DEBUG] Skipping validation for %s: already validated and not dirty\n", rootVar)
 										skipValidation = true
 									}
 								}
@@ -590,10 +599,16 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 			}
 
 		case ast.KindVariableDeclaration:
-			// Handle: const x: T = JSON.parse(string)
-			if config.TransformJSONParse {
-				varDecl := node.AsVariableDeclaration()
-				if varDecl != nil && varDecl.Type != nil && varDecl.Initializer != nil {
+			varDecl := node.AsVariableDeclaration()
+			if varDecl != nil {
+				// Get current function context
+				var ctx *funcContext
+				if len(funcStack) > 0 {
+					ctx = funcStack[len(funcStack)-1]
+				}
+
+				// Handle: const x: T = JSON.parse(string)
+				if config.TransformJSONParse && varDecl.Type != nil && varDecl.Initializer != nil {
 					// Check if initializer is JSON.parse()
 					if varDecl.Initializer.Kind == ast.KindCallExpression {
 						callExpr := varDecl.Initializer.AsCallExpression()
@@ -615,9 +630,64 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 											sourcePos: varDecl.Type.Pos(),
 											skipTo:    varDecl.Initializer.End(),
 										})
+
+										// Mark as validated
+										if ctx != nil && varDecl.Name().Kind == ast.KindIdentifier {
+											ctx.validated[varDecl.Name().AsIdentifier().Text] = append(ctx.validated[varDecl.Name().AsIdentifier().Text], targetType)
+										}
+
 										return false
 									}
 								}
+							}
+						}
+					}
+				}
+
+				// Handle aliasing, trusted functions, and cast expressions
+				if ctx != nil && varDecl.Initializer != nil && varDecl.Name().Kind == ast.KindIdentifier {
+					varName := varDecl.Name().AsIdentifier().Text
+
+					// 1. Direct aliasing: const x = y
+					if varDecl.Initializer.Kind == ast.KindIdentifier {
+						initName := varDecl.Initializer.AsIdentifier().Text
+						if types, ok := ctx.validated[initName]; ok {
+							ctx.validated[varName] = append(ctx.validated[varName], types...)
+						}
+					} else if varDecl.Initializer.Kind == ast.KindCallExpression {
+						// 2. Trusted function call: const x = trusted()
+						call := varDecl.Initializer.AsCallExpression()
+						if call != nil {
+							funcName := getEntityName(call.Expression)
+							isTrusted := false
+							for _, re := range config.TrustedFunctions {
+								if re.MatchString(funcName) {
+									isTrusted = true
+									break
+								}
+							}
+
+							if isTrusted {
+								// Get variable type (explicit or inferred)
+								var targetType *checker.Type
+								if varDecl.Type != nil {
+									targetType = checker.Checker_getTypeFromTypeNode(c, varDecl.Type)
+								} else {
+									targetType = checker.Checker_GetTypeAtLocation(c, varDecl.Name())
+								}
+
+								if targetType != nil {
+									ctx.validated[varName] = append(ctx.validated[varName], targetType)
+								}
+							}
+						}
+					} else if varDecl.Initializer.Kind == ast.KindAsExpression && config.ValidateCasts {
+						// 3. Cast expression: const x = data as T
+						asExpr := varDecl.Initializer.AsAsExpression()
+						if asExpr != nil && asExpr.Type != nil {
+							castType := checker.Checker_getTypeFromTypeNode(c, asExpr.Type)
+							if castType != nil && !shouldSkipType(castType) && !shouldSkipComplexType(castType, c) {
+								ctx.validated[varName] = append(ctx.validated[varName], castType)
 							}
 						}
 					}
@@ -1120,7 +1190,7 @@ func (vs *validationState) getValidatedType(expr *ast.Node, targetType *checker.
 // isDirty checks if a variable has been modified or potentially mutated between two positions.
 // It considers type-aware rules: primitives are only dirty on reassignment,
 // objects are dirty if passed to functions (unless the passed value is a primitive property).
-func isDirty(c *checker.Checker, validated map[string][]*checker.Type, varName string, fromPos int, toPos int, bodyNode *ast.Node) bool {
+func isDirty(c *checker.Checker, validated map[string][]*checker.Type, varName string, fromPos int, toPos int, bodyNode *ast.Node, pureFunctions []*regexp.Regexp) bool {
 	if bodyNode == nil {
 		return false
 	}
@@ -1181,17 +1251,33 @@ func isDirty(c *checker.Checker, validated map[string][]*checker.Type, varName s
 			// Check if varName (or any nested property containing an object) is passed as argument
 			call := n.AsCallExpression()
 			if call != nil && call.Arguments != nil {
-				for _, arg := range call.Arguments.Nodes {
-					root := getRootIdentifier(arg)
-					if root == varName {
-						// Check what's actually being passed
-						// If it's the whole object or an object property, it's dirty
-						// If it's a primitive property, it's not dirty
-						argType := checker.Checker_GetTypeAtLocation(c, arg)
-						if !isPrimitiveType(argType) {
-							leaked = true
-							dirty = true
-							return false
+				// Check if the called function is pure/readonly
+				isPure := false
+				if len(pureFunctions) > 0 {
+					funcName := getEntityName(call.Expression)
+					if funcName != "" {
+						for _, re := range pureFunctions {
+							if re.MatchString(funcName) {
+								isPure = true
+								break
+							}
+						}
+					}
+				}
+
+				if !isPure {
+					for _, arg := range call.Arguments.Nodes {
+						root := getRootIdentifier(arg)
+						if root == varName {
+							// Check what's actually being passed
+							// If it's the whole object or an object property, it's dirty
+							// If it's a primitive property, it's not dirty
+							argType := checker.Checker_GetTypeAtLocation(c, arg)
+							if !isPrimitiveType(argType) {
+								leaked = true
+								dirty = true
+								return false
+							}
 						}
 					}
 				}
@@ -1232,4 +1318,59 @@ func isDirty(c *checker.Checker, validated map[string][]*checker.Type, varName s
 
 	bodyNode.ForEachChild(check)
 	return dirty
+}
+
+// getEntityName extracts the full name from an entity name (identifier or qualified name).
+// For qualified names like `React.FormEvent`, it returns the full dotted path.
+func getEntityName(node *ast.Node) string {
+	if node == nil {
+		return ""
+	}
+
+	switch node.Kind {
+	case ast.KindIdentifier:
+		return node.AsIdentifier().Text
+	case ast.KindQualifiedName:
+		qn := node.AsQualifiedName()
+		if qn != nil {
+			left := getEntityName(qn.Left)
+			right := ""
+			if qn.Right != nil {
+				right = qn.Right.Text()
+			}
+			if left != "" && right != "" {
+				return left + "." + right
+			}
+			if right != "" {
+				return right
+			}
+			return left
+		}
+	case ast.KindPropertyAccessExpression:
+		// Also handle PropertyAccessExpression (e.g. console.log)
+		pa := node.AsPropertyAccessExpression()
+		if pa != nil {
+			left := getEntityName(pa.Expression)
+			right := ""
+			if pa.Name() != nil {
+				right = pa.Name().AsIdentifier().Text
+			}
+			if left != "" && right != "" {
+				return left + "." + right
+			}
+		}
+	}
+
+	return ""
+}
+
+func hasIgnoreComment(node *ast.Node, text string) bool {
+	pos := node.Pos()
+	limit := pos + 500
+	if limit > len(text) {
+		limit = len(text)
+	}
+	chunk := text[pos:limit]
+
+	return ignoreCommentRegex.MatchString(chunk)
 }

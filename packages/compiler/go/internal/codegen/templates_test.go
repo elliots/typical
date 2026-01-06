@@ -41,10 +41,10 @@ func TestTemplateLiteralTypes(t *testing.T) {
 		"type Status = \"active\" | \"inactive\";\n" +
 		"function testTypeRef(x: `status_${Status}`): void {}\n"
 
-	c, sourceFile, cleanup := setupTestProject(t, code)
+	c, sourceFile, program, cleanup := setupTestProject(t, code)
 	defer cleanup()
 
-	gen := NewGenerator(c)
+	gen := NewGenerator(c, program)
 
 	tests := []struct {
 		funcName        string
@@ -179,10 +179,10 @@ func TestTemplateLiteralIsCheck(t *testing.T) {
 	code := "function testSimple(x: `hello-${string}`): void {}\n" +
 		"function testComplex(x: `${number}-${string}`): void {}\n"
 
-	c, sourceFile, cleanup := setupTestProject(t, code)
+	c, sourceFile, program, cleanup := setupTestProject(t, code)
 	defer cleanup()
 
-	gen := NewGenerator(c)
+	gen := NewGenerator(c, program)
 
 	t.Run("simple is-check", func(t *testing.T) {
 		paramType := findFunctionParamType(c, sourceFile, "testSimple")
@@ -341,4 +341,3 @@ func TestRegexPatternGeneration(t *testing.T) {
 		})
 	}
 }
-

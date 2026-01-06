@@ -27,8 +27,8 @@ func TestTransformFile(t *testing.T) {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`"string" === typeof name`,      // Uses param name directly (inline)
-				`"name" + " to be string`,       // Error message uses param name
+				`"string" === typeof name`, // Uses param name directly (inline)
+				`"name" + " to be string`,  // Error message uses param name
 				`throw new TypeError`,
 			},
 		},
@@ -146,10 +146,10 @@ function greet(user: User): void {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`typeof user !== "object"`,  // Uses param name directly
-				`user === null`,             // Uses param name directly
-				`user.name`,                 // Property access on param
-				`"user" + ".name"`,          // Error message with param name
+				`typeof user !== "object"`, // Uses param name directly
+				`user === null`,            // Uses param name directly
+				`user.name`,                // Property access on param
+				`"user" + ".name"`,         // Error message with param name
 			},
 		},
 		{
@@ -159,9 +159,9 @@ function greet(user: User): void {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`Array.isArray(nums)`,           // Uses param name directly
-				`nums.length`,                   // Loop over array using param name
-				`"nums" + "[" + _i0 + "]"`,      // Array index in error message
+				`Array.isArray(nums)`,      // Uses param name directly
+				`nums.length`,              // Loop over array using param name
+				`"nums" + "[" + _i0 + "]"`, // Array index in error message
 			},
 		},
 		{
@@ -218,7 +218,12 @@ func TestDefaultConfig(t *testing.T) {
 }
 
 func TestSkipRedundantValidation(t *testing.T) {
-	config := Config{ValidateParameters: true, ValidateReturns: true, ValidateCasts: false}
+	config := Config{
+		ValidateParameters: true,
+		ValidateReturns:    true,
+		ValidateCasts:      true,
+		TransformJSONParse: true,
+	}
 
 	tests := []struct {
 		name            string
@@ -334,6 +339,62 @@ function objPropPrimitive(user: User): User {
 				`"return value"`,
 			},
 		},
+		{
+			name: "skip return - aliased validated variable",
+			input: `function aliased(x: string): string {
+	const y = x;
+	return y;
+}`,
+			expectedParts: []string{
+				`"string" === typeof x`, // Parameter validation
+				`/* already valid */`,   // Return validation skipped
+			},
+			unexpectedParts: []string{
+				`"return value"`,
+			},
+		},
+		{
+			name: "skip return - variable from JSON.parse",
+			input: `interface User { name: string; }
+function parseUser(str: string): User {
+	const user: User = JSON.parse(str);
+	return user;
+}`,
+			expectedParts: []string{
+				`const _r: any = {}`,  // Filtering happened
+				`JSON.parse(`,         // Parse happened
+				`/* already valid */`, // Return validation skipped!
+			},
+			unexpectedParts: []string{
+				`"return value"`, // Should NOT validate return
+			},
+		},
+		{
+			name: "skip return - variable validated via cast",
+			input: `interface User { name: string; }
+function getUser(data: unknown): User {
+	const user = data as User;
+	return user;
+}`,
+			expectedParts: []string{
+				`/* as removed */`,    // Cast was validated
+				`/* already valid */`, // Return validation skipped
+			},
+			unexpectedParts: []string{
+				`"return value"`, // Should NOT validate return
+			},
+		},
+		{
+			name: "ignore comment - function",
+			input: `// @typical-ignore
+function ignored(x: string): string {
+	return x;
+}`,
+			unexpectedParts: []string{
+				`"string" === typeof x`,
+				`"return value"`,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -369,12 +430,12 @@ func TestJSONTransformations(t *testing.T) {
 const user = JSON.parse<User>(jsonStr);`,
 			config: Config{TransformJSONParse: true},
 			expectedParts: []string{
-				`const _r: any = {}`,      // Creates filtered result object
-				`_r.name = _v.name`,       // Copies name property
-				`_r.age = _v.age`,         // Copies age property
-				`return _r`,               // Returns filtered object
-				`JSON.parse(`,             // Calls JSON.parse
-				`"JSON.parse"`,            // Uses label for error messages
+				`const _r: any = {}`, // Creates filtered result object
+				`_r.name = _v.name`,  // Copies name property
+				`_r.age = _v.age`,    // Copies age property
+				`return _r`,          // Returns filtered object
+				`JSON.parse(`,        // Calls JSON.parse
+				`"JSON.parse"`,       // Uses label for error messages
 			},
 			unexpectedParts: []string{
 				`JSON.parse<User>`, // Type argument should be consumed
@@ -386,10 +447,10 @@ const user = JSON.parse<User>(jsonStr);`,
 const str = JSON.stringify<User>(userObj);`,
 			config: Config{TransformJSONStringify: true},
 			expectedParts: []string{
-				`_r.name = _v.name`,   // Filter copies properties
-				`_r.age = _v.age`,     // Filter copies properties
-				`JSON.stringify(_r)`,  // Calls JSON.stringify on filtered object
-				`"JSON.stringify"`,    // Uses label for error messages
+				`_r.name = _v.name`,  // Filter copies properties
+				`_r.age = _v.age`,    // Filter copies properties
+				`JSON.stringify(_r)`, // Calls JSON.stringify on filtered object
+				`"JSON.stringify"`,   // Uses label for error messages
 			},
 			unexpectedParts: []string{
 				`JSON.stringify<User>`, // Type argument should be consumed
@@ -423,9 +484,9 @@ interface Person { name: string; address: Address; }
 const person = JSON.parse<Person>(jsonStr);`,
 			config: Config{TransformJSONParse: true},
 			expectedParts: []string{
-				`_r.name`,           // Top level property
-				`_r.address`,        // Nested object property
-				`.city`,             // Nested property
+				`_r.name`,    // Top level property
+				`_r.address`, // Nested object property
+				`.city`,      // Nested property
 			},
 		},
 		{
@@ -434,14 +495,14 @@ const person = JSON.parse<Person>(jsonStr);`,
 const users = JSON.parse<User[]>(jsonStr);`,
 			config: Config{TransformJSONParse: true},
 			expectedParts: []string{
-				`Array.isArray`,     // Checks for array
+				`Array.isArray`,        // Checks for array
 				`const _r: any[] = []`, // Creates array result
-				`.push(`,            // Pushes filtered elements
+				`.push(`,               // Pushes filtered elements
 			},
 		},
 		{
-			name: "JSON.parse without type argument - no transform",
-			input: `const data = JSON.parse(jsonStr);`,
+			name:   "JSON.parse without type argument - no transform",
+			input:  `const data = JSON.parse(jsonStr);`,
 			config: Config{TransformJSONParse: true},
 			expectedParts: []string{
 				`JSON.parse(jsonStr)`, // Original call unchanged
@@ -456,12 +517,12 @@ const users = JSON.parse<User[]>(jsonStr);`,
 const user = JSON.parse(jsonStr) as User;`,
 			config: Config{TransformJSONParse: true},
 			expectedParts: []string{
-				`const _r: any = {}`,      // Creates filtered result object
-				`_r.name = _v.name`,       // Copies name property
-				`_r.age = _v.age`,         // Copies age property
-				`return _r`,               // Returns filtered object
-				`JSON.parse(`,             // Calls JSON.parse
-				`"JSON.parse"`,            // Uses label for error messages
+				`const _r: any = {}`, // Creates filtered result object
+				`_r.name = _v.name`,  // Copies name property
+				`_r.age = _v.age`,    // Copies age property
+				`return _r`,          // Returns filtered object
+				`JSON.parse(`,        // Calls JSON.parse
+				`"JSON.parse"`,       // Uses label for error messages
 			},
 			unexpectedParts: []string{
 				`as User`, // "as T" should be consumed
@@ -473,10 +534,10 @@ const user = JSON.parse(jsonStr) as User;`,
 const str = JSON.stringify(userObj) as User;`,
 			config: Config{TransformJSONStringify: true},
 			expectedParts: []string{
-				`_r.name = _v.name`,   // Filter copies properties
-				`_r.age = _v.age`,     // Filter copies properties
-				`JSON.stringify(_r)`,  // Calls JSON.stringify on filtered object
-				`"JSON.stringify"`,    // Uses label for error messages
+				`_r.name = _v.name`,  // Filter copies properties
+				`_r.age = _v.age`,    // Filter copies properties
+				`JSON.stringify(_r)`, // Calls JSON.stringify on filtered object
+				`"JSON.stringify"`,   // Uses label for error messages
 			},
 			unexpectedParts: []string{
 				`as User`, // "as T" should be consumed
@@ -489,9 +550,9 @@ interface Person { name: string; address: Address; }
 const person = JSON.parse(jsonStr) as Person;`,
 			config: Config{TransformJSONParse: true},
 			expectedParts: []string{
-				`_r.name`,           // Top level property
-				`_r.address`,        // Nested object property
-				`.city`,             // Nested property
+				`_r.name`,    // Top level property
+				`_r.address`, // Nested object property
+				`.city`,      // Nested property
 			},
 			unexpectedParts: []string{
 				`as Person`, // "as T" should be consumed
@@ -503,9 +564,9 @@ const person = JSON.parse(jsonStr) as Person;`,
 const str = JSON.stringify(userObj as User);`,
 			config: Config{TransformJSONStringify: true},
 			expectedParts: []string{
-				`_r.name = _v.name`,   // Filter copies properties
-				`_r.age = _v.age`,     // Filter copies properties
-				`JSON.stringify(_r)`,  // Calls JSON.stringify on filtered object
+				`_r.name = _v.name`,  // Filter copies properties
+				`_r.age = _v.age`,    // Filter copies properties
+				`JSON.stringify(_r)`, // Calls JSON.stringify on filtered object
 			},
 			unexpectedParts: []string{
 				`as User`, // "as T" should be consumed
@@ -517,10 +578,10 @@ const str = JSON.stringify(userObj as User);`,
 const user: User = JSON.parse(jsonStr);`,
 			config: Config{TransformJSONParse: true},
 			expectedParts: []string{
-				`const _r: any = {}`,      // Creates filtered result object
-				`_r.name = _v.name`,       // Copies name property
-				`_r.age = _v.age`,         // Copies age property
-				`JSON.parse(`,             // Calls JSON.parse
+				`const _r: any = {}`, // Creates filtered result object
+				`_r.name = _v.name`,  // Copies name property
+				`_r.age = _v.age`,    // Copies age property
+				`JSON.parse(`,        // Calls JSON.parse
 			},
 		},
 		{
@@ -531,10 +592,10 @@ function loadUser(json: string): User {
 }`,
 			config: Config{TransformJSONParse: true},
 			expectedParts: []string{
-				`const _r: any = {}`,      // Creates filtered result object
-				`_r.name = _v.name`,       // Copies name property
-				`_r.age = _v.age`,         // Copies age property
-				`JSON.parse(`,             // Calls JSON.parse
+				`const _r: any = {}`, // Creates filtered result object
+				`_r.name = _v.name`,  // Copies name property
+				`_r.age = _v.age`,    // Copies age property
+				`JSON.parse(`,        // Calls JSON.parse
 			},
 		},
 	}
@@ -551,6 +612,68 @@ function loadUser(json: string): User {
 			}
 
 			// Check unexpected parts
+			for _, part := range tt.unexpectedParts {
+				if strings.Contains(result, part) {
+					t.Errorf("Expected output NOT to contain %q\nGot:\n%s", part, result)
+				}
+			}
+		})
+	}
+}
+
+func TestTrustedFunctions(t *testing.T) {
+	config := Config{
+		ValidateParameters: true,
+		ValidateReturns:    true,
+		TrustedFunctions:   CompileIgnorePatterns([]string{"db.load"}),
+	}
+
+	tests := []struct {
+		name            string
+		input           string
+		expectedParts   []string
+		unexpectedParts []string
+	}{
+		{
+			name: "skip return - trusted function",
+			input: `interface User { name: string; }
+declare const db: { load(id: string): User };
+function loadUser(id: string): User {
+	const user = db.load(id);
+	return user;
+}`,
+			expectedParts: []string{
+				`/* already valid */`,
+			},
+			unexpectedParts: []string{
+				`"return value"`,
+			},
+		},
+		{
+			name: "validate return - untrusted function",
+			input: `interface User { name: string; }
+declare const api: { fetch(id: string): any };
+function fetchUser(id: string): User {
+	const user: User = api.fetch(id);
+	return user;
+}`,
+			expectedParts: []string{
+				`"return value"`,
+			},
+			unexpectedParts: []string{
+				`/* already valid */`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := transformTestCode(t, tt.input, config)
+			for _, part := range tt.expectedParts {
+				if !strings.Contains(result, part) {
+					t.Errorf("Expected output to contain %q\nGot:\n%s", part, result)
+				}
+			}
 			for _, part := range tt.unexpectedParts {
 				if strings.Contains(result, part) {
 					t.Errorf("Expected output NOT to contain %q\nGot:\n%s", part, result)
@@ -618,5 +741,5 @@ func transformTestCode(t *testing.T, input string, config Config) string {
 	defer release()
 
 	// Transform the file
-	return TransformFileWithConfig(sourceFile, c, config)
+	return TransformFileWithConfig(sourceFile, c, program, config)
 }

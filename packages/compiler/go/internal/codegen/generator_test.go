@@ -100,7 +100,7 @@ function testFunc(user: User, names: string[], nullable: string | null): void {}
 	defer release()
 
 	// Create generator
-	gen := NewGenerator(checker)
+	gen := NewGenerator(checker, program)
 
 	// Test cases: find type alias declarations and generate validators
 	tests := []struct {
@@ -269,9 +269,9 @@ func TestUnionPatterns(t *testing.T) {
 func TestValidatorStructure(t *testing.T) {
 	expectedParts := []string{
 		"((_v: any, _n: string) => {", // Validator function start with typed params
-		"throw new TypeError",          // Should throw TypeError on validation failure
-		"return _v;",                   // Return the value
-		"})",                           // Function end
+		"throw new TypeError",         // Should throw TypeError on validation failure
+		"return _v;",                  // Return the value
+		"})",                          // Function end
 	}
 
 	t.Run("Validator structure", func(t *testing.T) {
@@ -384,7 +384,7 @@ function processNullable(value: string | null): void {}
 	c, release := program.GetTypeChecker(ctx)
 	defer release()
 
-	gen := NewGenerator(c)
+	gen := NewGenerator(c, program)
 
 	// Find functions and test generating validators for their parameter types
 	var visit ast.Visitor
@@ -536,7 +536,7 @@ function validate(user: SimpleUser): void {}
 	c, release := program.GetTypeChecker(ctx)
 	defer release()
 
-	gen := NewGenerator(c)
+	gen := NewGenerator(c, program)
 
 	// Find the validate function and get its parameter type
 	var userType *checker.Type
@@ -571,9 +571,9 @@ function validate(user: SimpleUser): void {}
 	// Check validator structure
 	expectedParts := []string{
 		"((_v: any, _n: string) => {", // Validator function with typed params
-		"throw new TypeError",          // Should throw TypeError on failure
-		"return _v;",                   // Return the value
-		"})",                           // Function end
+		"throw new TypeError",         // Should throw TypeError on failure
+		"return _v;",                  // Return the value
+		"})",                          // Function end
 	}
 
 	for _, part := range expectedParts {

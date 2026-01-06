@@ -2131,3 +2131,75 @@ void describe('Ignore Types', () => {
     assert.ok(result.code.includes('"string" === typeof'), `Expected User validation to still exist`)
   })
 })
+
+// =============================================================================
+// OPTIMISATIONS
+// =============================================================================
+
+void describe('Optimisations', () => {
+  void test('skip return - variable validated via cast then returned', async () => {
+    // When a variable is validated via a cast, returning it should not re-validate
+    await transformAndCheck(
+      `interface User { name: string; }
+      function getUser(data: unknown): User {
+        const user = data as User;
+        return user;
+      }`,
+      ['throw new TypeError', '/* already valid */'], // Should validate the cast, skip return
+      ['"return value"'], // Should NOT have return validation
+    )
+  })
+
+  void test('skip return - variable from JSON.parse as T then returned', async () => {
+    // JSON.parse with as T should validate and filter the result,
+    // then return should not re-validate
+    await transformAndCheck(
+      `interface User { name: string; }
+      function parseUser(json: string): User {
+        const user = JSON.parse(json) as User;
+        return user;
+      }`,
+      ['JSON.parse', '/* already valid */'],
+      ['"return value"'],
+    )
+  })
+
+  void test('skip return - aliased validated variable', async () => {
+    // When a variable is aliased from a validated param, return should skip
+    await transformAndCheck(
+      `function aliased(x: string): string {
+        const y = x;
+        return y;
+      }`,
+      ['"string" === typeof x', '/* already valid */'],
+      ['"return value"'],
+    )
+  })
+
+  void test('typical-ignore comment skips validation', async () => {
+    // @typical-ignore should skip validation entirely
+    const result = await compiler.transformSource(
+      'test.ts',
+      `// @typical-ignore
+      function ignored(x: string): string {
+        return x;
+      }`,
+    )
+    assert.ok(!result.code.includes('throw new TypeError'), 'Should not validate with @typical-ignore')
+    assert.ok(!result.code.includes('"return value"'), 'Should not validate return with @typical-ignore')
+  })
+
+  void test('pure functions do not dirty objects', async () => {
+    // Passing an object to console.log should not dirty it
+    // because console.log is a pure/readonly function
+    await transformAndCheck(
+      `interface User { name: string; }
+      function logAndReturn(user: User): User {
+        console.log(user);
+        return user;
+      }`,
+      ['/* already valid */'], // Return validation skipped
+      ['"return value"'], // No return validation
+    )
+  })
+})

@@ -10,12 +10,13 @@ import (
 	"github.com/microsoft/typescript-go/shim/ast"
 	"github.com/microsoft/typescript-go/shim/bundled"
 	"github.com/microsoft/typescript-go/shim/checker"
+	"github.com/microsoft/typescript-go/shim/compiler"
 	"github.com/microsoft/typescript-go/shim/project"
 	"github.com/microsoft/typescript-go/shim/vfs/osvfs"
 )
 
-// setupTestProject creates a TypeScript project with the given code and returns the checker and source file.
-func setupTestProject(t *testing.T, code string) (*checker.Checker, *ast.SourceFile, func()) {
+// setupTestProject creates a TypeScript project with the given code and returns the checker, source file and program.
+func setupTestProject(t *testing.T, code string) (*checker.Checker, *ast.SourceFile, *compiler.Program, func()) {
 	t.Helper()
 
 	tmpDir, err := os.MkdirTemp("", "codegen-advanced-test-*")
@@ -72,7 +73,7 @@ func setupTestProject(t *testing.T, code string) (*checker.Checker, *ast.SourceF
 
 	c, release := program.GetTypeChecker(ctx)
 
-	return c, sourceFile, func() {
+	return c, sourceFile, program, func() {
 		release()
 		cleanup()
 	}
@@ -131,10 +132,10 @@ function testRequired(user: Required<OptionalUser>): void {}
 function testRecord(data: Record<string, number>): void {}
 `
 
-	c, sourceFile, cleanup := setupTestProject(t, code)
+	c, sourceFile, program, cleanup := setupTestProject(t, code)
 	defer cleanup()
 
-	gen := NewGenerator(c)
+	gen := NewGenerator(c, program)
 
 	tests := []struct {
 		funcName        string
@@ -144,9 +145,9 @@ function testRecord(data: Record<string, number>): void {}
 		{
 			funcName: "testOmit",
 			expectedContain: []string{
-				`_v.id`,    // id should be present
-				`_v.name`,  // name should be present
-				`_v.age`,   // age should be present
+				`_v.id`,   // id should be present
+				`_v.name`, // name should be present
+				`_v.age`,  // age should be present
 				"object",
 			},
 			expectedNot: []string{
@@ -227,10 +228,10 @@ function testLiteralUnion(value: "a" | "b" | "c"): void {}
 function testMixedUnion(value: "error" | number): void {}
 `
 
-	c, sourceFile, cleanup := setupTestProject(t, code)
+	c, sourceFile, program, cleanup := setupTestProject(t, code)
 	defer cleanup()
 
-	gen := NewGenerator(c)
+	gen := NewGenerator(c, program)
 
 	tests := []struct {
 		funcName        string
@@ -260,7 +261,7 @@ function testMixedUnion(value: "error" | number): void {}
 				`"a"`,
 				`"b"`,
 				`"c"`,
-				"||", // Union check
+				"else if", // Union check
 			},
 		},
 	}
@@ -301,10 +302,10 @@ function testNamedTuple(value: [name: string, age: number]): void {}
 function testRestTuple(value: [string, ...number[]]): void {}
 `
 
-	c, sourceFile, cleanup := setupTestProject(t, code)
+	c, sourceFile, program, cleanup := setupTestProject(t, code)
 	defer cleanup()
 
-	gen := NewGenerator(c)
+	gen := NewGenerator(c, program)
 
 	tests := []struct {
 		funcName        string
@@ -378,10 +379,10 @@ const enum Size {
 function testConstEnum(size: Size): void {}
 `
 
-	c, sourceFile, cleanup := setupTestProject(t, code)
+	c, sourceFile, program, cleanup := setupTestProject(t, code)
 	defer cleanup()
 
-	gen := NewGenerator(c)
+	gen := NewGenerator(c, program)
 
 	tests := []struct {
 		funcName        string
@@ -445,10 +446,10 @@ class Account {
 function testClassWithPrivate(account: Account): void {}
 `
 
-	c, sourceFile, cleanup := setupTestProject(t, code)
+	c, sourceFile, program, cleanup := setupTestProject(t, code)
 	defer cleanup()
 
-	gen := NewGenerator(c)
+	gen := NewGenerator(c, program)
 
 	t.Run("testClassParam", func(t *testing.T) {
 		paramType := findFunctionParamType(c, sourceFile, "testClassParam")
@@ -498,10 +499,10 @@ type Shape = Circle | Square | Rectangle;
 function testDiscriminatedUnion(shape: Shape): void {}
 `
 
-	c, sourceFile, cleanup := setupTestProject(t, code)
+	c, sourceFile, program, cleanup := setupTestProject(t, code)
 	defer cleanup()
 
-	gen := NewGenerator(c)
+	gen := NewGenerator(c, program)
 
 	t.Run("testDiscriminatedUnion", func(t *testing.T) {
 		paramType := findFunctionParamType(c, sourceFile, "testDiscriminatedUnion")
@@ -515,8 +516,8 @@ function testDiscriminatedUnion(shape: Shape): void {}
 
 		// Should contain checks for each variant
 		expectedContain := []string{
-			"||",     // Union check
-			"object", // Object checks
+			"else if", // Union check uses if-else chain
+			"object",  // Object checks
 		}
 
 		for _, expected := range expectedContain {
@@ -555,10 +556,10 @@ function testNestedArrays(data: string[][]): void {}
 function testArrayOfUnions(values: (string | number)[]): void {}
 `
 
-	c, sourceFile, cleanup := setupTestProject(t, code)
+	c, sourceFile, program, cleanup := setupTestProject(t, code)
 	defer cleanup()
 
-	gen := NewGenerator(c)
+	gen := NewGenerator(c, program)
 
 	tests := []struct {
 		funcName        string
@@ -583,7 +584,7 @@ function testArrayOfUnions(values: (string | number)[]): void {}
 			funcName: "testArrayOfUnions",
 			expectedContain: []string{
 				"Array.isArray",
-				"||", // Union check for elements
+				"else if", // Union check uses if-else chain
 			},
 		},
 	}
@@ -627,10 +628,10 @@ type Employee = Named & Aged & { employeeId: string };
 function testComplexIntersection(employee: Employee): void {}
 `
 
-	c, sourceFile, cleanup := setupTestProject(t, code)
+	c, sourceFile, program, cleanup := setupTestProject(t, code)
 	defer cleanup()
 
-	gen := NewGenerator(c)
+	gen := NewGenerator(c, program)
 
 	tests := []struct {
 		funcName        string
