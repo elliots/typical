@@ -34,9 +34,11 @@ func (g *Generator) arrayCheck(t *checker.Type, expr string) string {
 func (g *Generator) tupleValidation(t *checker.Type, expr string, nameExpr string) string {
 	var sb strings.Builder
 
-	// Check it's an array
-	sb.WriteString(fmt.Sprintf(`if (!Array.isArray(%s)) throw new TypeError("Expected " + %s + " to be tuple, got " + typeof %s); `,
-		expr, nameExpr, expr))
+	// Check it's an array - use optimised error message
+	errorNameExpr := g.errorName(nameExpr)
+	errorMsg := concatStrings(`"Expected "`, errorNameExpr)
+	errorMsg = concatStrings(errorMsg, fmt.Sprintf(`" to be tuple, got " + typeof %s`, expr))
+	sb.WriteString(fmt.Sprintf(`if (!Array.isArray(%s)) %s; `, expr, g.throwOrReturn(errorMsg)))
 
 	// Get tuple element types
 	typeArgs := checker.Checker_getTypeArguments(g.checker, t)
@@ -49,28 +51,33 @@ func (g *Generator) tupleValidation(t *checker.Type, expr string, nameExpr strin
 		if combinedFlags&checker.ElementFlagsRest != 0 {
 			// Has rest element - check minimum length
 			if len(typeArgs) > 1 {
-				sb.WriteString(fmt.Sprintf(`if (%s.length < %d) throw new TypeError("Expected " + %s + " to have at least %d elements, got " + %s.length); `,
-					expr, len(typeArgs)-1, nameExpr, len(typeArgs)-1, expr))
+				lenErrorMsg := concatStrings(`"Expected "`, errorNameExpr)
+				lenErrorMsg = concatStrings(lenErrorMsg, fmt.Sprintf(`" to have at least %d elements, got " + %s.length`, len(typeArgs)-1, expr))
+				sb.WriteString(fmt.Sprintf(`if (%s.length < %d) %s; `, expr, len(typeArgs)-1, g.throwOrReturn(lenErrorMsg)))
 			}
 		} else if combinedFlags&checker.ElementFlagsOptional != 0 {
 			// Has optional elements - check max length
-			sb.WriteString(fmt.Sprintf(`if (%s.length > %d) throw new TypeError("Expected " + %s + " to have at most %d elements, got " + %s.length); `,
-				expr, len(typeArgs), nameExpr, len(typeArgs), expr))
+			lenErrorMsg := concatStrings(`"Expected "`, errorNameExpr)
+			lenErrorMsg = concatStrings(lenErrorMsg, fmt.Sprintf(`" to have at most %d elements, got " + %s.length`, len(typeArgs), expr))
+			sb.WriteString(fmt.Sprintf(`if (%s.length > %d) %s; `, expr, len(typeArgs), g.throwOrReturn(lenErrorMsg)))
 		} else {
 			// Fixed length tuple
-			sb.WriteString(fmt.Sprintf(`if (%s.length !== %d) throw new TypeError("Expected " + %s + " to have %d elements, got " + %s.length); `,
-				expr, len(typeArgs), nameExpr, len(typeArgs), expr))
+			lenErrorMsg := concatStrings(`"Expected "`, errorNameExpr)
+			lenErrorMsg = concatStrings(lenErrorMsg, fmt.Sprintf(`" to have %d elements, got " + %s.length`, len(typeArgs), expr))
+			sb.WriteString(fmt.Sprintf(`if (%s.length !== %d) %s; `, expr, len(typeArgs), g.throwOrReturn(lenErrorMsg)))
 		}
 	} else {
 		// Fallback - assume fixed length
-		sb.WriteString(fmt.Sprintf(`if (%s.length !== %d) throw new TypeError("Expected " + %s + " to have %d elements, got " + %s.length); `,
-			expr, len(typeArgs), nameExpr, len(typeArgs), expr))
+		lenErrorMsg := concatStrings(`"Expected "`, errorNameExpr)
+		lenErrorMsg = concatStrings(lenErrorMsg, fmt.Sprintf(`" to have %d elements, got " + %s.length`, len(typeArgs), expr))
+		sb.WriteString(fmt.Sprintf(`if (%s.length !== %d) %s; `, expr, len(typeArgs), g.throwOrReturn(lenErrorMsg)))
 	}
 
 	// Validate each element
 	for i, elemType := range typeArgs {
 		elemExpr := fmt.Sprintf("%s[%d]", expr, i)
-		elemNameExpr := fmt.Sprintf(`%s + "[%d]"`, nameExpr, i)
+		// Optimise: for static index, append directly if nameExpr is a literal
+		elemNameExpr := g.appendToName(nameExpr, fmt.Sprintf("[%d]", i))
 		elemValidation := g.generateValidation(elemType, elemExpr, elemNameExpr)
 		if elemValidation != "" {
 			sb.WriteString(elemValidation)

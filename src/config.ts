@@ -23,7 +23,13 @@ export interface TypicalSourceMapConfig {
 export interface TypicalConfig {
   include?: string[]
   exclude?: string[]
-  reusableValidators?: boolean
+  /**
+   * Controls whether validators are hoisted to module scope for reuse.
+   * - 'auto' (default): Hoist only validators used more than once
+   * - 'never': Never hoist, always generate inline validators
+   * - 'always': Always hoist validators, even if only used once
+   */
+  reusableValidators?: 'auto' | 'never' | 'always'
   validateCasts?: boolean
   hoistRegex?: boolean
   debug?: TypicalDebugConfig
@@ -69,7 +75,7 @@ export interface TypicalConfig {
 export const defaultConfig: TypicalConfig = {
   include: ['**/*.ts', '**/*.tsx'],
   exclude: ['node_modules/**', '**/*.d.ts', 'dist/**', 'build/**'],
-  reusableValidators: false, // Off by default for accurate source maps (set to true for production)
+  reusableValidators: 'auto', // Hoists validators to module scope for reduced code size
   validateCasts: false,
   validateFunctions: true,
   transformJSONParse: true,
@@ -79,7 +85,7 @@ export const defaultConfig: TypicalConfig = {
     writeIntermediateFiles: false,
   },
   sourceMap: {
-    enabled: true, // On by default for debugging (set to false for production)
+    enabled: true,
     includeContent: true,
     inline: false,
   },
@@ -109,35 +115,14 @@ export function loadConfig(configPath?: string): TypicalConfig {
   return defaultConfig
 }
 
-let warnedAboutSourceMaps = false
-
 /**
  * Validate and adjust config for consistency.
- * Currently handles:
- * - Disabling reusableValidators when source maps are enabled (required for accurate mappings)
  *
  * @param config The config to validate
  * @returns Validated/adjusted config
  */
 export function validateConfig(config: TypicalConfig): TypicalConfig {
-  let result = config
-
-  // Source maps require inline validators (not reusable) because each validation
-  // call needs its own source map marker pointing to the correct type annotation.
-  // With reusable validators, the expanded typia code would all map to the validator
-  // declaration rather than the individual usage sites.
-  const sourceMapEnabled = config.sourceMap?.enabled !== false
-  const reusableValidatorsEnabled = config.reusableValidators === true
-
-  if (sourceMapEnabled && reusableValidatorsEnabled) {
-    if (!warnedAboutSourceMaps) {
-      warnedAboutSourceMaps = true
-      console.warn(
-        'TYPICAL: Both sourceMap and reusableValidators are enabled. ' + 'Disabling reusableValidators for accurate source mapping. ' + 'For production builds, set sourceMap.enabled: false to use reusableValidators.',
-      )
-    }
-    result = { ...result, reusableValidators: false }
-  }
-
-  return result
+  // Reusable validators now throw at the call site, so they work correctly
+  // with source maps. No need for special handling.
+  return config
 }

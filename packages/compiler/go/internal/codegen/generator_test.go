@@ -595,3 +595,216 @@ function validate(user: SimpleUser): void {}
 		t.Error("Validator should have error message with name parameter")
 	}
 }
+
+// TestGenerateCheckFunction tests the GenerateCheckFunction method for reusable validators.
+func TestGenerateCheckFunction(t *testing.T) {
+	// Create a temp directory for test files
+	tmpDir, err := os.MkdirTemp("", "check-func-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create tsconfig.json
+	tsconfigPath := filepath.Join(tmpDir, "tsconfig.json")
+	tsconfigContent := `{
+		"compilerOptions": {
+			"target": "ES2020",
+			"module": "ESNext",
+			"strict": true
+		},
+		"include": ["*.ts"]
+	}`
+	if err := os.WriteFile(tsconfigPath, []byte(tsconfigContent), 0644); err != nil {
+		t.Fatalf("failed to write tsconfig: %v", err)
+	}
+
+	// Create test TypeScript file
+	testTsPath := filepath.Join(tmpDir, "test.ts")
+	testTsContent := `
+interface User {
+	name: string;
+	age: number;
+}
+`
+	if err := os.WriteFile(testTsPath, []byte(testTsContent), 0644); err != nil {
+		t.Fatalf("failed to write test.ts: %v", err)
+	}
+
+	// Setup project
+	fs := osvfs.FS()
+	session := project.NewSession(&project.SessionInit{
+		FS: fs,
+		Options: &project.SessionOptions{
+			CurrentDirectory:   tmpDir,
+			DefaultLibraryPath: "",
+		},
+	})
+
+	ctx := context.Background()
+	proj, err := session.OpenProject(ctx, tsconfigPath)
+	if err != nil {
+		t.Fatalf("failed to open project: %v", err)
+	}
+
+	program := proj.GetProgram()
+	sourceFile := program.GetSourceFile(testTsPath)
+	if sourceFile == nil {
+		t.Fatalf("failed to get source file")
+	}
+
+	c, release := program.GetTypeChecker(ctx)
+	defer release()
+
+	gen := NewGenerator(c, program)
+
+	// Find the User interface type
+	var userType *checker.Type
+	sourceFile.ForEachChild(func(node *ast.Node) bool {
+		if node.Kind == ast.KindInterfaceDeclaration {
+			decl := node.AsInterfaceDeclaration()
+			if decl != nil && decl.Name() != nil && decl.Name().Text() == "User" {
+				userType = checker.Checker_GetTypeAtLocation(c, node)
+			}
+		}
+		return false
+	})
+
+	if userType == nil {
+		t.Fatal("Failed to find User type")
+	}
+
+	// Generate the check function
+	result := gen.GenerateCheckFunction(userType, "User")
+	checkFunc := result.Code
+
+	t.Logf("Generated check function:\n%s", checkFunc)
+
+	// Check function structure - should NOT throw, should return error or null
+	expectedParts := []string{
+		"const _check_User = (_v: any): string | null => {", // Function signature
+		`return "Expected %n`,                               // Should return error with %n placeholder (optimised)
+		"return null;",                                      // Return null on success
+	}
+
+	for _, part := range expectedParts {
+		if !strings.Contains(checkFunc, part) {
+			t.Errorf("Check function missing expected part: %q", part)
+		}
+	}
+
+	// Should NOT contain throw
+	if strings.Contains(checkFunc, "throw new TypeError") {
+		t.Error("Check function should NOT throw - it should return error messages")
+	}
+
+	// Check that %n placeholder is used instead of _n
+	if strings.Contains(checkFunc, `"Expected " + _n`) {
+		t.Error("Check function should use %n placeholder, not _n parameter")
+	}
+
+	// Check function name
+	if result.Name != "_check_User" {
+		t.Errorf("Expected function name _check_User, got %s", result.Name)
+	}
+}
+
+// TestGenerateFilterFunction tests the generation of reusable filter functions
+// that return [error, result] tuples instead of throwing.
+func TestGenerateFilterFunction(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create test TypeScript file with User interface
+	testTsPath := filepath.Join(tmpDir, "test.ts")
+	testTsContent := `
+interface User {
+	name: string;
+	age: number;
+}
+`
+	if err := os.WriteFile(testTsPath, []byte(testTsContent), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	// Create tsconfig
+	tsconfigPath := filepath.Join(tmpDir, "tsconfig.json")
+	tsconfigContent := `{"compilerOptions": {"strict": true}}`
+	if err := os.WriteFile(tsconfigPath, []byte(tsconfigContent), 0644); err != nil {
+		t.Fatalf("failed to write tsconfig: %v", err)
+	}
+
+	// Setup project
+	fs := osvfs.FS()
+	session := project.NewSession(&project.SessionInit{
+		FS: fs,
+		Options: &project.SessionOptions{
+			CurrentDirectory:   tmpDir,
+			DefaultLibraryPath: "",
+		},
+	})
+
+	ctx := context.Background()
+	proj, err := session.OpenProject(ctx, tsconfigPath)
+	if err != nil {
+		t.Fatalf("failed to open project: %v", err)
+	}
+
+	program := proj.GetProgram()
+	sourceFile := program.GetSourceFile(testTsPath)
+	if sourceFile == nil {
+		t.Fatalf("failed to get source file")
+	}
+
+	c, release := program.GetTypeChecker(ctx)
+	defer release()
+
+	gen := NewGenerator(c, program)
+
+	// Find the User interface type
+	var userType *checker.Type
+	sourceFile.ForEachChild(func(node *ast.Node) bool {
+		if node.Kind == ast.KindInterfaceDeclaration {
+			decl := node.AsInterfaceDeclaration()
+			if decl != nil && decl.Name() != nil && decl.Name().Text() == "User" {
+				userType = checker.Checker_GetTypeAtLocation(c, node)
+			}
+		}
+		return false
+	})
+
+	if userType == nil {
+		t.Fatal("Failed to find User type")
+	}
+
+	// Generate the filter function
+	result := gen.GenerateFilterFunction(userType, "User")
+	filterFunc := result.Code
+
+	t.Logf("Generated filter function:\n%s", filterFunc)
+
+	// Filter function structure - should return [error, result] tuple
+	expectedParts := []string{
+		"const _filter_User = (_v: any): [string | null, any] => {", // Function signature with tuple return
+		`return ["Expected %n`,                                       // Should return error tuple with %n placeholder (optimised)
+		"return [null, _r];",                                         // Return success tuple
+		"const _r: any = {};",                                        // Result object
+		"_r.name = _v.name",                                          // Property assignment
+		"_r.age = _v.age",                                            // Property assignment
+	}
+
+	for _, part := range expectedParts {
+		if !strings.Contains(filterFunc, part) {
+			t.Errorf("Filter function missing expected part: %q", part)
+		}
+	}
+
+	// Should NOT contain throw
+	if strings.Contains(filterFunc, "throw new TypeError") {
+		t.Error("Filter function should NOT throw - it should return error tuples")
+	}
+
+	// Check function name
+	if result.Name != "_filter_User" {
+		t.Errorf("Expected function name _filter_User, got %s", result.Name)
+	}
+}

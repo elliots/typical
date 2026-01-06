@@ -3,7 +3,7 @@ import { typicalPlugin } from '@elliots/bun-plugin-typical'
 void Bun.plugin(
   typicalPlugin({
     typical: {
-      reusableValidators: false,
+      reusableValidators: 'auto',
       validateCasts: true,
       sourceMap: {
         enabled: true,

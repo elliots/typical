@@ -8,7 +8,7 @@ const result = await Bun.build({
   plugins: [
     typicalPlugin({
       typical: {
-        reusableValidators: true,
+        reusableValidators: 'auto',
         sourceMap: {
           enabled: true,
           includeContent: true,

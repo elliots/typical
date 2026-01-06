@@ -1,0 +1,11 @@
+{
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules/**", "**/*.d.ts", "dist/**"],
+  "reusableValidators": "auto",
+  "validateCasts": true,
+  "validateFunctions": false,
+  "ignoreTypes": ["ts.*", "TransformerExtras", "PluginConfig", "DecodedSourceMap", "EncodedSourceMap", "SourceMapSegment", "TransformContext"],
+  "debug": {
+    "writeIntermediateFiles": false
+  }
+}

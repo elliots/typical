@@ -1893,7 +1893,7 @@ void describe('Optional Parameters', () => {
     await transformAndCheck(
       `interface Config { host: string; port: number; }
       function connect(config?: Config): void {}`,
-      ['if (config !== undefined)', 'typeof config !== "object"'], // Object check is !== not ===
+      ['if (config !== undefined)', 'typeof config === "object"'], // Object check with negated if
     )
   })
 
@@ -2082,7 +2082,7 @@ void describe('Ignore Types', () => {
     `
 
     // Transform with ignoreTypes pattern
-    const result = await compiler.transformSource('test.ts', source, ['*FieldConfig'])
+    const result = await compiler.transformSource('test.ts', source, { ignoreTypes: ['*FieldConfig'] })
 
     // Should contain the skip comment instead of validation
     assert.ok(result.code.includes('validation skipped'), `Expected 'validation skipped' comment, got: ${result.code}`)
@@ -2103,7 +2103,7 @@ void describe('Ignore Types', () => {
       }
     `
 
-    const result = await compiler.transformSource('test.ts', source, ['*FieldConfig'])
+    const result = await compiler.transformSource('test.ts', source, { ignoreTypes: ['*FieldConfig'] })
 
     // Should contain the skip comment
     assert.ok(result.code.includes('validation skipped'), `Expected 'validation skipped' comment, got: ${result.code}`)
@@ -2123,7 +2123,7 @@ void describe('Ignore Types', () => {
     `
 
     // Only ignore Admin, not User
-    const result = await compiler.transformSource('test.ts', source, ['Admin'])
+    const result = await compiler.transformSource('test.ts', source, { ignoreTypes: ['Admin'] })
 
     // Admin should be skipped
     assert.ok(result.code.includes("validation skipped: type 'Admin'"), `Expected Admin to be skipped, got: ${result.code}`)
@@ -2201,5 +2201,144 @@ void describe('Optimisations', () => {
       ['/* already valid */'], // Return validation skipped
       ['"return value"'], // No return validation
     )
+  })
+})
+
+// =============================================================================
+// REUSABLE VALIDATORS
+// =============================================================================
+
+void describe('Reusable Validators', () => {
+  void test('hoists check function to module scope', async () => {
+    const result = await compiler.transformSource(
+      'test.ts',
+      `interface User { name: string; age: number; }
+      function greet(user: User): void {
+        console.log(user.name);
+      }`,
+      { reusableValidators: 'always' },
+    )
+
+    // Should have a hoisted check function
+    assert.ok(result.code.includes('const _check_'), `Expected hoisted _check_ function, got: ${result.code}`)
+    // Should have hoisted error variable
+    assert.ok(result.code.includes('let _e'), `Expected hoisted _e variable, got: ${result.code}`)
+    // Check function should return error message (not throw)
+    assert.ok(result.code.includes('return "Expected'), `Expected check function to return error message, got: ${result.code}`)
+    // Call site should throw
+    assert.ok(result.code.includes('throw new TypeError(_e'), `Expected call site to throw, got: ${result.code}`)
+  })
+
+  void test('same type reuses same check function', async () => {
+    const result = await compiler.transformSource(
+      'test.ts',
+      `interface User { name: string; }
+      function first(user: User): void {
+        console.log(user.name);
+      }
+      function second(user: User): void {
+        console.log(user.name);
+      }`,
+      { reusableValidators: 'auto' },
+    )
+
+    // Count occurrences of _check_ function definitions
+    const checkFuncMatches = result.code.match(/const _check_\w+ = /g)
+    assert.ok(checkFuncMatches, `Expected check function definitions, got: ${result.code}`)
+    assert.strictEqual(checkFuncMatches.length, 1, `Expected exactly 1 check function for User type, got ${checkFuncMatches.length}`)
+
+    // Should have two call sites using the same check function
+    const callSiteMatches = result.code.match(/_e = _check_\w+\(/g)
+    assert.ok(callSiteMatches, `Expected check function calls, got: ${result.code}`)
+    assert.strictEqual(callSiteMatches.length, 2, `Expected 2 call sites, got ${callSiteMatches.length}`)
+  })
+
+  void test('call site substitutes variable name via replace', async () => {
+    const result = await compiler.transformSource(
+      'test.ts',
+      `interface Config { debug: boolean; }
+      function loadConfig(config: Config): void {
+        console.log(config.debug);
+      }`,
+      { reusableValidators: 'always' },
+    )
+
+    // Call site should use replace to substitute the name placeholder
+    assert.ok(result.code.includes('.replace(/%n/g,'), `Expected name substitution with replace, got: ${result.code}`)
+  })
+
+  void test('parameter validation uses reusable validators', async () => {
+    const result = await compiler.transformSource(
+      'test.ts',
+      `interface User { name: string; }
+      function greet(user: User): string {
+        return "Hello " + user.name;
+      }`,
+      { reusableValidators: 'always' },
+    )
+
+    // Should have hoisted check function for User
+    assert.ok(result.code.includes('const _check_'), `Expected hoisted check function, got: ${result.code}`)
+    // Should validate parameter at function start
+    assert.ok(result.code.includes('_e = _check_'), `Expected parameter validation call, got: ${result.code}`)
+  })
+
+  void test('can be disabled for inline validators', async () => {
+    const result = await compiler.transformSource(
+      'test.ts',
+      `interface User { name: string; }
+      function greet(user: User): void {
+        console.log(user.name);
+      }`,
+      { reusableValidators: 'never' },
+    )
+
+    // With reusableValidators: 'never', should use inline validation
+    assert.ok(!result.code.includes('const _check_'), `Should not have hoisted check function when disabled`)
+    assert.ok(!result.code.includes('let _e'), `Should not have hoisted _e when disabled`)
+    // Should have inline validation (not IIFE for params, just direct checks)
+    assert.ok(result.code.includes('throw new TypeError'), `Expected inline validation, got: ${result.code}`)
+  })
+
+  void test('only hoists validators when used more than once', async () => {
+    const result = await compiler.transformSource(
+      'test.ts',
+      `interface User { name: string; }
+      interface Config { debug: boolean; }
+      // User is used twice, should be hoisted
+      function first(user: User): void { console.log(user.name); }
+      function second(user: User): void { console.log(user.name); }
+      // Config is used once, should be inline
+      function third(config: Config): void { console.log(config.debug); }`,
+      { reusableValidators: 'auto' },
+    )
+
+    // User should be hoisted (used twice)
+    assert.ok(result.code.includes('const _check_User'), `Expected hoisted _check_User function, got: ${result.code}`)
+
+    // Config should NOT be hoisted (used only once) - validation should be inline
+    assert.ok(!result.code.includes('_check_Config'), `Config should use inline validation, not hoisted function. Got: ${result.code}`)
+
+    // Config validation should still happen (inline)
+    assert.ok(result.code.includes('config.debug'), `Config should still be validated inline. Got: ${result.code}`)
+  })
+
+  void test('single-use type uses inline validation even with reusableValidators true', async () => {
+    const result = await compiler.transformSource(
+      'test.ts',
+      `interface SingleUse { value: number; }
+      function process(data: SingleUse): void {
+        console.log(data.value);
+      }`,
+      { reusableValidators: 'auto' },
+    )
+
+    // Should NOT have hoisted check function for single-use type
+    assert.ok(!result.code.includes('const _check_'), `Single-use type should not be hoisted. Got: ${result.code}`)
+    assert.ok(!result.code.includes('let _e'), `No _e needed for single-use inline validation. Got: ${result.code}`)
+
+    // Should have inline validation
+    assert.ok(result.code.includes('data.value'), `Should have inline validation for data.value. Got: ${result.code}`)
+    assert.ok(result.code.includes('throw new TypeError'), `Should have inline throw. Got: ${result.code}`)
   })
 })

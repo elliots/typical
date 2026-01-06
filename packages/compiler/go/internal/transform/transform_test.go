@@ -27,8 +27,8 @@ func TestTransformFile(t *testing.T) {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`"string" === typeof name`, // Uses param name directly (inline)
-				`"name" + " to be string`,  // Error message uses param name
+				`"string" === typeof name`,      // Uses param name directly (inline)
+				`"Expected name to be string`,   // Error message (optimised single string)
 				`throw new TypeError`,
 			},
 		},
@@ -39,8 +39,8 @@ func TestTransformFile(t *testing.T) {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`"number" === typeof x`, // Uses param name directly (inline)
-				`"x" + " to be number`,  // Error message uses param name
+				`"number" === typeof x`,      // Uses param name directly (inline)
+				`"Expected x to be number`,   // Error message (optimised single string)
 			},
 		},
 		{
@@ -146,10 +146,10 @@ function greet(user: User): void {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`typeof user !== "object"`, // Uses param name directly
-				`user === null`,            // Uses param name directly
+				`typeof user === "object"`, // Uses param name directly
+				`user !== null`,            // Uses param name directly
 				`user.name`,                // Property access on param
-				`"user" + ".name"`,         // Error message with param name
+				`"Expected user.name`,      // Error message with param name (optimised - compile-time concatenation)
 			},
 		},
 		{
@@ -159,9 +159,9 @@ function greet(user: User): void {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`Array.isArray(nums)`,      // Uses param name directly
-				`nums.length`,              // Loop over array using param name
-				`"nums" + "[" + _i0 + "]"`, // Array index in error message
+				`Array.isArray(nums)`,       // Uses param name directly
+				`nums.length`,               // Loop over array using param name
+				`"Expected nums[" + _i0 +`,  // Array index in error message (dynamic index part)
 			},
 		},
 		{
@@ -171,7 +171,7 @@ function greet(user: User): void {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`Expected " + "name" + " to be string`, // Inline uses literal param name
+				`"Expected name to be string`, // Optimised single string
 			},
 		},
 	}
@@ -677,6 +677,263 @@ function fetchUser(id: string): User {
 			for _, part := range tt.unexpectedParts {
 				if strings.Contains(result, part) {
 					t.Errorf("Expected output NOT to contain %q\nGot:\n%s", part, result)
+				}
+			}
+		})
+	}
+}
+
+func TestReusableValidatorsAlways(t *testing.T) {
+	tests := []struct {
+		name            string
+		input           string
+		expectedParts   []string // Parts that should appear in output
+		unexpectedParts []string // Parts that should NOT appear in output
+	}{
+		{
+			name: "always mode - hoists check function even for single use",
+			input: `interface User {
+	name: string;
+	age: number;
+}
+
+function greet(user: User): void {
+	console.log(user.name);
+}`,
+			expectedParts: []string{
+				"let _e: string | null;",                       // Shared error variable
+				"const _check_User = (_v: any): string | null", // Hoisted check function
+				"_check_User(user)",                            // Call site uses check function
+				`.replace(/%n/g, "user")`,                      // Name substitution at call site
+				"throw new TypeError",                          // Throw at call site
+			},
+			unexpectedParts: []string{
+				`((_v: any, _n: string) => {`, // Should NOT have inline IIFE validator
+			},
+		},
+		{
+			name: "always mode - reuses same check function for same type",
+			input: `interface User {
+	name: string;
+	age: number;
+}
+
+function greet(user: User): void {
+	console.log(user.name);
+}
+
+function farewell(user: User): void {
+	console.log("Goodbye " + user.name);
+}`,
+			expectedParts: []string{
+				"const _check_User = (_v: any): string | null", // Only ONE check function
+				"_check_User(user)",                            // Both functions use same check
+			},
+		},
+		{
+			name: "always mode - check function validates properties",
+			input: `interface User {
+	name: string;
+	age: number;
+}
+
+function greet(user: User): void {
+	console.log(user.name);
+}`,
+			expectedParts: []string{
+				`typeof _v === "object"`,      // Object check in check function
+				`"string" === typeof _v.name`, // Property check for name
+				`"number" === typeof _v.age`,  // Property check for age
+				`return "Expected %n`,         // Error return with %n placeholder (optimised)
+				`return null;`,                // Success return
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := Config{
+				ValidateParameters: true,
+				ValidateReturns:    false,
+				ValidateCasts:      false,
+				ReusableValidators: ReusableValidatorsAlways,
+			}
+
+			output := transformTestCode(t, tt.input, config)
+			t.Logf("Output:\n%s", output)
+
+			for _, part := range tt.expectedParts {
+				if !strings.Contains(output, part) {
+					t.Errorf("Expected output to contain %q", part)
+				}
+			}
+
+			for _, part := range tt.unexpectedParts {
+				if strings.Contains(output, part) {
+					t.Errorf("Expected output NOT to contain %q", part)
+				}
+			}
+		})
+	}
+}
+
+func TestReusableValidatorsAuto(t *testing.T) {
+	tests := []struct {
+		name            string
+		input           string
+		expectedParts   []string // Parts that should appear in output
+		unexpectedParts []string // Parts that should NOT appear in output
+	}{
+		{
+			name: "auto mode - inlines when type used only once",
+			input: `interface User {
+	name: string;
+	age: number;
+}
+
+function greet(user: User): void {
+	console.log(user.name);
+}`,
+			expectedParts: []string{
+				`typeof user === "object"`,      // Inline validation uses param name
+				`"string" === typeof user.name`, // Inline property access on param
+				`throw new TypeError`,           // Inline throw
+			},
+			unexpectedParts: []string{
+				"let _e: string | null;", // Should NOT have shared error var
+				"const _check_User",      // Should NOT hoist check function
+				`.replace(/%n/g`,         // Should NOT have %n replacement
+			},
+		},
+		{
+			name: "auto mode - hoists when type used more than once",
+			input: `interface User {
+	name: string;
+	age: number;
+}
+
+function greet(user: User): void {
+	console.log(user.name);
+}
+
+function farewell(user: User): void {
+	console.log("Goodbye " + user.name);
+}`,
+			expectedParts: []string{
+				"let _e: string | null;",                       // Shared error variable
+				"const _check_User = (_v: any): string | null", // Hoisted check function
+				"_check_User(user)",                            // Both functions use same check
+				`.replace(/%n/g, "user")`,                      // Name substitution at call site
+			},
+			unexpectedParts: []string{
+				`typeof user === "object"`, // Should NOT have inline validation on param name
+			},
+		},
+		{
+			name: "auto mode - different types get different check functions",
+			input: `interface User {
+	name: string;
+}
+
+interface Company {
+	title: string;
+}
+
+function greetUser1(user: User): void {}
+function greetUser2(user: User): void {}
+function logCompany1(company: Company): void {}
+function logCompany2(company: Company): void {}`,
+			expectedParts: []string{
+				"const _check_User = (_v: any): string | null",    // User check function
+				"const _check_Company = (_v: any): string | null", // Company check function
+				"_check_User(user)",                               // User validation
+				"_check_Company(company)",                         // Company validation
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := Config{
+				ValidateParameters: true,
+				ValidateReturns:    false,
+				ValidateCasts:      false,
+				ReusableValidators: ReusableValidatorsAuto,
+			}
+
+			output := transformTestCode(t, tt.input, config)
+			t.Logf("Output:\n%s", output)
+
+			for _, part := range tt.expectedParts {
+				if !strings.Contains(output, part) {
+					t.Errorf("Expected output to contain %q", part)
+				}
+			}
+
+			for _, part := range tt.unexpectedParts {
+				if strings.Contains(output, part) {
+					t.Errorf("Expected output NOT to contain %q", part)
+				}
+			}
+		})
+	}
+}
+
+func TestReusableValidatorsNever(t *testing.T) {
+	tests := []struct {
+		name            string
+		input           string
+		expectedParts   []string // Parts that should appear in output
+		unexpectedParts []string // Parts that should NOT appear in output
+	}{
+		{
+			name: "never mode - always inlines even when type used multiple times",
+			input: `interface User {
+	name: string;
+	age: number;
+}
+
+function greet(user: User): void {
+	console.log(user.name);
+}
+
+function farewell(user: User): void {
+	console.log("Goodbye " + user.name);
+}`,
+			expectedParts: []string{
+				`typeof user === "object"`,      // Inline validation uses param name
+				`"string" === typeof user.name`, // Inline property access on param
+				`throw new TypeError`,           // Inline throw
+			},
+			unexpectedParts: []string{
+				"let _e: string | null;", // Should NOT have shared error var
+				"const _check_User",      // Should NOT hoist check function
+				`.replace(/%n/g`,         // Should NOT have %n replacement
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := Config{
+				ValidateParameters: true,
+				ValidateReturns:    false,
+				ValidateCasts:      false,
+				ReusableValidators: ReusableValidatorsNever,
+			}
+
+			output := transformTestCode(t, tt.input, config)
+			t.Logf("Output:\n%s", output)
+
+			for _, part := range tt.expectedParts {
+				if !strings.Contains(output, part) {
+					t.Errorf("Expected output to contain %q", part)
+				}
+			}
+
+			for _, part := range tt.unexpectedParts {
+				if strings.Contains(output, part) {
+					t.Errorf("Expected output NOT to contain %q", part)
 				}
 			}
 		})

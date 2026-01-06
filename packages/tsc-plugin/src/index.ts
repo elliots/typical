@@ -1,18 +1,18 @@
 import type ts from 'typescript'
 import type { PluginConfig, ProgramTransformerExtras } from 'ts-patch'
 import { TypicalCompiler } from '@elliots/typical-compiler'
-import { loadConfig, validateConfig } from '@elliots/typical'
+import { loadConfig, validateConfig, type TypicalConfig } from '@elliots/typical'
 import deasync from 'deasync'
 
 /**
  * Synchronous wrapper around the async compiler transformFile.
  */
-function transformFileSync(compiler: TypicalCompiler, project: string, fileName: string): string {
+function transformFileSync(compiler: TypicalCompiler, project: string, fileName: string, config: TypicalConfig): string {
   let result: string | undefined
   let error: Error | undefined
   let done = false
 
-  compiler.transformFile(project, fileName).then(
+  compiler.transformFile(project, fileName, config.ignoreTypes, config.maxGeneratedFunctions, config.reusableValidators).then(
     res => {
       result = res.code
       done = true
@@ -84,7 +84,7 @@ export default function (program: ts.Program, host: ts.CompilerHost | undefined,
     }
 
     try {
-      const transformed = transformFileSync(compiler, projectHandle!, sourceFile.fileName)
+      const transformed = transformFileSync(compiler, projectHandle!, sourceFile.fileName, config)
       transformedFiles.set(sourceFile.fileName, transformed)
     } catch (err) {
       console.error(`[typical] Failed to transform ${sourceFile.fileName}:`, err)

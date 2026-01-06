@@ -221,12 +221,14 @@ func escapeRegex(s string) string {
 }
 
 // getExpectedDescription returns a human-readable description of the template pattern.
+// The output is a template literal syntax like `hello-${string}` for error messages.
 func (tp *TemplatePattern) getExpectedDescription() string {
 	var parts []string
 	for _, part := range tp.Parts {
 		switch part.Kind {
 		case PartKindStatic:
-			parts = append(parts, fmt.Sprintf("%q", part.Text))
+			// Static text goes directly into the template literal
+			parts = append(parts, part.Text)
 		case PartKindString:
 			parts = append(parts, "${string}")
 		case PartKindNumber:
@@ -236,6 +238,7 @@ func (tp *TemplatePattern) getExpectedDescription() string {
 		case PartKindBigInt:
 			parts = append(parts, "${bigint}")
 		case PartKindLiteral:
+			// Literal values like ${"foo"} or ${42}
 			parts = append(parts, fmt.Sprintf("${%q}", part.Text))
 		case PartKindUnion:
 			parts = append(parts, "${...}")

@@ -1,6 +1,7 @@
 # CLAUDE.md - Typical Package Guide
 
 Important: Use Australian english spelling and grammar conventions.
+Important: Build the binaries with `npm run build:all`
 
 ## What is Typical?
 

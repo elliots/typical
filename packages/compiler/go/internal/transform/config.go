@@ -2,6 +2,18 @@ package transform
 
 import "regexp"
 
+// ReusableValidatorsMode controls how validators are hoisted to module scope.
+type ReusableValidatorsMode string
+
+const (
+	// ReusableValidatorsAuto hoists validators only when used more than once (default).
+	ReusableValidatorsAuto ReusableValidatorsMode = "auto"
+	// ReusableValidatorsNever never hoists, always generates inline validators.
+	ReusableValidatorsNever ReusableValidatorsMode = "never"
+	// ReusableValidatorsAlways always hoists validators, even if only used once.
+	ReusableValidatorsAlways ReusableValidatorsMode = "always"
+)
+
 // Config specifies which validations to apply during transformation.
 type Config struct {
 	// ValidateParameters wraps function parameters with validators.
@@ -44,6 +56,13 @@ type Config struct {
 	// are trusted to be valid according to their type annotation.
 	// Example: "db.loadUser" -> const user: User = db.loadUser(id) -> user is valid
 	TrustedFunctions []*regexp.Regexp
+
+	// ReusableValidators controls whether validator functions are hoisted to module scope.
+	// - "auto": Hoist validators only when the same type is validated more than once (default)
+	// - "never": Never hoist, always generate inline validators
+	// - "always": Always hoist validators, even if only used once
+	// The throw still occurs at the call site for proper source map support.
+	ReusableValidators ReusableValidatorsMode
 }
 
 // DefaultMaxGeneratedFunctions is the default limit for generated helper functions.
@@ -59,6 +78,7 @@ func DefaultConfig() Config {
 		TransformJSONStringify: true,
 		MaxGeneratedFunctions:  DefaultMaxGeneratedFunctions,
 		PureFunctions:          CompileIgnorePatterns([]string{"console.*", "JSON.stringify"}),
+		ReusableValidators:     ReusableValidatorsAuto,
 	}
 }
 

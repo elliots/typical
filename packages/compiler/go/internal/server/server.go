@@ -118,7 +118,7 @@ func (s *Server) handleRequest(method string, payload []byte) ([]byte, error) {
 		if err := json.Unmarshal(payload, &params); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
 		}
-		resp, err := s.api.TransformFile(params.Project, params.FileName, params.IgnoreTypes, params.MaxGeneratedFunctions)
+		resp, err := s.api.TransformFile(params.Project, params.FileName, params.IgnoreTypes, params.MaxGeneratedFunctions, params.ReusableValidators)
 		if err != nil {
 			return nil, err
 		}
@@ -129,7 +129,7 @@ func (s *Server) handleRequest(method string, payload []byte) ([]byte, error) {
 		if err := json.Unmarshal(payload, &params); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
 		}
-		resp, err := s.api.TransformSource(params.FileName, params.Source, params.IgnoreTypes, params.MaxGeneratedFunctions)
+		resp, err := s.api.TransformSource(params.FileName, params.Source, params.IgnoreTypes, params.MaxGeneratedFunctions, params.ReusableValidators)
 		if err != nil {
 			return nil, err
 		}

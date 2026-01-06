@@ -294,6 +294,7 @@ Create a `typical.json` file in your project root (optional):
 | `validateCasts`          | `false`                                                   | Validate type assertions (`as Type`)                              |
 | `transformJSONParse`     | `true`                                                    | Transform `JSON.parse` to validate and filter to typed properties |
 | `transformJSONStringify` | `true`                                                    | Transform `JSON.stringify` to only include typed properties       |
+| `reusableValidators`     | `true`                                                    | Hoist validators to module scope for reduced code size            |
 
 ---
 
@@ -350,8 +351,9 @@ Types that can't be validated at runtime (like generic type parameters `T`) are 
 
 The generated validation code is optimised for runtime performance:
 
+- **Reusable validators** - When the same type is validated multiple times, Typical hoists the validation logic to a reusable function at module scope. Nested types that appear in multiple places (e.g., `Address` used in both `User` and `Company`) are also extracted and reused.
 - **Smart redundancy elimination** - Skips validation when returning values that are already known to be valid: validated parameters, properties of validated objects, variables assigned from casts or `JSON.parse`, and aliased variables
-- **Type-aware dirty tracking** - Tracks when validated values might become invalid. Primitives stay valid after being passed to functions (they're copied), but objects are re-validated if passed to unknown functions. Pure functions like `console.log` don't invalidate objects.
+- **Type-aware dirty tracking** - Tracks when validated values might become invalid. Primitives stay valid after being passed to functions (they're copied), but objects are re-validated if passed to unknown functions. Pure functions (listed in the config) like `console.log` don't invalidate objects.
 - **Union early bail-out** - Union type checks use if-else chains so the first matching type succeeds immediately
 - **Skip comments** - Add `// @typical-ignore` before a function to skip all validation for it
 

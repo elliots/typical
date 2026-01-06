@@ -16,20 +16,25 @@ function debugLog(...args: unknown[]): void {
 }
 
 function getBinaryPath(): string {
-  // Try platform-specific package first
+
+  // try local binary first (for development)
+  const localBinPath = join(__dirname, '..', 'bin', 'typical')
+  try {
+    require('fs').accessSync(localBinPath)
+    debugLog(`[CLIENT] Using local binary at ${localBinPath}`)
+    return localBinPath
+  } catch {
+    // continue to platform-specific package
+  }
+
+  // Then use platform-specific package
   const platform = process.platform // darwin, linux, win32
   const arch = process.arch // arm64, x64
   const pkgName = `@elliots/typical-compiler-${platform}-${arch}`
 
-  try {
-    const pkg = require(pkgName) as { binaryPath: string }
-    debugLog(`[CLIENT] Using platform binary from ${pkgName}`)
-    return pkg.binaryPath
-  } catch {
-    // Fallback to local bin (for development)
-    debugLog(`[CLIENT] Platform package ${pkgName} not found, falling back to local bin`)
-    return join(__dirname, '..', 'bin', 'typical')
-  }
+  const pkg = require(pkgName) as { binaryPath: string }
+  debugLog(`[CLIENT] Using platform binary from ${pkgName}`)
+  return pkg.binaryPath
 }
 
 export interface TypicalCompilerOptions {
@@ -103,13 +108,14 @@ export class TypicalCompiler {
     return this.request<ProjectHandle>('loadProject', { configFileName })
   }
 
-  async transformFile(project: ProjectHandle | string, fileName: string, ignoreTypes?: string[], maxGeneratedFunctions?: number): Promise<TransformResult> {
+  async transformFile(project: ProjectHandle | string, fileName: string, ignoreTypes?: string[], maxGeneratedFunctions?: number, reusableValidators?: 'auto' | 'never' | 'always'): Promise<TransformResult> {
     const projectId = typeof project === 'string' ? project : project.id
     return this.request<TransformResult>('transformFile', {
       project: projectId,
       fileName,
       ignoreTypes,
       maxGeneratedFunctions,
+      reusableValidators,
     })
   }
 
@@ -124,16 +130,24 @@ export class TypicalCompiler {
    *
    * @param fileName - Virtual filename for error messages (e.g., "test.ts")
    * @param source - TypeScript source code
-   * @param ignoreTypes - Glob patterns for types to skip validation (e.g., ["FieldConfig", "React.*"])
-   * @param maxGeneratedFunctions - Max helper functions before error (0 = default 50)
+   * @param options - Optional transform options
    * @returns Transformed code with validation
    */
-  async transformSource(fileName: string, source: string, ignoreTypes?: string[], maxGeneratedFunctions?: number): Promise<TransformResult> {
+  async transformSource(
+    fileName: string,
+    source: string,
+    options?: {
+      ignoreTypes?: string[]
+      maxGeneratedFunctions?: number
+      reusableValidators?: 'auto' | 'never' | 'always'
+    },
+  ): Promise<TransformResult> {
     return this.request<TransformResult>('transformSource', {
       fileName,
       source,
-      ignoreTypes,
-      maxGeneratedFunctions,
+      ignoreTypes: options?.ignoreTypes,
+      maxGeneratedFunctions: options?.maxGeneratedFunctions,
+      reusableValidators: options?.reusableValidators,
     })
   }
 

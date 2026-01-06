@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/elliots/typical/packages/compiler/internal/codegen"
+	"github.com/elliots/typical/packages/compiler/internal/utils"
 	"github.com/microsoft/typescript-go/shim/ast"
 	"github.com/microsoft/typescript-go/shim/checker"
 	"github.com/microsoft/typescript-go/shim/compiler"
@@ -73,6 +74,218 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 
 	// Collect all insertions (position -> text to insert)
 	var insertions []insertion
+
+	// Track reusable validators when config.ReusableValidators is enabled
+	// Maps type key -> generated function code
+	checkFunctions := make(map[string]string)      // _check_X functions for validation
+	filterFunctions := make(map[string]string)     // _filter_X functions for JSON.parse/stringify
+	checkFunctionNames := make(map[string]string)  // type key -> function name
+	filterFunctionNames := make(map[string]string) // type key -> function name
+	usedCheckNames := make(map[string]bool)        // track which function names are in use
+	usedFilterNames := make(map[string]bool)       // track which function names are in use
+	checkNameCounter := make(map[string]int)       // base name -> next suffix counter
+	filterNameCounter := make(map[string]int)      // base name -> next suffix counter
+
+	// Pre-computed type usage counts from first pass (only populated when ReusableValidators is true)
+	checkTypeUsage := make(map[string]int)
+	filterTypeUsage := make(map[string]int)
+	// Type objects from first pass - used to pre-generate check functions for nested types
+	checkTypeObjects := make(map[string]typeInfo)
+	filterTypeObjects := make(map[string]typeInfo)
+
+	// getTypeKey returns a stable key for a type, used to deduplicate reusable validators
+	// We use the full type string to ensure different types get different keys
+	getTypeKey := func(t *checker.Type, typeNode *ast.Node) string {
+		// Use TypeToString for the full type representation
+		// This ensures ArrayItem[] and (ArrayItem & {age: number})[] get different keys
+		typeStr := c.TypeToString(t)
+		if typeStr != "" {
+			return typeStr
+		}
+		// Fallback to pointer-based key for types that can't be stringified
+		return fmt.Sprintf("anon_%p", t)
+	}
+
+	// First pass: count type usages (only when ReusableValidators is "auto")
+	// This allows us to only hoist functions that are used more than once
+	// AND enables composable validators (nested types call reusable functions)
+	if config.ReusableValidators == ReusableValidatorsAuto {
+		countTypeUsages(sourceFile, c, program, config, getTypeKey, checkTypeUsage, filterTypeUsage, checkTypeObjects, filterTypeObjects)
+		debugf("[DEBUG] First pass complete: %d check types, %d filter types\n", len(checkTypeUsage), len(filterTypeUsage))
+
+		// Pre-allocate function names for types that will be hoisted (usage > 1)
+		// This enables composable validators - nested types can call parent's check function
+		for typeKey, count := range checkTypeUsage {
+			if count > 1 {
+				// Generate a unique function name based on the type key
+				// Uses smart naming: simple types get full name, complex types get shortened name with number
+				finalName := generateFunctionName("_check_", typeKey, checkNameCounter, usedCheckNames)
+				checkFunctionNames[typeKey] = finalName
+			}
+		}
+
+		// Pass the pre-allocated names to the generator for composable validators
+		gen.SetAvailableCheckFunctions(checkFunctionNames)
+
+		// Pre-generate check function code for all types that will be reused
+		// This must happen BEFORE the main visitor so that when we generate
+		// a check function for NestedUser that calls _check_Address,
+		// the _check_Address code already exists
+		for typeKey, count := range checkTypeUsage {
+			if count > 1 {
+				if info, exists := checkTypeObjects[typeKey]; exists {
+					typeName := info.typeName
+					if typeName == "" {
+						typeName = "value"
+					}
+					// Generate the check function code - this populates checkFunctions[typeKey]
+					var result codegen.CheckFunctionResult
+					if info.typeNode != nil {
+						result = gen.GenerateCheckFunctionFromNode(info.t, info.typeNode, typeName)
+					} else {
+						result = gen.GenerateCheckFunction(info.t, typeName)
+					}
+					if !result.Ignored && result.Code != "" {
+						finalName := checkFunctionNames[typeKey]
+						if result.Name != finalName {
+							result.Code = strings.Replace(result.Code, result.Name+" ", finalName+" ", 1)
+						}
+						checkFunctions[typeKey] = result.Code
+					}
+				}
+			}
+		}
+		debugf("[DEBUG] Pre-generated %d check functions\n", len(checkFunctions))
+	}
+
+	// shouldUseReusable returns true if we should use a reusable function for this type
+	// - ReusableValidatorsNever: Never hoist (always inline)
+	// - ReusableValidatorsAuto: Hoist only if used more than once
+	// - ReusableValidatorsAlways: Always hoist even if used once
+	shouldUseReusableCheck := func(t *checker.Type, typeNode *ast.Node) bool {
+		if config.ReusableValidators == ReusableValidatorsNever {
+			return false
+		}
+		if config.ReusableValidators == ReusableValidatorsAlways {
+			return true
+		}
+		// Default (ReusableValidatorsAuto): only hoist if used more than once
+		key := getTypeKey(t, typeNode)
+		return checkTypeUsage[key] > 1
+	}
+
+	shouldUseReusableFilter := func(t *checker.Type, typeNode *ast.Node) bool {
+		if config.ReusableValidators == ReusableValidatorsNever {
+			return false
+		}
+		if config.ReusableValidators == ReusableValidatorsAlways {
+			return true
+		}
+		// Default (ReusableValidatorsAuto): only hoist if used more than once
+		key := getTypeKey(t, typeNode)
+		return filterTypeUsage[key] > 1
+	}
+
+	// getOrCreateCheckFunction returns the check function name for a type,
+	// generating it if needed. Returns empty string if generation fails or is ignored.
+	getOrCreateCheckFunction := func(t *checker.Type, typeNode *ast.Node, typeName string) string {
+		key := getTypeKey(t, typeNode)
+
+		// Check if we already have the code generated
+		if _, codeExists := checkFunctions[key]; codeExists {
+			// Code already generated, return the name
+			return checkFunctionNames[key]
+		}
+
+		// Check if we have a pre-allocated name (from first pass in auto mode)
+		preAllocatedName, hasPreAllocatedName := checkFunctionNames[key]
+
+		// Generate the check function code
+		var result codegen.CheckFunctionResult
+		if typeNode != nil {
+			result = gen.GenerateCheckFunctionFromNode(t, typeNode, typeName)
+		} else {
+			result = gen.GenerateCheckFunction(t, typeName)
+		}
+		if result.Ignored || result.Code == "" {
+			return ""
+		}
+
+		var finalName string
+		if hasPreAllocatedName {
+			// Use the pre-allocated name, but replace the generated name in the code
+			finalName = preAllocatedName
+			if result.Name != finalName {
+				result.Code = strings.Replace(result.Code, result.Name+" ", finalName+" ", 1)
+			}
+		} else {
+			// Generate a smart function name based on the type key
+			// This ensures short, unique names for complex types
+			finalName = generateFunctionName("_check_", key, checkNameCounter, usedCheckNames)
+			// Replace the function name in the generated code
+			if result.Name != finalName {
+				result.Code = strings.Replace(result.Code, result.Name+" ", finalName+" ", 1)
+			}
+			checkFunctionNames[key] = finalName
+		}
+
+		checkFunctions[key] = result.Code
+		return finalName
+	}
+
+	// getOrCreateFilterFunction returns the filter function name for a type,
+	// generating it if needed. Returns empty string if generation fails or is ignored.
+	getOrCreateFilterFunction := func(t *checker.Type, typeNode *ast.Node, typeName string) string {
+		key := getTypeKey(t, typeNode)
+
+		// Check if we already have the code generated
+		if _, codeExists := filterFunctions[key]; codeExists {
+			// Code already generated, return the name
+			return filterFunctionNames[key]
+		}
+
+		// Check if we have a pre-allocated name (from first pass in auto mode)
+		preAllocatedName, hasPreAllocatedName := filterFunctionNames[key]
+
+		// Generate the filter function code
+		var result codegen.FilterFunctionResult
+		if typeNode != nil {
+			result = gen.GenerateFilterFunctionFromNode(t, typeNode, typeName)
+		} else {
+			result = gen.GenerateFilterFunction(t, typeName)
+		}
+		if result.Ignored || result.Code == "" {
+			return ""
+		}
+
+		var finalName string
+		if hasPreAllocatedName {
+			// Use the pre-allocated name, but replace the generated name in the code
+			finalName = preAllocatedName
+			if result.Name != finalName {
+				result.Code = strings.Replace(result.Code, result.Name+" ", finalName+" ", 1)
+			}
+		} else {
+			// Generate a smart function name based on the type key
+			// This ensures short, unique names for complex types
+			finalName = generateFunctionName("_filter_", key, filterNameCounter, usedFilterNames)
+			// Replace the function name in the generated code
+			if result.Name != finalName {
+				result.Code = strings.Replace(result.Code, result.Name+" ", finalName+" ", 1)
+			}
+			filterFunctionNames[key] = finalName
+		}
+
+		filterFunctions[key] = result.Code
+		return finalName
+	}
+
+	// generateCheckAndThrow generates the compact check-and-throw pattern for reusable validators
+	// Pattern: if ((_e = _check_Type(value)) !== null) throw new TypeError(_e.replace(/%n/g, "name"));
+	generateCheckAndThrow := func(checkFuncName, valueExpr, nameStr string) string {
+		return fmt.Sprintf(`if ((_e = %s(%s)) !== null) throw new TypeError(_e.replace(/%%n/g, "%s")); `,
+			checkFuncName, valueExpr, nameStr)
+	}
 
 	// Track which function we're currently in for return statement handling
 	type funcContext struct {
@@ -195,14 +408,29 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 								lineNum := getLineNumber(paramPos)
 								gen.SetContext(fmt.Sprintf("param '%s' at line %d", paramName, lineNum))
 
-								// Generate inline validation without IIFE wrapper
-								// Use continued validation after first param to avoid duplicate _io names
+								// Get type name for the check function
+								typeName := getTypeNameWithChecker(paramType, c)
+								if typeName == "" {
+									// Fallback to parameter name for anonymous types
+									typeName = paramName
+								}
+
 								var validation string
-								if isFirstParam {
-									validation = gen.GenerateInlineValidationFromNode(paramType, param.Type, paramName)
-									isFirstParam = false
+								if shouldUseReusableCheck(paramType, param.Type) {
+									// Use reusable check function (type is used more than once)
+									checkFuncName := getOrCreateCheckFunction(paramType, param.Type, typeName)
+									if checkFuncName != "" {
+										validation = generateCheckAndThrow(checkFuncName, paramName, paramName)
+									}
 								} else {
-									validation = gen.GenerateInlineValidationContinued(paramType, param.Type, paramName)
+									// Generate inline validation without IIFE wrapper
+									// Use continued validation after first param to avoid duplicate _io names
+									if isFirstParam {
+										validation = gen.GenerateInlineValidationFromNode(paramType, param.Type, paramName)
+										isFirstParam = false
+									} else {
+										validation = gen.GenerateInlineValidationContinued(paramType, param.Type, paramName)
+									}
 								}
 								if validation != "" {
 									// Check if parameter is optional (has ? token or default value)
@@ -247,14 +475,32 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 							methodName, isJSON := getJSONMethodName(callExpr)
 							if isJSON && methodName == "parse" {
 								// Get the actual return type (unwrap Promise for async)
-								actualType, _ := unwrapReturnType(returnType, ctx.returnType, ctx.isAsync, c)
+								actualType, actualTypeNode := unwrapReturnType(returnType, ctx.returnType, ctx.isAsync, c)
 								if actualType != nil && !shouldSkipType(actualType) && !shouldSkipComplexType(actualType, c) {
-									filteringValidator := gen.GenerateFilteringValidator(actualType, "")
-
 									if callExpr.Arguments != nil && len(callExpr.Arguments.Nodes) > 0 {
 										arg := callExpr.Arguments.Nodes[0]
 										argText := text[arg.Pos():arg.End()]
 
+										if shouldUseReusableFilter(actualType, actualTypeNode) {
+											// Use reusable filter function (type is used more than once)
+											typeName := getTypeNameWithChecker(actualType, c)
+											if typeName == "" {
+												typeName = "value"
+											}
+											filterFuncName := getOrCreateFilterFunction(actualType, actualTypeNode, typeName)
+											if filterFuncName != "" {
+												// Generate: ((_f = _filter_X(JSON.parse(arg)))[0] !== null ? (() => { throw ... })() : _f[1])
+												insertions = append(insertions, insertion{
+													pos:       returnStmt.Expression.Pos(),
+													text:      fmt.Sprintf(`((_f = %s(JSON.parse(%s)))[0] !== null ? (() => { throw new TypeError(_f[0].replace(/%%n/g, "JSON.parse")); })() : _f[1])`, filterFuncName, argText),
+													sourcePos: ctx.returnType.Pos(),
+													skipTo:    returnStmt.Expression.End(),
+												})
+												return false
+											}
+										}
+										// Fallback to inline filter validator
+										filteringValidator := gen.GenerateFilteringValidator(actualType, "")
 										// Replace JSON.parse(arg) with filteringValidator(JSON.parse(arg), "JSON.parse")
 										insertions = append(insertions, insertion{
 											pos:       returnStmt.Expression.Pos(),
@@ -415,43 +661,73 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 							if isJSON {
 								// Handle JSON.parse(x) as T
 								if methodName == "parse" && config.TransformJSONParse {
-									filteringValidator := gen.GenerateFilteringValidator(castType, "")
-
 									if innerCall.Arguments != nil && len(innerCall.Arguments.Nodes) > 0 {
 										arg := innerCall.Arguments.Nodes[0]
-										argStart := arg.Pos()
-										argEnd := arg.End()
-										argText := text[argStart:argEnd]
+										argText := text[arg.Pos():arg.End()]
 
-										// Replace entire "JSON.parse(x) as T" with filteringValidator(JSON.parse(x), "JSON.parse")
+										if shouldUseReusableFilter(castType, asExpr.Type) {
+											// Use reusable filter function (type is used more than once)
+											typeName := getTypeNameWithChecker(castType, c)
+											if typeName == "" {
+												typeName = "value"
+											}
+											filterFuncName := getOrCreateFilterFunction(castType, asExpr.Type, typeName)
+											if filterFuncName != "" {
+												// Generate: ((_f = _filter_X(JSON.parse(arg)))[0] !== null ? (() => { throw ... })() : _f[1])
+												insertions = append(insertions, insertion{
+													pos:       node.Pos(),
+													text:      fmt.Sprintf(`((_f = %s(JSON.parse(%s)))[0] !== null ? (() => { throw new TypeError(_f[0].replace(/%%n/g, "JSON.parse")); })() : _f[1])`, filterFuncName, argText),
+													sourcePos: castTypePos,
+													skipTo:    node.End(),
+												})
+												return false
+											}
+										}
+										// Fallback to inline filter validator
+										filteringValidator := gen.GenerateFilteringValidator(castType, "")
 										insertions = append(insertions, insertion{
 											pos:       node.Pos(),
 											text:      filteringValidator + "(JSON.parse(" + argText + `), "JSON.parse")`,
 											sourcePos: castTypePos,
-											skipTo:    node.End(), // Skip entire original expression including "as T"
+											skipTo:    node.End(),
 										})
-										return false // Don't visit children
+										return false
 									}
 								}
 
 								// Handle JSON.stringify(x) as T (less common but support it)
 								if methodName == "stringify" && config.TransformJSONStringify {
-									stringifier := gen.GenerateStringifier(castType, "")
-
 									if innerCall.Arguments != nil && len(innerCall.Arguments.Nodes) > 0 {
 										arg := innerCall.Arguments.Nodes[0]
-										argStart := arg.Pos()
-										argEnd := arg.End()
-										argText := text[argStart:argEnd]
+										argText := text[arg.Pos():arg.End()]
 
-										// Replace entire "JSON.stringify(x) as T" with stringifier(x, "JSON.stringify")
+										if shouldUseReusableFilter(castType, asExpr.Type) {
+											// Use reusable filter function (type is used more than once)
+											typeName := getTypeNameWithChecker(castType, c)
+											if typeName == "" {
+												typeName = "value"
+											}
+											filterFuncName := getOrCreateFilterFunction(castType, asExpr.Type, typeName)
+											if filterFuncName != "" {
+												// Generate: ((_f = _filter_X(arg))[0] !== null ? (() => { throw ... })() : JSON.stringify(_f[1]))
+												insertions = append(insertions, insertion{
+													pos:       node.Pos(),
+													text:      fmt.Sprintf(`((_f = %s(%s))[0] !== null ? (() => { throw new TypeError(_f[0].replace(/%%n/g, "JSON.stringify")); })() : JSON.stringify(_f[1]))`, filterFuncName, argText),
+													sourcePos: castTypePos,
+													skipTo:    node.End(),
+												})
+												return false
+											}
+										}
+										// Fallback to inline stringifier
+										stringifier := gen.GenerateStringifier(castType, "")
 										insertions = append(insertions, insertion{
 											pos:       node.Pos(),
 											text:      stringifier + "(" + argText + `, "JSON.stringify")`,
 											sourcePos: castTypePos,
-											skipTo:    node.End(), // Skip entire original expression including "as T"
+											skipTo:    node.End(),
 										})
-										return false // Don't visit children
+										return false
 									}
 								}
 							}
@@ -465,42 +741,69 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 						lineNum := getLineNumber(castPos)
 						gen.SetContext(fmt.Sprintf("cast at line %d", lineNum))
 
-						debugf("[DEBUG] Generating validator for cast type...\n")
-						result := gen.GenerateValidatorFromNode(castType, asExpr.Type, "")
-						debugf("[DEBUG] Generated validator, length=%d, ignored=%v\n", len(result.Code), result.Ignored)
+						// Get the expression text for error messages
+						exprStart := asExpr.Expression.Pos()
+						exprEnd := asExpr.Expression.End()
+						exprText := text[exprStart:exprEnd]
 
-						if result.Ignored {
-							// Type was ignored - add a comment explaining why
-							insertions = append(insertions, insertion{
-								pos:       node.Pos(),
-								text:      "/* validation skipped: " + result.IgnoredReason + " */",
-								sourcePos: -1,
-							})
-						} else if result.Code != "" {
-							// Get the expression text for error messages
-							exprStart := asExpr.Expression.Pos()
-							exprEnd := asExpr.Expression.End()
-							exprText := text[exprStart:exprEnd]
+						// Get type name for the check function
+						typeName := getTypeNameWithChecker(castType, c)
+						if typeName == "" {
+							// Fallback for anonymous types
+							typeName = "value"
+						}
 
-							// Wrap the entire as expression
-							// (expr as Type) -> validator(expr, "expr as Type")
-							insertions = append(insertions, insertion{
-								pos:       node.Pos(),
-								text:      result.Code + "(",
-								sourcePos: castTypePos,
-							})
-							insertions = append(insertions, insertion{
-								pos:       exprEnd,
-								text:      `, "` + escapeString(exprText) + `")`,
-								sourcePos: castTypePos,
-							})
-							// We need to remove " as Type" part
-							// Insert empty to mark for removal
-							insertions = append(insertions, insertion{
-								pos:       exprEnd,
-								text:      "/* as removed */",
-								sourcePos: castTypePos,
-							})
+						if shouldUseReusableCheck(castType, asExpr.Type) {
+							// Use reusable check function (type is used more than once)
+							checkFuncName := getOrCreateCheckFunction(castType, asExpr.Type, typeName)
+							if checkFuncName != "" {
+								// Generate: if ((_e = _check_X(expr)) !== null) throw new TypeError(_e.replace(/%n/g, "expr"));
+								checkAndThrow := generateCheckAndThrow(checkFuncName, text[exprStart:exprEnd], escapeString(exprText))
+								insertions = append(insertions, insertion{
+									pos:       node.Pos(),
+									text:      "(" + checkAndThrow,
+									sourcePos: castTypePos,
+								})
+								insertions = append(insertions, insertion{
+									pos:       exprEnd,
+									text:      ")/* as removed */",
+									sourcePos: castTypePos,
+								})
+							}
+						} else {
+							// Inline validation
+							debugf("[DEBUG] Generating validator for cast type...\n")
+							result := gen.GenerateValidatorFromNode(castType, asExpr.Type, "")
+							debugf("[DEBUG] Generated validator, length=%d, ignored=%v\n", len(result.Code), result.Ignored)
+
+							if result.Ignored {
+								// Type was ignored - add a comment explaining why
+								insertions = append(insertions, insertion{
+									pos:       node.Pos(),
+									text:      "/* validation skipped: " + result.IgnoredReason + " */",
+									sourcePos: -1,
+								})
+							} else if result.Code != "" {
+								// Wrap the entire as expression
+								// (expr as Type) -> validator(expr, "expr as Type")
+								insertions = append(insertions, insertion{
+									pos:       node.Pos(),
+									text:      result.Code + "(",
+									sourcePos: castTypePos,
+								})
+								insertions = append(insertions, insertion{
+									pos:       exprEnd,
+									text:      `, "` + escapeString(exprText) + `")`,
+									sourcePos: castTypePos,
+								})
+								// We need to remove " as Type" part
+								// Insert empty to mark for removal
+								insertions = append(insertions, insertion{
+									pos:       exprEnd,
+									text:      "/* as removed */",
+									sourcePos: castTypePos,
+								})
+							}
 						}
 					}
 				}
@@ -514,12 +817,14 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 				if isJSON {
 					// Try to get target type from various sources
 					var targetType *checker.Type
+					var targetTypeNode *ast.Node
 					var sourcePos int = node.Pos()
 
 					// 1. Check for explicit type argument: JSON.parse<T>()
 					if callExpr.TypeArguments != nil && len(callExpr.TypeArguments.Nodes) > 0 {
 						typeArgNode := callExpr.TypeArguments.Nodes[0]
 						targetType = checker.Checker_getTypeFromTypeNode(c, typeArgNode)
+						targetTypeNode = typeArgNode
 						sourcePos = typeArgNode.Pos()
 					}
 
@@ -531,6 +836,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 								asExpr := arg.AsAsExpression()
 								if asExpr != nil && asExpr.Type != nil {
 									targetType = checker.Checker_getTypeFromTypeNode(c, asExpr.Type)
+									targetTypeNode = asExpr.Type
 									sourcePos = asExpr.Type.Pos()
 								}
 							}
@@ -548,6 +854,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 								flags := checker.Type_flags(argType)
 								if flags&checker.TypeFlagsObject != 0 || flags&checker.TypeFlagsUnion != 0 {
 									targetType = argType
+									targetTypeNode = nil // No explicit type node for inferred types
 									sourcePos = arg.Pos()
 								}
 							}
@@ -557,12 +864,30 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 					// Apply transformation if we have a target type
 					if targetType != nil && !shouldSkipType(targetType) && !shouldSkipComplexType(targetType, c) {
 						if methodName == "parse" && config.TransformJSONParse {
-							filteringValidator := gen.GenerateFilteringValidator(targetType, "")
-
 							if callExpr.Arguments != nil && len(callExpr.Arguments.Nodes) > 0 {
 								arg := callExpr.Arguments.Nodes[0]
 								argText := text[arg.Pos():arg.End()]
 
+								if shouldUseReusableFilter(targetType, targetTypeNode) {
+									// Use reusable filter function (type is used more than once)
+									typeName := getTypeNameWithChecker(targetType, c)
+									if typeName == "" {
+										typeName = "value"
+									}
+									filterFuncName := getOrCreateFilterFunction(targetType, targetTypeNode, typeName)
+									if filterFuncName != "" {
+										// Generate: ((_f = _filter_X(JSON.parse(arg)))[0] !== null ? (() => { throw ... })() : _f[1])
+										insertions = append(insertions, insertion{
+											pos:       node.Pos(),
+											text:      fmt.Sprintf(`((_f = %s(JSON.parse(%s)))[0] !== null ? (() => { throw new TypeError(_f[0].replace(/%%n/g, "JSON.parse")); })() : _f[1])`, filterFuncName, argText),
+											sourcePos: sourcePos,
+											skipTo:    node.End(),
+										})
+										return false
+									}
+								}
+								// Fallback to inline filter validator
+								filteringValidator := gen.GenerateFilteringValidator(targetType, "")
 								insertions = append(insertions, insertion{
 									pos:       node.Pos(),
 									text:      filteringValidator + "(JSON.parse(" + argText + `), "JSON.parse")`,
@@ -572,8 +897,6 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 								return false
 							}
 						} else if methodName == "stringify" && config.TransformJSONStringify {
-							stringifier := gen.GenerateStringifier(targetType, "")
-
 							if callExpr.Arguments != nil && len(callExpr.Arguments.Nodes) > 0 {
 								arg := callExpr.Arguments.Nodes[0]
 								// For "x as T" pattern, use just the expression part
@@ -585,6 +908,26 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 									}
 								}
 
+								if shouldUseReusableFilter(targetType, targetTypeNode) {
+									// Use reusable filter function (type is used more than once)
+									typeName := getTypeNameWithChecker(targetType, c)
+									if typeName == "" {
+										typeName = "value"
+									}
+									filterFuncName := getOrCreateFilterFunction(targetType, targetTypeNode, typeName)
+									if filterFuncName != "" {
+										// Generate: ((_f = _filter_X(arg))[0] !== null ? (() => { throw ... })() : JSON.stringify(_f[1]))
+										insertions = append(insertions, insertion{
+											pos:       node.Pos(),
+											text:      fmt.Sprintf(`((_f = %s(%s))[0] !== null ? (() => { throw new TypeError(_f[0].replace(/%%n/g, "JSON.stringify")); })() : JSON.stringify(_f[1]))`, filterFuncName, argText),
+											sourcePos: sourcePos,
+											skipTo:    node.End(),
+										})
+										return false
+									}
+								}
+								// Fallback to inline stringifier
+								stringifier := gen.GenerateStringifier(targetType, "")
 								insertions = append(insertions, insertion{
 									pos:       node.Pos(),
 									text:      stringifier + "(" + argText + `, "JSON.stringify")`,
@@ -617,12 +960,36 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 							if isJSON && methodName == "parse" {
 								targetType := checker.Checker_getTypeFromTypeNode(c, varDecl.Type)
 								if targetType != nil && !shouldSkipType(targetType) && !shouldSkipComplexType(targetType, c) {
-									filteringValidator := gen.GenerateFilteringValidator(targetType, "")
-
 									if callExpr.Arguments != nil && len(callExpr.Arguments.Nodes) > 0 {
 										arg := callExpr.Arguments.Nodes[0]
 										argText := text[arg.Pos():arg.End()]
 
+										if shouldUseReusableFilter(targetType, varDecl.Type) {
+											// Use reusable filter function (type is used more than once)
+											typeName := getTypeNameWithChecker(targetType, c)
+											if typeName == "" {
+												typeName = "value"
+											}
+											filterFuncName := getOrCreateFilterFunction(targetType, varDecl.Type, typeName)
+											if filterFuncName != "" {
+												// Generate: ((_f = _filter_X(JSON.parse(arg)))[0] !== null ? (() => { throw ... })() : _f[1])
+												insertions = append(insertions, insertion{
+													pos:       varDecl.Initializer.Pos(),
+													text:      fmt.Sprintf(`((_f = %s(JSON.parse(%s)))[0] !== null ? (() => { throw new TypeError(_f[0].replace(/%%n/g, "JSON.parse")); })() : _f[1])`, filterFuncName, argText),
+													sourcePos: varDecl.Type.Pos(),
+													skipTo:    varDecl.Initializer.End(),
+												})
+
+												// Mark as validated
+												if ctx != nil && varDecl.Name().Kind == ast.KindIdentifier {
+													ctx.validated[varDecl.Name().AsIdentifier().Text] = append(ctx.validated[varDecl.Name().AsIdentifier().Text], targetType)
+												}
+
+												return false
+											}
+										}
+										// Fallback to inline filter validator
+										filteringValidator := gen.GenerateFilteringValidator(targetType, "")
 										// Replace the JSON.parse call with filtered version
 										insertions = append(insertions, insertion{
 											pos:       varDecl.Initializer.Pos(),
@@ -709,6 +1076,44 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 	}
 
 	debugf("[DEBUG] Visitor complete for %s, building source map with %d insertions...\n", fileName, len(insertions))
+
+	// If reusable validators were generated, prepend them at the start of the file
+	// Note: checkFunctions and filterFunctions only contain functions for types used more than once
+	// (due to shouldUseReusableCheck/shouldUseReusableFilter checks)
+	if len(checkFunctions) > 0 || len(filterFunctions) > 0 {
+		var hoistedCode strings.Builder
+
+		// Add the shared error variables
+		if len(checkFunctions) > 0 {
+			hoistedCode.WriteString("let _e: string | null;\n")
+		}
+		if len(filterFunctions) > 0 {
+			hoistedCode.WriteString("let _f: [string | null, any];\n")
+		}
+
+		// Add check functions
+		for _, code := range checkFunctions {
+			hoistedCode.WriteString(code)
+			hoistedCode.WriteString(";\n")
+		}
+
+		// Add filter functions
+		for _, code := range filterFunctions {
+			hoistedCode.WriteString(code)
+			hoistedCode.WriteString(";\n")
+		}
+
+		// Insert at position 0 (start of file)
+		insertions = append([]insertion{{
+			pos:       0,
+			text:      hoistedCode.String(),
+			sourcePos: -1, // No source mapping for generated code
+		}}, insertions...)
+
+		debugf("[DEBUG] Hoisted %d check functions and %d filter functions\n",
+			len(checkFunctions), len(filterFunctions))
+	}
+
 	// Build result with source map
 	code, sourceMap := buildSourceMap(fileName, text, insertions)
 	return code, sourceMap, nil
@@ -1023,6 +1428,258 @@ func isPrimitiveType(t *checker.Type) bool {
 		checker.TypeFlagsBigInt|checker.TypeFlagsNull|checker.TypeFlagsUndefined|
 		checker.TypeFlagsStringLiteral|checker.TypeFlagsNumberLiteral|checker.TypeFlagsBooleanLiteral|
 		checker.TypeFlagsVoid|checker.TypeFlagsESSymbol|checker.TypeFlagsESSymbolLike) != 0
+}
+
+// sanitizeTypeName converts a type string to a valid JavaScript identifier.
+// Replaces special characters with underscores.
+func sanitizeTypeName(name string) string {
+	var result strings.Builder
+	for _, c := range name {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
+			result.WriteRune(c)
+		} else {
+			result.WriteRune('_')
+		}
+	}
+	return result.String()
+}
+
+// maxTypeNameLength is the maximum length for a sanitized type name before we truncate it
+const maxTypeNameLength = 30
+
+// generateFunctionName creates a function name for a type.
+// For simple named types (like "User", "ArrayItem"), returns the clean name without suffix.
+// For complex/anonymous types, always adds a numbered suffix for clarity (e.g., _check_object_0).
+func generateFunctionName(prefix string, typeKey string, counter map[string]int, used map[string]bool) string {
+	// Check if this is a simple named type (just an identifier, no special chars)
+	if isSimpleIdentifier(typeKey) {
+		// Simple named type - use clean name without suffix if available
+		fullName := prefix + typeKey
+		if !used[fullName] {
+			used[fullName] = true
+			return fullName
+		}
+		// Name collision with same simple type name, add a number
+		counter[fullName]++
+		numberedName := fmt.Sprintf("%s_%d", fullName, counter[fullName])
+		used[numberedName] = true
+		return numberedName
+	}
+
+	// Complex type - extract base name and always add a numbered suffix
+	baseName := extractBaseTypeName(typeKey)
+	sanitized := sanitizeTypeName(baseName)
+
+	// Truncate if too long
+	if len(sanitized) > maxTypeNameLength {
+		sanitized = sanitized[:maxTypeNameLength]
+	}
+
+	baseWithPrefix := prefix + sanitized
+	// Always add a number for complex types (starting from 0)
+	idx := counter[baseWithPrefix]
+	counter[baseWithPrefix]++
+	numberedName := fmt.Sprintf("%s_%d", baseWithPrefix, idx)
+	used[numberedName] = true
+	return numberedName
+}
+
+// extractBaseTypeName extracts the primary type name from a type string.
+// For example:
+//   - "ArrayItem" -> "ArrayItem"
+//   - "(ArrayItem & { age: number })[]" -> "ArrayItem_array"
+//   - "{ foo: string }" -> "object"
+//   - "string | number" -> "union"
+func extractBaseTypeName(typeKey string) string {
+	// Check for array types
+	isArray := strings.HasSuffix(typeKey, "[]")
+	if isArray {
+		inner := strings.TrimSuffix(typeKey, "[]")
+		baseName := extractBaseTypeName(inner)
+		return baseName + "_array"
+	}
+
+	// Check for union types
+	if strings.Contains(typeKey, " | ") {
+		// Try to extract the first type name
+		parts := strings.SplitN(typeKey, " | ", 2)
+		firstType := extractBaseTypeName(strings.TrimSpace(parts[0]))
+		if firstType != "object" && firstType != "union" && firstType != "intersection" {
+			return firstType + "_union"
+		}
+		return "union"
+	}
+
+	// Check for intersection types (wrapped in parens)
+	if strings.HasPrefix(typeKey, "(") && strings.Contains(typeKey, " & ") {
+		// Try to extract the first type name from inside the parens
+		inner := strings.TrimPrefix(typeKey, "(")
+		if idx := strings.Index(inner, " & "); idx > 0 {
+			firstType := extractBaseTypeName(strings.TrimSpace(inner[:idx]))
+			if firstType != "object" && firstType != "union" && firstType != "intersection" {
+				return firstType + "_intersection"
+			}
+		}
+		return "intersection"
+	}
+
+	// Check for anonymous object types
+	if strings.HasPrefix(typeKey, "{") {
+		return "object"
+	}
+
+	// For simple named types, return as-is
+	// Remove any brackets or special chars to get clean name
+	clean := strings.TrimSpace(typeKey)
+	// If it's a simple identifier, return it
+	if isSimpleIdentifier(clean) {
+		return clean
+	}
+
+	return "type"
+}
+
+// isSimpleIdentifier returns true if the string is a valid JavaScript identifier.
+func isSimpleIdentifier(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for i, c := range s {
+		if i == 0 {
+			// First char must be letter or underscore
+			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_') {
+				return false
+			}
+		} else {
+			// Subsequent chars can be letter, digit, or underscore
+			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// getTypeName returns a stable name for a type, suitable for naming check functions.
+// For primitives, returns the primitive name (e.g., "string", "number").
+// For named types, returns the symbol name.
+// For anonymous types, returns empty string.
+func getTypeName(t *checker.Type) string {
+	if t == nil {
+		return ""
+	}
+
+	// Check symbol name first (for named types like interfaces)
+	if sym := checker.Type_symbol(t); sym != nil && sym.Name != "" {
+		return sym.Name
+	}
+
+	// For primitives, return the type name
+	flags := checker.Type_flags(t)
+	switch {
+	case flags&checker.TypeFlagsString != 0:
+		return "string"
+	case flags&checker.TypeFlagsNumber != 0:
+		return "number"
+	case flags&checker.TypeFlagsBoolean != 0:
+		return "boolean"
+	case flags&checker.TypeFlagsBigInt != 0:
+		return "bigint"
+	case flags&checker.TypeFlagsNull != 0:
+		return "null"
+	case flags&checker.TypeFlagsUndefined != 0:
+		return "undefined"
+	case flags&checker.TypeFlagsVoid != 0:
+		return "void"
+	case flags&checker.TypeFlagsESSymbol != 0, flags&checker.TypeFlagsESSymbolLike != 0:
+		return "symbol"
+	// Literal types - use base type name
+	case flags&checker.TypeFlagsStringLiteral != 0:
+		return "string"
+	case flags&checker.TypeFlagsNumberLiteral != 0:
+		return "number"
+	case flags&checker.TypeFlagsBooleanLiteral != 0:
+		return "boolean"
+	}
+
+	return ""
+}
+
+// getTypeNameWithChecker returns a descriptive name for a type, using the checker
+// to extract element types for generic types. For ArrayItem[], returns "ArrayItem_Array".
+// For Map<string, User>, returns "string_User_Map". For (Foo & Bar)[], returns "Foo_Bar_Array".
+func getTypeNameWithChecker(t *checker.Type, c *checker.Checker) string {
+	if t == nil {
+		return ""
+	}
+
+	flags := checker.Type_flags(t)
+
+	// Handle intersection types (Foo & Bar) - check BEFORE symbol name
+	// because intersections may have a symbol but we want the component names
+	if flags&checker.TypeFlagsIntersection != 0 {
+		members := t.Types()
+		if len(members) > 0 {
+			var names []string
+			for _, memberType := range members {
+				name := getTypeNameWithChecker(memberType, c)
+				if name != "" {
+					names = append(names, name)
+				}
+			}
+			if len(names) > 0 {
+				return strings.Join(names, "_")
+			}
+		}
+	}
+
+	// Handle union types (Foo | Bar) - check BEFORE symbol name
+	if flags&checker.TypeFlagsUnion != 0 {
+		members := t.Types()
+		if len(members) > 0 {
+			var names []string
+			for _, memberType := range members {
+				name := getTypeNameWithChecker(memberType, c)
+				if name != "" {
+					names = append(names, name)
+				}
+			}
+			if len(names) > 0 {
+				return strings.Join(names, "_or_")
+			}
+		}
+	}
+
+	// Check symbol name for named types like interfaces
+	if sym := checker.Type_symbol(t); sym != nil && sym.Name != "" {
+		symName := sym.Name
+
+		// For generic types (Array, Map, Set, Promise, etc.), append type argument names
+		if flags&checker.TypeFlagsObject != 0 {
+			objFlags := checker.Type_objectFlags(t)
+			if objFlags&checker.ObjectFlagsReference != 0 {
+				typeArgs := checker.Checker_getTypeArguments(c, t)
+				if len(typeArgs) > 0 {
+					var argNames []string
+					for _, arg := range typeArgs {
+						argName := getTypeNameWithChecker(arg, c)
+						if argName != "" {
+							argNames = append(argNames, argName)
+						}
+					}
+					if len(argNames) > 0 {
+						// Format: ElementType_Array, Key_Value_Map, etc.
+						return strings.Join(argNames, "_") + "_" + symName
+					}
+				}
+			}
+		}
+
+		return symName
+	}
+
+	// Fall back to basic getTypeName for primitives
+	return getTypeName(t)
 }
 
 // getRootIdentifier returns the root identifier from a property access chain.
@@ -1373,4 +2030,430 @@ func hasIgnoreComment(node *ast.Node, text string) bool {
 	chunk := text[pos:limit]
 
 	return ignoreCommentRegex.MatchString(chunk)
+}
+
+// typeInfo stores information about a type for the first pass
+type typeInfo struct {
+	t        *checker.Type
+	typeNode *ast.Node
+	typeName string
+}
+
+// countTypeUsages performs a first pass over the AST to count how many times each type
+// will be validated. This allows us to only hoist validators for types used more than once.
+// Also stores type objects in checkTypes/filterTypes maps for later code generation.
+func countTypeUsages(sourceFile *ast.SourceFile, c *checker.Checker, program *compiler.Program, config Config,
+	getTypeKey func(*checker.Type, *ast.Node) string,
+	checkUsage map[string]int, filterUsage map[string]int,
+	checkTypes map[string]typeInfo, filterTypes map[string]typeInfo) {
+
+	text := sourceFile.Text()
+
+	// Track visited types to prevent infinite recursion
+	visitedTypes := make(map[string]bool)
+
+	// isBuiltinClassType checks if a type is from the default library and has constructors.
+	// Such types (HTMLElement, Date, Map, etc.) use instanceof and shouldn't have properties traversed.
+	isBuiltinClassType := func(t *checker.Type) bool {
+		if program == nil {
+			return false
+		}
+		sym := checker.Type_symbol(t)
+		if sym == nil {
+			return false
+		}
+		// Check if from default library
+		if !utils.IsSymbolFromDefaultLibrary(program, sym) {
+			return false
+		}
+		// Check for construct signatures (indicates it's a class)
+		staticType := checker.Checker_getTypeOfSymbol(c, sym)
+		if staticType != nil {
+			if len(utils.GetConstructSignatures(c, staticType)) > 0 {
+				return true
+			}
+		}
+		// Also check if the symbol itself is a class
+		if sym.Flags&ast.SymbolFlagsClass != 0 {
+			return true
+		}
+		return false
+	}
+
+	// isPrimitiveType checks if a type is a primitive (string, number, boolean, etc.)
+	// Primitives should never be hoisted - inline checks are simpler and smaller.
+	isPrimitiveType := func(t *checker.Type) bool {
+		flags := checker.Type_flags(t)
+		return flags&(checker.TypeFlagsString|checker.TypeFlagsNumber|checker.TypeFlagsBoolean|
+			checker.TypeFlagsBigInt|checker.TypeFlagsESSymbol|checker.TypeFlagsNull|
+			checker.TypeFlagsUndefined|checker.TypeFlagsVoid|
+			checker.TypeFlagsStringLiteral|checker.TypeFlagsNumberLiteral|checker.TypeFlagsBooleanLiteral|
+			checker.TypeFlagsBigIntLiteral) != 0
+	}
+
+	// isFunctionType checks if a type is a function type.
+	// Function types should never be hoisted - they just need typeof === "function".
+	isFunctionType := func(t *checker.Type) bool {
+		// Check if it has call signatures - if so, it's a function type
+		callSigs := checker.Checker_getSignaturesOfType(c, t, checker.SignatureKindCall)
+		if len(callSigs) > 0 {
+			return true
+		}
+		// Check if it has construct signatures - if so, it's a constructor function
+		constructSigs := checker.Checker_getSignaturesOfType(c, t, checker.SignatureKindConstruct)
+		if len(constructSigs) > 0 {
+			return true
+		}
+		// Check symbol name for Function
+		if sym := checker.Type_symbol(t); sym != nil {
+			if sym.Name == "Function" {
+				return true
+			}
+		}
+		return false
+	}
+
+	// countNestedTypes recursively counts all named types within a type's properties
+	// and stores the type objects for later code generation
+	var countNestedTypes func(t *checker.Type, usage map[string]int, types map[string]typeInfo)
+	countNestedTypes = func(t *checker.Type, usage map[string]int, types map[string]typeInfo) {
+		if t == nil || shouldSkipType(t) || shouldSkipComplexType(t, c) {
+			return
+		}
+
+		// Use type string as key for cycle detection
+		typeStr := c.TypeToString(t)
+		if visitedTypes[typeStr] {
+			return
+		}
+		visitedTypes[typeStr] = true
+		defer delete(visitedTypes, typeStr)
+
+		// Only count named object types (interfaces, type aliases with properties)
+		flags := checker.Type_flags(t)
+		objectFlags := checker.Type_objectFlags(t)
+
+		// Skip array types for property traversal - only handle via type arguments below
+		isArray := checker.Checker_isArrayType(c, t)
+
+		// For object types with properties, count the type and recurse into properties
+		if flags&checker.TypeFlagsObject != 0 && !isArray {
+			// Skip builtin class types (HTMLElement, Date, etc.) - they use instanceof, not property checks
+			if isBuiltinClassType(t) {
+				return
+			}
+
+			// Check if it's a named type (has a symbol with a name)
+			if sym := checker.Type_symbol(t); sym != nil && sym.Name != "" {
+				// Don't count anonymous types or built-in types
+				if !strings.HasPrefix(sym.Name, "__") {
+					key := getTypeKey(t, nil)
+					usage[key]++
+					// Store the type object for later code generation
+					if _, exists := types[key]; !exists {
+						types[key] = typeInfo{t: t, typeNode: nil, typeName: sym.Name}
+					}
+				}
+			}
+
+			// Recurse into properties (but NOT for arrays - they have inherited methods we don't want)
+			if objectFlags&(checker.ObjectFlagsInterface|checker.ObjectFlagsAnonymous|checker.ObjectFlagsReference) != 0 {
+				props := checker.Checker_getPropertiesOfType(c, t)
+				for _, prop := range props {
+					propType := checker.Checker_getTypeOfSymbol(c, prop)
+					if propType != nil {
+						countNestedTypes(propType, usage, types)
+					}
+				}
+			}
+		}
+
+		// For arrays, count the element type (NOT properties - they include push, pop, etc.)
+		if isArray {
+			typeArgs := checker.Checker_getTypeArguments(c, t)
+			if len(typeArgs) > 0 {
+				countNestedTypes(typeArgs[0], usage, types)
+			}
+		}
+
+		// For unions/intersections, recurse into constituents
+		if flags&(checker.TypeFlagsUnion|checker.TypeFlagsIntersection) != 0 {
+			constituents := t.Types()
+			for _, constituent := range constituents {
+				countNestedTypes(constituent, usage, types)
+			}
+		}
+	}
+
+	// countCheck increments usage for a check function type and its nested types
+	countCheck := func(t *checker.Type, typeNode *ast.Node) {
+		if t == nil || shouldSkipType(t) || shouldSkipComplexType(t, c) {
+			return
+		}
+		// Skip builtin class types - they use instanceof, not property checks
+		if isBuiltinClassType(t) {
+			return
+		}
+		// Skip primitives - inline checks are simpler and smaller than hoisted functions
+		if isPrimitiveType(t) {
+			return
+		}
+		// Skip function types - they just need typeof === "function"
+		if isFunctionType(t) {
+			return
+		}
+		key := getTypeKey(t, typeNode)
+		checkUsage[key]++
+		// Store the type object for later code generation
+		if _, exists := checkTypes[key]; !exists {
+			typeName := ""
+			if sym := checker.Type_symbol(t); sym != nil && sym.Name != "" {
+				typeName = sym.Name
+			}
+			checkTypes[key] = typeInfo{t: t, typeNode: typeNode, typeName: typeName}
+		}
+		// Also count nested types (but not the top-level type itself - countNestedTypes handles that)
+		// countNestedTypes will recurse into properties, arrays, etc.
+		flags := checker.Type_flags(t)
+		isArray := checker.Checker_isArrayType(c, t)
+
+		// For object types, recurse into properties (but NOT for arrays)
+		if flags&checker.TypeFlagsObject != 0 && !isArray {
+			objectFlags := checker.Type_objectFlags(t)
+			if objectFlags&(checker.ObjectFlagsInterface|checker.ObjectFlagsAnonymous|checker.ObjectFlagsReference) != 0 {
+				props := checker.Checker_getPropertiesOfType(c, t)
+				for _, prop := range props {
+					propType := checker.Checker_getTypeOfSymbol(c, prop)
+					if propType != nil {
+						countNestedTypes(propType, checkUsage, checkTypes)
+					}
+				}
+			}
+		}
+
+		// For arrays, count the element type (NOT properties)
+		if isArray {
+			typeArgs := checker.Checker_getTypeArguments(c, t)
+			if len(typeArgs) > 0 {
+				countNestedTypes(typeArgs[0], checkUsage, checkTypes)
+			}
+		}
+
+		// For unions/intersections, recurse into constituents
+		if flags&(checker.TypeFlagsUnion|checker.TypeFlagsIntersection) != 0 {
+			constituents := t.Types()
+			for _, constituent := range constituents {
+				countNestedTypes(constituent, checkUsage, checkTypes)
+			}
+		}
+	}
+
+	// countFilter increments usage for a filter function type and its nested types
+	countFilter := func(t *checker.Type, typeNode *ast.Node) {
+		if t == nil || shouldSkipType(t) || shouldSkipComplexType(t, c) {
+			return
+		}
+		// Skip builtin class types - they use instanceof, not property checks
+		if isBuiltinClassType(t) {
+			return
+		}
+		// Skip primitives - inline checks are simpler and smaller than hoisted functions
+		if isPrimitiveType(t) {
+			return
+		}
+		// Skip function types - they just need typeof === "function"
+		if isFunctionType(t) {
+			return
+		}
+		key := getTypeKey(t, typeNode)
+		filterUsage[key]++
+		// Store the type object for later code generation
+		if _, exists := filterTypes[key]; !exists {
+			typeName := ""
+			if sym := checker.Type_symbol(t); sym != nil && sym.Name != "" {
+				typeName = sym.Name
+			}
+			filterTypes[key] = typeInfo{t: t, typeNode: typeNode, typeName: typeName}
+		}
+		// Also count nested types (but not the top-level type itself)
+		flags := checker.Type_flags(t)
+		isArray := checker.Checker_isArrayType(c, t)
+
+		// For object types, recurse into properties (but NOT for arrays)
+		if flags&checker.TypeFlagsObject != 0 && !isArray {
+			objectFlags := checker.Type_objectFlags(t)
+			if objectFlags&(checker.ObjectFlagsInterface|checker.ObjectFlagsAnonymous|checker.ObjectFlagsReference) != 0 {
+				props := checker.Checker_getPropertiesOfType(c, t)
+				for _, prop := range props {
+					propType := checker.Checker_getTypeOfSymbol(c, prop)
+					if propType != nil {
+						countNestedTypes(propType, filterUsage, filterTypes)
+					}
+				}
+			}
+		}
+
+		// For arrays, count the element type (NOT properties)
+		if isArray {
+			typeArgs := checker.Checker_getTypeArguments(c, t)
+			if len(typeArgs) > 0 {
+				countNestedTypes(typeArgs[0], filterUsage, filterTypes)
+			}
+		}
+
+		// For unions/intersections, recurse into constituents
+		if flags&(checker.TypeFlagsUnion|checker.TypeFlagsIntersection) != 0 {
+			constituents := t.Types()
+			for _, constituent := range constituents {
+				countNestedTypes(constituent, filterUsage, filterTypes)
+			}
+		}
+	}
+
+	var visit ast.Visitor
+	visit = func(node *ast.Node) bool {
+		// Check for @typical-ignore comment
+		if hasIgnoreComment(node, text) {
+			return false
+		}
+
+		switch node.Kind {
+		case ast.KindFunctionDeclaration,
+			ast.KindFunctionExpression,
+			ast.KindArrowFunction,
+			ast.KindMethodDeclaration:
+
+			if fn := getFunctionLike(node); fn != nil {
+				// Count parameter types
+				if config.ValidateParameters {
+					for _, param := range fn.Parameters() {
+						if param.Type != nil {
+							paramType := checker.Checker_getTypeFromTypeNode(c, param.Type)
+							countCheck(paramType, param.Type)
+						}
+					}
+				}
+			}
+
+		case ast.KindAsExpression:
+			asExpr := node.AsAsExpression()
+			if asExpr != nil && asExpr.Type != nil {
+				// Skip "as const"
+				if strings.TrimSpace(text[asExpr.Type.Pos():asExpr.Type.End()]) == "const" {
+					break
+				}
+				// Skip "as unknown as T" patterns
+				if asExpr.Expression.Kind == ast.KindAsExpression {
+					innerAs := asExpr.Expression.AsAsExpression()
+					if innerAs != nil && innerAs.Type != nil {
+						innerTypeText := strings.TrimSpace(text[innerAs.Type.Pos():innerAs.Type.End()])
+						if innerTypeText == "unknown" || innerTypeText == "any" {
+							break
+						}
+					}
+				}
+
+				castType := checker.Checker_getTypeFromTypeNode(c, asExpr.Type)
+
+				// Check if inner expression is JSON method
+				if asExpr.Expression.Kind == ast.KindCallExpression {
+					innerCall := asExpr.Expression.AsCallExpression()
+					if innerCall != nil {
+						methodName, isJSON := getJSONMethodName(innerCall)
+						if isJSON {
+							if methodName == "parse" && config.TransformJSONParse {
+								countFilter(castType, asExpr.Type)
+								return false
+							}
+							if methodName == "stringify" && config.TransformJSONStringify {
+								countFilter(castType, asExpr.Type)
+								return false
+							}
+						}
+					}
+				}
+
+				// Regular cast
+				if config.ValidateCasts {
+					countCheck(castType, asExpr.Type)
+				}
+			}
+
+		case ast.KindCallExpression:
+			callExpr := node.AsCallExpression()
+			if callExpr != nil {
+				methodName, isJSON := getJSONMethodName(callExpr)
+				if isJSON {
+					var targetType *checker.Type
+					var targetTypeNode *ast.Node
+
+					// Check for explicit type argument
+					if callExpr.TypeArguments != nil && len(callExpr.TypeArguments.Nodes) > 0 {
+						typeArgNode := callExpr.TypeArguments.Nodes[0]
+						targetType = checker.Checker_getTypeFromTypeNode(c, typeArgNode)
+						targetTypeNode = typeArgNode
+					}
+
+					// For stringify, check argument cast
+					if methodName == "stringify" && targetType == nil && config.TransformJSONStringify {
+						if callExpr.Arguments != nil && len(callExpr.Arguments.Nodes) > 0 {
+							arg := callExpr.Arguments.Nodes[0]
+							if arg.Kind == ast.KindAsExpression {
+								asExpr := arg.AsAsExpression()
+								if asExpr != nil && asExpr.Type != nil {
+									targetType = checker.Checker_getTypeFromTypeNode(c, asExpr.Type)
+									targetTypeNode = asExpr.Type
+								}
+							}
+						}
+					}
+
+					// For stringify, infer from argument type
+					if methodName == "stringify" && targetType == nil && config.TransformJSONStringify {
+						if callExpr.Arguments != nil && len(callExpr.Arguments.Nodes) > 0 {
+							arg := callExpr.Arguments.Nodes[0]
+							argType := checker.Checker_GetTypeAtLocation(c, arg)
+							if argType != nil && !shouldSkipType(argType) {
+								flags := checker.Type_flags(argType)
+								if flags&checker.TypeFlagsObject != 0 || flags&checker.TypeFlagsUnion != 0 {
+									targetType = argType
+								}
+							}
+						}
+					}
+
+					if targetType != nil {
+						if methodName == "parse" && config.TransformJSONParse {
+							countFilter(targetType, targetTypeNode)
+							return false
+						} else if methodName == "stringify" && config.TransformJSONStringify {
+							countFilter(targetType, targetTypeNode)
+							return false
+						}
+					}
+				}
+			}
+
+		case ast.KindVariableDeclaration:
+			varDecl := node.AsVariableDeclaration()
+			if varDecl != nil && config.TransformJSONParse && varDecl.Type != nil && varDecl.Initializer != nil {
+				if varDecl.Initializer.Kind == ast.KindCallExpression {
+					callExpr := varDecl.Initializer.AsCallExpression()
+					if callExpr != nil {
+						methodName, isJSON := getJSONMethodName(callExpr)
+						if isJSON && methodName == "parse" {
+							targetType := checker.Checker_getTypeFromTypeNode(c, varDecl.Type)
+							countFilter(targetType, varDecl.Type)
+							return false
+						}
+					}
+				}
+			}
+		}
+
+		node.ForEachChild(visit)
+		return false
+	}
+
+	sourceFile.AsNode().ForEachChild(visit)
 }
