@@ -32,8 +32,10 @@ echo "==> tsgolint uses typescript-go commit: $TSGO_COMMIT"
 echo "==> Copying shims..."
 rm -rf "$GO_DIR/shim"
 cp -r "$TSGOLINT_DIR/shim" "$GO_DIR/shim"
-# Create symlink to our custom extensions (stored in internal/shim/)
-ln -sf ../../internal/shim/checker_extensions.go "$GO_DIR/shim/checker/typical_extensions.go"
+# Copy our custom extensions (stored in internal/shim/) to the shim directories
+# Using copy instead of symlink because the shim directory gets wiped by rm -rf above
+cp "$GO_DIR/internal/shim/checker_extensions.go" "$GO_DIR/shim/checker/typical_extensions.go"
+cp "$GO_DIR/internal/shim/project/session_extensions.go" "$GO_DIR/shim/project/typical_extensions.go"
 
 # Clone or update typescript-go to the same commit (no submodules!)
 echo "==> Updating typescript-go to $TSGO_COMMIT..."

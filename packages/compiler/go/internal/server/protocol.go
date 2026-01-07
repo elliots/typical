@@ -56,6 +56,7 @@ const (
 	MethodTransformFile   = "transformFile"
 	MethodTransformSource = "transformSource"
 	MethodRelease         = "release"
+	MethodAnalyseFile     = "analyseFile"
 )
 
 // Request/Response types
@@ -87,6 +88,32 @@ type TransformSourceParams struct {
 }
 
 type TransformResponse struct {
-	Code      string                 `json:"code"`
+	Code      string                  `json:"code"`
 	SourceMap *transform.RawSourceMap `json:"sourceMap,omitempty"`
+}
+
+// AnalyseFileParams contains parameters for the analyseFile method
+type AnalyseFileParams struct {
+	Project     string   `json:"project"`
+	FileName    string   `json:"fileName"`
+	Content     string   `json:"content,omitempty"`     // Optional: file content (if provided, uses this instead of reading from disk)
+	IgnoreTypes []string `json:"ignoreTypes,omitempty"`
+}
+
+// AnalyseFileResponse contains the analysis results
+type AnalyseFileResponse struct {
+	Items []ValidationItem `json:"items"`
+}
+
+// ValidationItem represents a single validation point in the source code
+type ValidationItem struct {
+	StartLine   int    `json:"startLine"`            // 1-based line number
+	StartColumn int    `json:"startColumn"`          // 0-based column
+	EndLine     int    `json:"endLine"`              // 1-based line number
+	EndColumn   int    `json:"endColumn"`            // 0-based column
+	Kind        string `json:"kind"`                 // "parameter", "return", "cast", "json-parse", "json-stringify"
+	Name        string `json:"name"`                 // param name, "return value", or expression text
+	Status      string `json:"status"`               // "validated" or "skipped"
+	TypeString  string `json:"typeString"`           // e.g. "User", "string | null"
+	SkipReason  string `json:"skipReason,omitempty"` // reason for skipping (when status is "skipped")
 }

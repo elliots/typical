@@ -33,7 +33,7 @@ export class TypicalTransformer {
    * Ensure the Go compiler is started and project is loaded.
    * Uses lazy initialization - only starts on first transform.
    */
-  private async ensureInitialized(): Promise<void> {
+  private async ensureInitialized(x?: string): Promise<void> {
     if (!this.initPromise) {
       this.initPromise = (async () => {
         await this.compiler.start()

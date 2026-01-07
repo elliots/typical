@@ -13,6 +13,7 @@ import (
 	"github.com/microsoft/typescript-go/shim/tspath"
 	"github.com/microsoft/typescript-go/shim/vfs"
 
+	"github.com/elliots/typical/packages/compiler/internal/analyse"
 	"github.com/elliots/typical/packages/compiler/internal/transform"
 )
 
@@ -36,12 +37,14 @@ type projectInfo struct {
 }
 
 type API struct {
-	session  *project.Session
-	cwd      string
-	fs       vfs.FS
-	mu       sync.Mutex
-	projects map[string]*projectInfo
-	nextId   int
+	session        *project.Session
+	cwd            string
+	fs             vfs.FS
+	mu             sync.Mutex
+	projects       map[string]*projectInfo
+	nextId         int
+	fileVersions   map[string]int32 // track version per file for overlays
+	openFiles      map[string]bool  // track which files have been opened via DidOpenFile
 }
 
 func NewAPI(opts *APIOptions) *API {
@@ -55,10 +58,12 @@ func NewAPI(opts *APIOptions) *API {
 	})
 
 	return &API{
-		session:  session,
-		cwd:      opts.Cwd,
-		fs:       opts.FS,
-		projects: make(map[string]*projectInfo),
+		session:      session,
+		cwd:          opts.Cwd,
+		fs:           opts.FS,
+		projects:     make(map[string]*projectInfo),
+		fileVersions: make(map[string]int32),
+		openFiles:    make(map[string]bool),
 	}
 }
 
@@ -233,4 +238,115 @@ func (a *API) Release(handle string) error {
 
 func (a *API) toAbsolutePath(path string) string {
 	return tspath.GetNormalizedAbsolutePath(path, a.cwd)
+}
+
+// AnalyseFile analyses a file for validation points without transforming it.
+// Returns validation items that can be used by the VSCode extension.
+// If content is provided, it updates the file overlay before analysing.
+func (a *API) AnalyseFile(projectId, fileName, content string, ignoreTypes []string) (*AnalyseFileResponse, error) {
+	debugf("[DEBUG] AnalyseFile called: project=%s file=%s contentLen=%d ignoreTypes=%v\n", projectId, fileName, len(content), ignoreTypes)
+
+	// Verify the project exists (we still need to validate the projectId)
+	a.mu.Lock()
+	_, ok := a.projects[projectId]
+	a.mu.Unlock()
+
+	if !ok {
+		return nil, fmt.Errorf("project not found: %s", projectId)
+	}
+
+	fileName = a.toAbsolutePath(fileName)
+	debugf("[DEBUG] Absolute path: %s\n", fileName)
+
+	ctx := context.Background()
+
+	// Build URI for the file
+	uri := lsproto.DocumentUri("file://" + fileName)
+
+	// If content is provided, update the file overlay in the session
+	if content != "" {
+		// Increment version for this file
+		a.mu.Lock()
+		a.fileVersions[fileName]++
+		version := a.fileVersions[fileName]
+		isOpen := a.openFiles[fileName]
+		a.mu.Unlock()
+
+		if !isOpen {
+			// First time seeing this file - use DidOpenFile to create the overlay
+			debugf("[DEBUG] Calling DidOpenFile with URI: %s, version: %d, contentLen: %d\n", uri, version, len(content))
+			project.Session_DidOpenFile(a.session, ctx, uri, version, content, lsproto.LanguageKindTypeScript)
+
+			a.mu.Lock()
+			a.openFiles[fileName] = true
+			a.mu.Unlock()
+			debugf("[DEBUG] Opened file overlay for %s\n", fileName)
+		} else {
+			// File already open - use DidChangeFile with a whole document change
+			changes := []lsproto.TextDocumentContentChangePartialOrWholeDocument{
+				{
+					WholeDocument: &lsproto.TextDocumentContentChangeWholeDocument{
+						Text: content,
+					},
+				},
+			}
+			debugf("[DEBUG] Calling DidChangeFile with URI: %s, version: %d, contentLen: %d\n", uri, version, len(content))
+			project.Session_DidChangeFile(a.session, ctx, uri, version, changes)
+			debugf("[DEBUG] Updated file overlay for %s\n", fileName)
+		}
+	}
+
+	// Use GetLanguageServiceAndProjectsForFile - this is exactly what the LSP server uses.
+	// It properly flushes pending changes, updates the snapshot, and returns a fresh program.
+	proj, _, _, err := project.Session_GetLanguageServiceAndProjectsForFile(a.session, ctx, uri)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get project for file: %w", err)
+	}
+
+	program := proj.GetProgram()
+	sourceFile := program.GetSourceFile(fileName)
+
+	if sourceFile == nil {
+		return nil, fmt.Errorf("source file not found: %s", fileName)
+	}
+
+	debugf("[DEBUG] SourceFile text length: %d\n", len(sourceFile.Text()))
+
+	checker, release := program.GetTypeChecker(ctx)
+	defer release()
+
+	// Build analyse config
+	config := analyse.Config{
+		ValidateParameters:     true,
+		ValidateReturns:        true,
+		ValidateCasts:          true,
+		TransformJSONParse:     true,
+		TransformJSONStringify: true,
+		IgnoreTypes:            transform.CompileIgnorePatterns(ignoreTypes),
+	}
+
+	// Analyse the file
+	result := analyse.AnalyseFile(sourceFile, checker, program, config)
+
+	// Convert analyse.ValidationItem to server.ValidationItem
+	items := make([]ValidationItem, len(result.Items))
+	for i, item := range result.Items {
+		items[i] = ValidationItem{
+			StartLine:   item.StartLine,
+			StartColumn: item.StartColumn,
+			EndLine:     item.EndLine,
+			EndColumn:   item.EndColumn,
+			Kind:        item.Kind,
+			Name:        item.Name,
+			Status:      item.Status,
+			TypeString:  item.TypeString,
+			SkipReason:  item.SkipReason,
+		}
+	}
+
+	debugf("[DEBUG] AnalyseFile complete, found %d validation items\n", len(items))
+
+	return &AnalyseFileResponse{
+		Items: items,
+	}, nil
 }

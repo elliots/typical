@@ -142,6 +142,17 @@ func (s *Server) handleRequest(method string, payload []byte) ([]byte, error) {
 		}
 		return nil, s.api.Release(handle)
 
+	case MethodAnalyseFile:
+		var params AnalyseFileParams
+		if err := json.Unmarshal(payload, &params); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
+		}
+		resp, err := s.api.AnalyseFile(params.Project, params.FileName, params.Content, params.IgnoreTypes)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(resp)
+
 	default:
 		return nil, fmt.Errorf("unknown method: %s", method)
 	}

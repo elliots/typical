@@ -1,0 +1,76 @@
+{
+  "name": "typical-vscode",
+  "displayName": "Typical",
+  "description": "Shows runtime validation indicators for Typical TypeScript projects",
+  "version": "0.0.1",
+  "publisher": "elliots",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "keywords": [
+    "typescript",
+    "validation",
+    "typical",
+    "runtime"
+  ],
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Typical",
+      "properties": {
+        "typical.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Typical validation indicators"
+        },
+        "typical.showInlayHints": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show inlay hints for validated items"
+        },
+        "typical.validatedColor": {
+          "type": "string",
+          "default": "#4CAF50",
+          "description": "Colour for validated items (green)"
+        },
+        "typical.skippedColor": {
+          "type": "string",
+          "default": "#9E9E9E",
+          "description": "Colour for skipped items (grey)"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "typical.toggleIndicators",
+        "title": "Typical: Toggle Validation Indicators"
+      },
+      {
+        "command": "typical.refreshFile",
+        "title": "Typical: Refresh Current File"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --sourcemap --watch",
+    "package": "vsce package",
+    "dev-install": "pnpm run build && vsce package && code-insiders --install-extension typical-vscode-0.0.1.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.7.0"
+  }
+}

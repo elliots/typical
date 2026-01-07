@@ -3,7 +3,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { encodeRequest, decodeResponse, MessageType } from './protocol.js'
-import type { ProjectHandle, TransformResult } from './types.js'
+import type { ProjectHandle, TransformResult, AnalyseResult } from './types.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
@@ -121,6 +121,32 @@ export class TypicalCompiler {
   async release(handle: ProjectHandle | string): Promise<void> {
     const id = typeof handle === 'string' ? handle : handle.id
     await this.request<null>('release', id)
+  }
+
+  /**
+   * Analyse a file for validation points without transforming it.
+   * Returns information about which parameters, returns, and casts will be validated.
+   * Used by the VSCode extension to show validation indicators.
+   *
+   * @param project - Project handle or ID
+   * @param fileName - Path to the file to analyse
+   * @param content - Optional file content for live updates (uses disk version if not provided)
+   * @param ignoreTypes - Optional glob patterns for types to skip
+   * @returns Analysis result with validation items
+   */
+  async analyseFile(
+    project: ProjectHandle | string,
+    fileName: string,
+    content?: string,
+    ignoreTypes?: string[],
+  ): Promise<AnalyseResult> {
+    const projectId = typeof project === 'string' ? project : project.id
+    return this.request<AnalyseResult>('analyseFile', {
+      project: projectId,
+      fileName,
+      content,
+      ignoreTypes,
+    })
   }
 
   /**

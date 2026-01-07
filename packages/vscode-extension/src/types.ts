@@ -1,24 +1,3 @@
-export interface ProjectHandle {
-  id: string
-  configFile: string
-  rootFiles: string[]
-}
-
-export interface RawSourceMap {
-  version: number
-  file: string
-  sourceRoot?: string
-  sources: string[]
-  names: string[]
-  mappings: string
-  sourcesContent?: (string | null)[]
-}
-
-export interface TransformResult {
-  code: string
-  sourceMap?: RawSourceMap
-}
-
 /** Represents a single validation point in the source code */
 export interface ValidationItem {
   /** 1-based line number */
@@ -29,8 +8,8 @@ export interface ValidationItem {
   endLine: number
   /** 0-based column */
   endColumn: number
-  /** Type of validation: "parameter", "return", "cast", "json-parse", "json-stringify" */
-  kind: 'parameter' | 'return' | 'cast' | 'json-parse' | 'json-stringify'
+  /** Type of validation: "parameter", "return-type", "return", "cast", "json-parse", "json-stringify" */
+  kind: 'parameter' | 'return-type' | 'return' | 'cast' | 'json-parse' | 'json-stringify'
   /** Name of the item being validated (param name, "return value", or expression text) */
   name: string
   /** Whether the item will be validated or skipped */
@@ -43,4 +22,17 @@ export interface ValidationItem {
 
 export interface AnalyseResult {
   items: ValidationItem[]
+}
+
+export interface ProjectHandle {
+  id: string
+  configFile: string
+  rootFiles: string[]
+}
+
+export interface TypicalConfig {
+  enabled: boolean
+  showInlayHints: boolean
+  validatedColor: string
+  skippedColor: string
 }
