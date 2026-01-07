@@ -2142,6 +2142,10 @@ func countTypeUsages(sourceFile *ast.SourceFile, c *checker.Checker, program *co
 			if isBuiltinClassType(t) {
 				return
 			}
+			// Skip function types - they just need typeof === "function"
+			if isFunctionType(t) {
+				return
+			}
 
 			// Check if it's a named type (has a symbol with a name)
 			if sym := checker.Type_symbol(t); sym != nil && sym.Name != "" {

@@ -1,6 +1,6 @@
 {
   "name": "@elliots/typical-compiler-darwin-x64",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "description": "Typical compiler binary for macOS x64",
   "license": "MIT",
   "author": "elliots",

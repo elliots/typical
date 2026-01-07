@@ -27,17 +27,17 @@ export function validateArray(items: ArrayItem[]): ArrayItem[] {
 }
 
 // Typical validation
-export function validateDifferentArray(items: (ArrayItem & {age: number})[]): (ArrayItem & {age: number})[] {
+export function validateDifferentArray(items: (ArrayItem & { age: number })[]): (ArrayItem & { age: number })[] {
   return items
 }
 
 // Typical validation
-export function validateDifferentArrayAgain(items: (ArrayItem & {age: number})[]): (ArrayItem & {age: number})[] {
+export function validateDifferentArrayAgain(items: (ArrayItem & { age: number })[]): (ArrayItem & { age: number })[] {
   return items
 }
 
 // Typical validation
-export function validateSecondDifferentArray(items: (ArrayItem & {height: number})[]): (ArrayItem & {height: number})[] {
+export function validateSecondDifferentArray(items: (ArrayItem & { height: number })[]): (ArrayItem & { height: number })[] {
   return items
 }
 

@@ -1,5 +1,3 @@
-
-
 // Template literal types
 type Email = `${string}@${string}.${string}`
 type ZipCode = `${number}`

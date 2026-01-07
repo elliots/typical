@@ -16,7 +16,6 @@ function debugLog(...args: unknown[]): void {
 }
 
 function getBinaryPath(): string {
-
   // try local binary first (for development)
   const localBinPath = join(__dirname, '..', 'bin', 'typical')
   try {
