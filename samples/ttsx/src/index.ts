@@ -52,8 +52,8 @@ try {
   service.loadUser('{"name":"Charlie","age":"22","email":"charlie at example.com"}')
   console.error('❌ Invalid user data was accepted!')
   process.exit(1)
-} catch (_e) {
-  console.log('Caught error as expected for invalid user data:', (_e as Error).message)
+} catch (e) {
+  console.log('Caught error as expected for invalid user data:', (e as Error).message)
 }
 
 try {
@@ -63,10 +63,8 @@ try {
   } as any as TypicalConfig)
   console.error('❌ Invalid config was accepted!')
   process.exit(1)
-} catch (_e) {
-  console.log('Caught error as expected for invalid config:', (_e as Error).message)
-  console.log(_e)
+} catch (e) {
+  console.log('Caught error as expected for invalid config:', (e as Error).message)
 }
 
 console.log('✅ All tests passed!')
-process.exit(0)

@@ -65,3 +65,28 @@ func TemplateLiteralType_Types(t *checker.TemplateLiteralType) []*checker.Type {
 func IsTemplateLiteralType(t *checker.Type) bool {
 	return Type_flags(t)&TypeFlagsTemplateLiteral != 0
 }
+
+// TupleType_elementInfos returns the element infos for a tuple type.
+// Each TupleElementInfo contains flags indicating whether the element is fixed, rest, optional, etc.
+// This uses unsafe pointer casting to access the unexported elementInfos field.
+// The struct layout must match checker.TupleType exactly.
+func TupleType_elementInfos(t *checker.TupleType) []checker.TupleElementInfo {
+	// TupleType struct layout from typescript-go:
+	// type TupleType struct {
+	//   InterfaceType
+	//   elementInfos  []TupleElementInfo
+	//   minLength     int
+	//   fixedLength   int
+	//   combinedFlags ElementFlags
+	//   readonly      bool
+	// }
+	type tupleTypeLayout struct {
+		checker.InterfaceType
+		elementInfos  []checker.TupleElementInfo
+		minLength     int
+		fixedLength   int
+		combinedFlags checker.ElementFlags
+		readonly      bool
+	}
+	return ((*tupleTypeLayout)(unsafe.Pointer(t))).elementInfos
+}

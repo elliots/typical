@@ -97,14 +97,13 @@ export class TypicalCompiler {
     return this.request<ProjectHandle>('loadProject', { configFileName })
   }
 
-  async transformFile(project: ProjectHandle | string, fileName: string, ignoreTypes?: string[], maxGeneratedFunctions?: number, reusableValidators?: 'auto' | 'never' | 'always'): Promise<TransformResult> {
+  async transformFile(project: ProjectHandle | string, fileName: string, ignoreTypes?: string[], maxGeneratedFunctions?: number): Promise<TransformResult> {
     const projectId = typeof project === 'string' ? project : project.id
     return this.request<TransformResult>('transformFile', {
       project: projectId,
       fileName,
       ignoreTypes,
       maxGeneratedFunctions,
-      reusableValidators,
     })
   }
 
@@ -149,7 +148,6 @@ export class TypicalCompiler {
     options?: {
       ignoreTypes?: string[]
       maxGeneratedFunctions?: number
-      reusableValidators?: 'auto' | 'never' | 'always'
     },
   ): Promise<TransformResult> {
     return this.request<TransformResult>('transformSource', {
@@ -157,7 +155,6 @@ export class TypicalCompiler {
       source,
       ignoreTypes: options?.ignoreTypes,
       maxGeneratedFunctions: options?.maxGeneratedFunctions,
-      reusableValidators: options?.reusableValidators,
     })
   }
 

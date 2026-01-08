@@ -23,13 +23,6 @@ export interface TypicalSourceMapConfig {
 export interface TypicalConfig {
   include?: string[]
   exclude?: string[]
-  /**
-   * Controls whether validators are hoisted to module scope for reuse.
-   * - 'auto' (default): Hoist only validators used more than once
-   * - 'never': Never hoist, always generate inline validators
-   * - 'always': Always hoist validators, even if only used once
-   */
-  reusableValidators?: 'auto' | 'never' | 'always'
   validateCasts?: boolean
   hoistRegex?: boolean
   debug?: TypicalDebugConfig
@@ -75,7 +68,6 @@ export interface TypicalConfig {
 export const defaultConfig: TypicalConfig = {
   include: ['**/*.ts', '**/*.tsx'],
   exclude: ['node_modules/**', '**/*.d.ts', 'dist/**', 'build/**'],
-  reusableValidators: 'auto', // Hoists validators to module scope for reduced code size
   validateCasts: false,
   validateFunctions: true,
   transformJSONParse: true,

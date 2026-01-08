@@ -20,7 +20,7 @@
  *
  * Bun.plugin(typicalPlugin({
  *   typical: {
- *     reusableValidators: true,
+ *     validateCasts: true,
  *   }
  * }))
  * ```

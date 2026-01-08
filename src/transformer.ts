@@ -59,7 +59,7 @@ export class TypicalTransformer {
 
     const resolvedPath = resolve(fileName)
     // Pass config options to the Go compiler
-    const result = await this.compiler.transformFile(this.projectHandle!, resolvedPath, this.config.ignoreTypes, this.config.maxGeneratedFunctions, this.config.reusableValidators)
+    const result = await this.compiler.transformFile(this.projectHandle!, resolvedPath, this.config.ignoreTypes, this.config.maxGeneratedFunctions)
 
     return {
       code: result.code,

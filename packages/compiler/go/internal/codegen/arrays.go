@@ -43,17 +43,26 @@ func (g *Generator) tupleValidation(t *checker.Type, expr string, nameExpr strin
 	// Get tuple element types
 	typeArgs := checker.Checker_getTypeArguments(g.checker, t)
 
-	// Get tuple type info for length checking
+	// Get tuple type info for length checking and per-element flags
 	tupleType := checker.Type_TargetTupleType(t)
+	var elementInfos []checker.TupleElementInfo
 	if tupleType != nil {
+		elementInfos = checker.TupleType_elementInfos(tupleType)
 		combinedFlags := checker.TupleType_combinedFlags(tupleType)
 
 		if combinedFlags&checker.ElementFlagsRest != 0 {
 			// Has rest element - check minimum length
-			if len(typeArgs) > 1 {
+			// Count non-rest elements to determine minimum length
+			minLen := 0
+			for _, info := range elementInfos {
+				if info.TupleElementFlags()&checker.ElementFlagsRest == 0 {
+					minLen++
+				}
+			}
+			if minLen > 0 {
 				lenErrorMsg := concatStrings(`"Expected "`, errorNameExpr)
-				lenErrorMsg = concatStrings(lenErrorMsg, fmt.Sprintf(`" to have at least %d elements, got " + %s.length`, len(typeArgs)-1, expr))
-				sb.WriteString(fmt.Sprintf(`if (%s.length < %d) %s; `, expr, len(typeArgs)-1, g.throwOrReturn(lenErrorMsg)))
+				lenErrorMsg = concatStrings(lenErrorMsg, fmt.Sprintf(`" to have at least %d elements, got " + %s.length`, minLen, expr))
+				sb.WriteString(fmt.Sprintf(`if (%s.length < %d) %s; `, expr, minLen, g.throwOrReturn(lenErrorMsg)))
 			}
 		} else if combinedFlags&checker.ElementFlagsOptional != 0 {
 			// Has optional elements - check max length
@@ -73,14 +82,72 @@ func (g *Generator) tupleValidation(t *checker.Type, expr string, nameExpr strin
 		sb.WriteString(fmt.Sprintf(`if (%s.length !== %d) %s; `, expr, len(typeArgs), g.throwOrReturn(lenErrorMsg)))
 	}
 
-	// Validate each element
-	for i, elemType := range typeArgs {
-		elemExpr := fmt.Sprintf("%s[%d]", expr, i)
-		// Optimise: for static index, append directly if nameExpr is a literal
-		elemNameExpr := g.appendToName(nameExpr, fmt.Sprintf("[%d]", i))
-		elemValidation := g.generateValidation(elemType, elemExpr, elemNameExpr)
+	// Check if we have variadic tuple (with rest element)
+	hasRest := false
+	restIndex := -1
+	if elementInfos != nil {
+		for i, info := range elementInfos {
+			if info.TupleElementFlags()&checker.ElementFlagsRest != 0 {
+				hasRest = true
+				restIndex = i
+				break
+			}
+		}
+	}
+
+	if hasRest && restIndex >= 0 {
+		// Variadic tuple: [leading..., ...rest[], ...trailing]
+		// Count trailing fixed elements (elements after the rest)
+		trailingCount := len(typeArgs) - restIndex - 1
+
+		// Validate leading fixed elements (before rest)
+		for i := 0; i < restIndex; i++ {
+			elemExpr := fmt.Sprintf("%s[%d]", expr, i)
+			elemNameExpr := g.appendToName(nameExpr, fmt.Sprintf("[%d]", i))
+			elemValidation := g.generateValidation(typeArgs[i], elemExpr, elemNameExpr)
+			if elemValidation != "" {
+				sb.WriteString(elemValidation)
+			}
+		}
+
+		// Validate rest elements with a loop
+		restType := typeArgs[restIndex]
+		idx := g.funcIdx
+		g.funcIdx++
+		iVar := fmt.Sprintf("_i%d", idx)
+		eVar := fmt.Sprintf("_e%d", idx)
+		// Loop from restIndex to length - trailingCount
+		loopEnd := fmt.Sprintf("%s.length - %d", expr, trailingCount)
+		if trailingCount == 0 {
+			loopEnd = fmt.Sprintf("%s.length", expr)
+		}
+		elemNameExpr := g.appendArrayIndex(nameExpr, iVar)
+		elemValidation := g.generateValidation(restType, eVar, elemNameExpr)
 		if elemValidation != "" {
-			sb.WriteString(elemValidation)
+			sb.WriteString(fmt.Sprintf(`for (let %s = %d; %s < %s; %s++) { const %s: any = %s[%s]; %s} `,
+				iVar, restIndex, iVar, loopEnd, iVar, eVar, expr, iVar, elemValidation))
+		}
+
+		// Validate trailing fixed elements (relative to end)
+		for i := 0; i < trailingCount; i++ {
+			typeIdx := restIndex + 1 + i
+			// Access from end: arr[arr.length - trailingCount + i]
+			elemExpr := fmt.Sprintf("%s[%s.length - %d]", expr, expr, trailingCount-i)
+			elemNameExpr := g.appendToName(nameExpr, fmt.Sprintf("[%s.length - %d]", expr, trailingCount-i))
+			elemValidation := g.generateValidation(typeArgs[typeIdx], elemExpr, elemNameExpr)
+			if elemValidation != "" {
+				sb.WriteString(elemValidation)
+			}
+		}
+	} else {
+		// Simple tuple without rest - validate each element at fixed index
+		for i, elemType := range typeArgs {
+			elemExpr := fmt.Sprintf("%s[%d]", expr, i)
+			elemNameExpr := g.appendToName(nameExpr, fmt.Sprintf("[%d]", i))
+			elemValidation := g.generateValidation(elemType, elemExpr, elemNameExpr)
+			if elemValidation != "" {
+				sb.WriteString(elemValidation)
+			}
 		}
 	}
 

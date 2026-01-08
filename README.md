@@ -294,7 +294,6 @@ Create a `typical.json` file in your project root (optional):
 | `validateCasts`          | `false`                                                   | Validate type assertions (`as Type`)                              |
 | `transformJSONParse`     | `true`                                                    | Transform `JSON.parse` to validate and filter to typed properties |
 | `transformJSONStringify` | `true`                                                    | Transform `JSON.stringify` to only include typed properties       |
-| `reusableValidators`     | `true`                                                    | Hoist validators to module scope for reduced code size            |
 
 ---
 

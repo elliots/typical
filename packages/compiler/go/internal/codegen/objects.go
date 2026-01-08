@@ -113,13 +113,11 @@ func (g *Generator) objectTypeCheck(t *checker.Type, expr string) string {
 		return fmt.Sprintf(`("function" === typeof %s)`, expr)
 	}
 
-	// Built-in classes use instanceof check - they're classes at runtime
-	if className := g.isBuiltinClassType(t); className != "" {
-		return fmt.Sprintf(`(%s instanceof %s)`, expr, className)
-	}
-
 	// Get object flags to check the kind of object
 	objFlags := checker.Type_objectFlags(t)
+
+	// IMPORTANT: Check for array/tuple types BEFORE checking for builtin class types.
+	// Array is a builtin class, but we want to validate element types, not just instanceof.
 
 	// Check if it's a reference type (Array<T>, etc.)
 	if objFlags&checker.ObjectFlagsReference != 0 {
@@ -146,6 +144,12 @@ func (g *Generator) objectTypeCheck(t *checker.Type, expr string) string {
 		if g.looksLikeArrayType(t) {
 			return g.arrayCheckFromAnonymous(t, expr)
 		}
+	}
+
+	// Built-in classes use instanceof check - they're classes at runtime
+	// (but not Array, which needs element validation - handled above)
+	if className := g.isBuiltinClassType(t); className != "" {
+		return fmt.Sprintf(`(%s instanceof %s)`, expr, className)
 	}
 
 	// Regular object type - create _io function

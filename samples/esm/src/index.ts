@@ -65,8 +65,6 @@ try {
   process.exit(1)
 } catch (_e) {
   console.log('Caught error as expected for invalid config:', (_e as Error).message)
-  console.log(_e)
 }
 
 console.log('✅ All tests passed!')
-process.exit(0)

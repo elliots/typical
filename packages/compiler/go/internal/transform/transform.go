@@ -95,7 +95,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 	// Collect all insertions (position -> text to insert)
 	var insertions []insertion
 
-	// Track reusable validators when config.ReusableValidators is enabled
+	// Track reusable validators - hoisted to module scope when used more than once
 	// Maps type key -> generated function code
 	checkFunctions := make(map[string]string)      // _check_X functions for validation
 	filterFunctions := make(map[string]string)     // _filter_X functions for JSON.parse/stringify
@@ -106,7 +106,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 	checkNameCounter := make(map[string]int)       // base name -> next suffix counter
 	filterNameCounter := make(map[string]int)      // base name -> next suffix counter
 
-	// Pre-computed type usage counts from first pass (only populated when ReusableValidators is true)
+	// Pre-computed type usage counts from first pass
 	checkTypeUsage := make(map[string]int)
 	filterTypeUsage := make(map[string]int)
 	// Type objects from first pass - used to pre-generate check functions for nested types
@@ -151,93 +151,73 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 		}
 	}
 
-	// Copy type usage results (only when ReusableValidators is "auto")
-	if config.ReusableValidators == ReusableValidatorsAuto {
+	// Copy type usage results from analysis pass
+	for k, v := range analyseResult.CheckTypeUsage {
+		checkTypeUsage[k] = v
+	}
+	for k, v := range analyseResult.FilterTypeUsage {
+		filterTypeUsage[k] = v
+	}
+	for k, v := range analyseResult.CheckTypeObjects {
+		checkTypeObjects[k] = typeInfo{t: v.Type, typeNode: v.TypeNode, typeName: v.TypeName}
+	}
+	for k, v := range analyseResult.FilterTypeObjects {
+		filterTypeObjects[k] = typeInfo{t: v.Type, typeNode: v.TypeNode, typeName: v.TypeName}
+	}
+	debugf("[DEBUG] First pass complete: %d check types, %d filter types\n", len(checkTypeUsage), len(filterTypeUsage))
 
-		// Copy results to local maps
-		for k, v := range analyseResult.CheckTypeUsage {
-			checkTypeUsage[k] = v
+	// Pre-allocate function names for types that will be hoisted (usage > 1)
+	// This enables composable validators - nested types can call parent's check function
+	for typeKey, count := range checkTypeUsage {
+		if count > 1 {
+			// Generate a unique function name based on the type key
+			// Uses smart naming: simple types get full name, complex types get shortened name with number
+			finalName := generateFunctionName("_check_", typeKey, checkNameCounter, usedCheckNames)
+			checkFunctionNames[typeKey] = finalName
 		}
-		for k, v := range analyseResult.FilterTypeUsage {
-			filterTypeUsage[k] = v
-		}
-		for k, v := range analyseResult.CheckTypeObjects {
-			checkTypeObjects[k] = typeInfo{t: v.Type, typeNode: v.TypeNode, typeName: v.TypeName}
-		}
-		for k, v := range analyseResult.FilterTypeObjects {
-			filterTypeObjects[k] = typeInfo{t: v.Type, typeNode: v.TypeNode, typeName: v.TypeName}
-		}
-		debugf("[DEBUG] First pass complete: %d check types, %d filter types\n", len(checkTypeUsage), len(filterTypeUsage))
+	}
 
-		// Pre-allocate function names for types that will be hoisted (usage > 1)
-		// This enables composable validators - nested types can call parent's check function
-		for typeKey, count := range checkTypeUsage {
-			if count > 1 {
-				// Generate a unique function name based on the type key
-				// Uses smart naming: simple types get full name, complex types get shortened name with number
-				finalName := generateFunctionName("_check_", typeKey, checkNameCounter, usedCheckNames)
-				checkFunctionNames[typeKey] = finalName
-			}
-		}
+	// Pass the pre-allocated names to the generator for composable validators
+	gen.SetAvailableCheckFunctions(checkFunctionNames)
 
-		// Pass the pre-allocated names to the generator for composable validators
-		gen.SetAvailableCheckFunctions(checkFunctionNames)
-
-		// Pre-generate check function code for all types that will be reused
-		// This must happen BEFORE the main visitor so that when we generate
-		// a check function for NestedUser that calls _check_Address,
-		// the _check_Address code already exists
-		for typeKey, count := range checkTypeUsage {
-			if count > 1 {
-				if info, exists := checkTypeObjects[typeKey]; exists {
-					typeName := info.typeName
-					if typeName == "" {
-						typeName = "value"
+	// Pre-generate check function code for all types that will be reused
+	// This must happen BEFORE the main visitor so that when we generate
+	// a check function for NestedUser that calls _check_Address,
+	// the _check_Address code already exists
+	for typeKey, count := range checkTypeUsage {
+		if count > 1 {
+			if info, exists := checkTypeObjects[typeKey]; exists {
+				typeName := info.typeName
+				if typeName == "" {
+					typeName = "value"
+				}
+				// Generate the check function code - this populates checkFunctions[typeKey]
+				var result codegen.CheckFunctionResult
+				if info.typeNode != nil {
+					result = gen.GenerateCheckFunctionFromNode(info.t, info.typeNode, typeName)
+				} else {
+					result = gen.GenerateCheckFunction(info.t, typeName)
+				}
+				if !result.Ignored && result.Code != "" {
+					finalName := checkFunctionNames[typeKey]
+					if result.Name != finalName {
+						result.Code = strings.Replace(result.Code, result.Name+" ", finalName+" ", 1)
 					}
-					// Generate the check function code - this populates checkFunctions[typeKey]
-					var result codegen.CheckFunctionResult
-					if info.typeNode != nil {
-						result = gen.GenerateCheckFunctionFromNode(info.t, info.typeNode, typeName)
-					} else {
-						result = gen.GenerateCheckFunction(info.t, typeName)
-					}
-					if !result.Ignored && result.Code != "" {
-						finalName := checkFunctionNames[typeKey]
-						if result.Name != finalName {
-							result.Code = strings.Replace(result.Code, result.Name+" ", finalName+" ", 1)
-						}
-						checkFunctions[typeKey] = result.Code
-					}
+					checkFunctions[typeKey] = result.Code
 				}
 			}
 		}
-		debugf("[DEBUG] Pre-generated %d check functions\n", len(checkFunctions))
 	}
+	debugf("[DEBUG] Pre-generated %d check functions\n", len(checkFunctions))
 
 	// shouldUseReusable returns true if we should use a reusable function for this type
-	// - ReusableValidatorsNever: Never hoist (always inline)
-	// - ReusableValidatorsAuto: Hoist only if used more than once
-	// - ReusableValidatorsAlways: Always hoist even if used once
+	// Hoist only if used more than once
 	shouldUseReusableCheck := func(t *checker.Type, typeNode *ast.Node) bool {
-		if config.ReusableValidators == ReusableValidatorsNever {
-			return false
-		}
-		if config.ReusableValidators == ReusableValidatorsAlways {
-			return true
-		}
-		// Default (ReusableValidatorsAuto): only hoist if used more than once
 		key := getTypeKey(t, typeNode)
 		return checkTypeUsage[key] > 1
 	}
 
 	shouldUseReusableFilter := func(t *checker.Type, typeNode *ast.Node) bool {
-		if config.ReusableValidators == ReusableValidatorsNever {
-			return false
-		}
-		if config.ReusableValidators == ReusableValidatorsAlways {
-			return true
-		}
-		// Default (ReusableValidatorsAuto): only hoist if used more than once
 		key := getTypeKey(t, typeNode)
 		return filterTypeUsage[key] > 1
 	}

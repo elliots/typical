@@ -9,7 +9,6 @@ export default defineConfig({
   plugins: [
     Typical({
       typical: {
-        // reusableValidators: true,
         validateCasts: true,
         // ignoreTypes: ['React.FormEvent'],
         debug: {

@@ -1176,6 +1176,54 @@ func (g *Generator) unionValidation(t *checker.Type, expr string, nameExpr strin
 		return g.generateValidation(members[0], expr, nameExpr)
 	}
 
+	// Special case for optional types with check functions (e.g., children?: TreeNode[], a?: A)
+	// In returnErrors mode, we need to capture errors from recursive validation
+	// rather than just returning a generic "to be undefined | T" error.
+	if g.returnErrors && len(members) == 2 {
+		// Check for undefined | T pattern where T has a check function
+		var undefinedIdx, otherIdx int = -1, -1
+		for i, member := range members {
+			memberFlags := checker.Type_flags(member)
+			if memberFlags&checker.TypeFlagsUndefined != 0 {
+				undefinedIdx = i
+			} else {
+				otherIdx = i
+			}
+		}
+
+		if undefinedIdx >= 0 && otherIdx >= 0 {
+			otherType := members[otherIdx]
+
+			// Check if it's an array type with check function for element type
+			if checker.Checker_isArrayType(g.checker, otherType) {
+				typeArgs := checker.Checker_getTypeArguments(g.checker, otherType)
+				if len(typeArgs) > 0 {
+					elemType := typeArgs[0]
+					elemTypeStr := g.checker.TypeToString(elemType)
+					if _, hasCheckFunc := g.availableCheckFunctions[elemTypeStr]; hasCheckFunc {
+						// Generate: if (undefined === expr) { } else { arrayValidation }
+						var sb strings.Builder
+						sb.WriteString(fmt.Sprintf("if (undefined === %s) { } else { ", expr))
+						sb.WriteString(g.arrayValidation(otherType, expr, nameExpr))
+						sb.WriteString("} ")
+						return sb.String()
+					}
+				}
+			}
+
+			// Check if the other type itself has a check function (for recursive object types)
+			otherTypeStr := g.checker.TypeToString(otherType)
+			if checkFuncName, hasCheckFunc := g.availableCheckFunctions[otherTypeStr]; hasCheckFunc {
+				// Generate: if (undefined === expr) { } else { call check function }
+				var sb strings.Builder
+				sb.WriteString(fmt.Sprintf("if (undefined === %s) { } else { ", expr))
+				sb.WriteString(fmt.Sprintf("const _t = %s(%s); if (_t !== null) return _t.replace(/%%n/g, %s); ", checkFuncName, expr, nameExpr))
+				sb.WriteString("} ")
+				return sb.String()
+			}
+		}
+	}
+
 	var sb strings.Builder
 
 	// Generate if-else chain for each member
@@ -1433,6 +1481,17 @@ func (g *Generator) generateCheck(t *checker.Type, expr string) string {
 	}
 	g.depth++
 	defer func() { g.depth-- }()
+
+	// Check if this type has a reusable check function available
+	// This enables recursive types to call themselves
+	if g.availableCheckFunctions != nil {
+		typeStr := g.checker.TypeToString(t)
+		if checkFuncName, ok := g.availableCheckFunctions[typeStr]; ok {
+			// Generate a call to the reusable check function
+			// For checks (boolean expressions), we call the function and check if it returns null
+			return fmt.Sprintf(`(%s(%s) === null)`, checkFuncName, expr)
+		}
+	}
 
 	// Cycle detection for recursive types - use type key based on symbol
 	typeKey := getTypeKey(t)

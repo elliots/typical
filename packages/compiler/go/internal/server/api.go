@@ -96,8 +96,8 @@ func (a *API) LoadProject(configFileName string) (*ProjectResponse, error) {
 	}, nil
 }
 
-func (a *API) TransformFile(projectId, fileName, content string, ignoreTypes []string, maxGeneratedFunctions int, reusableValidators *string) (*TransformResponse, error) {
-	debugf("[DEBUG] TransformFile called: project=%s file=%s contentLen=%d ignoreTypes=%v maxFuncs=%d reusable=%v\n", projectId, fileName, len(content), ignoreTypes, maxGeneratedFunctions, reusableValidators)
+func (a *API) TransformFile(projectId, fileName, content string, ignoreTypes []string, maxGeneratedFunctions int) (*TransformResponse, error) {
+	debugf("[DEBUG] TransformFile called: project=%s file=%s contentLen=%d ignoreTypes=%v maxFuncs=%d\n", projectId, fileName, len(content), ignoreTypes, maxGeneratedFunctions)
 
 	a.mu.Lock()
 	_, ok := a.projects[projectId]
@@ -175,9 +175,6 @@ func (a *API) TransformFile(projectId, fileName, content string, ignoreTypes []s
 	if maxGeneratedFunctions > 0 {
 		config.MaxGeneratedFunctions = maxGeneratedFunctions
 	}
-	if reusableValidators != nil {
-		config.ReusableValidators = transform.ReusableValidatorsMode(*reusableValidators)
-	}
 
 	// Transform the file with source map
 	debugf("[DEBUG] Starting transform...\n")
@@ -195,8 +192,8 @@ func (a *API) TransformFile(projectId, fileName, content string, ignoreTypes []s
 
 // TransformSource transforms a standalone TypeScript source string without needing a project.
 // It creates a temporary directory with tsconfig.json and the source file to enable type checking.
-func (a *API) TransformSource(fileName, source string, ignoreTypes []string, maxGeneratedFunctions int, reusableValidators *string) (*TransformResponse, error) {
-	debugf("[DEBUG] TransformSource called: fileName=%s sourceLen=%d ignoreTypes=%v maxFuncs=%d reusable=%v\n", fileName, len(source), ignoreTypes, maxGeneratedFunctions, reusableValidators)
+func (a *API) TransformSource(fileName, source string, ignoreTypes []string, maxGeneratedFunctions int) (*TransformResponse, error) {
+	debugf("[DEBUG] TransformSource called: fileName=%s sourceLen=%d ignoreTypes=%v maxFuncs=%d\n", fileName, len(source), ignoreTypes, maxGeneratedFunctions)
 
 	// Create a temporary directory for this transformation
 	tmpDir, err := os.MkdirTemp("", "typical-transform-*")
@@ -250,9 +247,6 @@ func (a *API) TransformSource(fileName, source string, ignoreTypes []string, max
 	config.IgnoreTypes = transform.CompileIgnorePatterns(ignoreTypes)
 	if maxGeneratedFunctions > 0 {
 		config.MaxGeneratedFunctions = maxGeneratedFunctions
-	}
-	if reusableValidators != nil {
-		config.ReusableValidators = transform.ReusableValidatorsMode(*reusableValidators)
 	}
 
 	code, sourceMap, err := transform.TransformFileWithSourceMapAndError(sourceFile, checker, program, config)

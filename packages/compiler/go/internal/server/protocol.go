@@ -77,7 +77,6 @@ type TransformFileParams struct {
 	Content               string   `json:"content,omitempty"`               // Optional: file content for live preview
 	IgnoreTypes           []string `json:"ignoreTypes,omitempty"`           // Glob patterns for types to skip
 	MaxGeneratedFunctions int      `json:"maxGeneratedFunctions,omitempty"` // Max helper functions before error (0 = default 50)
-	ReusableValidators    *string  `json:"reusableValidators,omitempty"`    // "auto" (default), "never", or "always"
 }
 
 type TransformSourceParams struct {
@@ -85,7 +84,6 @@ type TransformSourceParams struct {
 	Source                string   `json:"source"`                          // TypeScript source code
 	IgnoreTypes           []string `json:"ignoreTypes,omitempty"`           // Glob patterns for types to skip
 	MaxGeneratedFunctions int      `json:"maxGeneratedFunctions,omitempty"` // Max helper functions before error (0 = default 50)
-	ReusableValidators    *string  `json:"reusableValidators,omitempty"`    // "auto" (default), "never", or "always"
 }
 
 type TransformResponse struct {

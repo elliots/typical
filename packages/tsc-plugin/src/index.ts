@@ -12,7 +12,7 @@ function transformFileSync(compiler: TypicalCompiler, project: string, fileName:
   let error: Error | undefined
   let done = false
 
-  compiler.transformFile(project, fileName, config.ignoreTypes, config.maxGeneratedFunctions, config.reusableValidators).then(
+  compiler.transformFile(project, fileName, config.ignoreTypes, config.maxGeneratedFunctions).then(
     res => {
       result = res.code
       done = true

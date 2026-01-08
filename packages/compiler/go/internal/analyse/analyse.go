@@ -208,6 +208,14 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 
 		typeStr := c.TypeToString(t)
 		if visitedTypes[typeStr] {
+			// Recursive type detected - increment usage count so a reusable function is created
+			// This allows the validator to call itself recursively
+			if sym := checker.Type_symbol(t); sym != nil && sym.Name != "" {
+				if !strings.HasPrefix(sym.Name, "__") {
+					key := getTypeKey(t, nil)
+					usage[key]++
+				}
+			}
 			return
 		}
 		visitedTypes[typeStr] = true
