@@ -52,6 +52,11 @@ git checkout "$TSGO_COMMIT"
 # Apply patches if they exist
 echo "==> Applying patches from tsgolint..."
 if ls "$TSGOLINT_DIR/patches"/*.patch 1> /dev/null 2>&1; then
+    # Configure git user for CI environments where it's not set
+    if [ -n "$CI" ] && ! git config user.email > /dev/null 2>&1; then
+        git config user.email "ci@typical.build"
+        git config user.name "Typical CI"
+    fi
     for patch in "$TSGOLINT_DIR/patches"/*.patch; do
         echo "Applying $(basename "$patch")..."
         git am --3way --no-gpg-sign "$patch" || {
