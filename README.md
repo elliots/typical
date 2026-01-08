@@ -378,29 +378,28 @@ DEBUG=1 npm run build
 
 Runtime validation performance comparing Typical vs Zod vs no validation:
 
-| Scenario                           |   Nothing |   Typical |       Zod | vs Nothing |    vs Zod |
-| ---------------------------------- | --------: | --------: | --------: | ---------: | --------: |
-| string                             |  23.91M/s |  24.86M/s |  24.80M/s |    🟡 1.0x |   🟡 1.0x |
-| number                             |  24.33M/s |  25.44M/s |  24.44M/s |    🟡 1.0x |   🟡 1.0x |
-| boolean                            |  24.49M/s |  24.49M/s |  24.19M/s |    🟡 1.0x |   🟡 1.0x |
-| object w/ template literals        |  24.53M/s |  21.39M/s |   7.71M/s |    🟡 0.9x |   🟢 2.8x |
-| nested w/ template literals        |  24.69M/s |   8.05M/s |   2.31M/s |    🔴 0.3x |   🟢 3.5x |
-| array w/ templates (10)            |  29.89M/s |   7.10M/s |   1.54M/s |    🔴 0.2x |   🟢 4.6x |
-| array w/ templates (100)           |  30.18M/s | 795.31K/s | 150.09K/s |    🔴 0.0x |   🟢 5.3x |
-| union types                        |  29.77M/s |  30.69M/s |  10.76M/s |    🟡 1.0x |   🟢 2.9x |
-| template literals                  |  30.09M/s |  17.23M/s |   1.71M/s |    🔴 0.6x |  🟢 10.1x |
-| complex config                     |  30.56M/s |  29.14M/s |   3.51M/s |    🟡 1.0x |   🟢 8.3x |
-| JSON.parse (small)                 |   4.61M/s |   4.37M/s |   3.85M/s |    🟡 0.9x |   🟢 1.1x |
-| JSON.parse (small+filtered extras) |   4.65M/s |   4.32M/s |   3.79M/s |    🟡 0.9x |   🟢 1.1x |
-| JSON.parse (medium)                |   2.85M/s |   2.26M/s | 928.42K/s |    🔴 0.8x |   🟢 2.4x |
-| JSON.parse (large)                 | 209.41K/s | 186.91K/s |  99.28K/s |    🟡 0.9x |   🟢 1.9x |
-| JSON.parse (1000 large)            |     211/s |     212/s |     104/s |    🟡 1.0x |   🟢 2.0x |
-| JSON.stringify (small)             |   9.99M/s |   9.30M/s |   6.70M/s |    🟡 0.9x |   🟢 1.4x |
-| JSON.stringify (small+extras)      |   2.85M/s |   9.20M/s |   6.98M/s |    🟢 3.2x |   🟢 1.3x |
-| JSON.stringify (medium)            |   5.09M/s |   3.82M/s |   1.16M/s |    🔴 0.8x |   🟢 3.3x |
-| JSON.stringify (large)             | 392.53K/s | 330.45K/s | 132.50K/s |    🔴 0.8x |   🟢 2.5x |
-| JSON.stringify (1000 large)        |     362/s |     339/s |     128/s |    🟡 0.9x |   🟢 2.7x |
+| Scenario                           |   Nothing |   Typical |       Zod | vs Nothing |   vs Zod |
+| ---------------------------------- | --------: | --------: | --------: | ---------: | -------: |
+| string                             |  23.91M/s |  24.86M/s |  24.80M/s |    🟡 1.0x |  🟡 1.0x |
+| number                             |  24.33M/s |  25.44M/s |  24.44M/s |    🟡 1.0x |  🟡 1.0x |
+| boolean                            |  24.49M/s |  24.49M/s |  24.19M/s |    🟡 1.0x |  🟡 1.0x |
+| object w/ template literals        |  24.53M/s |  21.39M/s |   7.71M/s |    🟡 0.9x |  🟢 2.8x |
+| nested w/ template literals        |  24.69M/s |   8.05M/s |   2.31M/s |    🔴 0.3x |  🟢 3.5x |
+| array w/ templates (10)            |  29.89M/s |   7.10M/s |   1.54M/s |    🔴 0.2x |  🟢 4.6x |
+| array w/ templates (100)           |  30.18M/s | 795.31K/s | 150.09K/s |    🔴 0.0x |  🟢 5.3x |
+| union types                        |  29.77M/s |  30.69M/s |  10.76M/s |    🟡 1.0x |  🟢 2.9x |
+| template literals                  |  30.09M/s |  17.23M/s |   1.71M/s |    🔴 0.6x | 🟢 10.1x |
+| complex config                     |  30.56M/s |  29.14M/s |   3.51M/s |    🟡 1.0x |  🟢 8.3x |
+| JSON.parse (small)                 |   4.61M/s |   4.37M/s |   3.85M/s |    🟡 0.9x |  🟢 1.1x |
+| JSON.parse (small+filtered extras) |   4.65M/s |   4.32M/s |   3.79M/s |    🟡 0.9x |  🟢 1.1x |
+| JSON.parse (medium)                |   2.85M/s |   2.26M/s | 928.42K/s |    🔴 0.8x |  🟢 2.4x |
+| JSON.parse (large)                 | 209.41K/s | 186.91K/s |  99.28K/s |    🟡 0.9x |  🟢 1.9x |
+| JSON.parse (1000 large)            |     211/s |     212/s |     104/s |    🟡 1.0x |  🟢 2.0x |
+| JSON.stringify (small)             |   9.99M/s |   9.30M/s |   6.70M/s |    🟡 0.9x |  🟢 1.4x |
+| JSON.stringify (small+extras)      |   2.85M/s |   9.20M/s |   6.98M/s |    🟢 3.2x |  🟢 1.3x |
+| JSON.stringify (medium)            |   5.09M/s |   3.82M/s |   1.16M/s |    🔴 0.8x |  🟢 3.3x |
+| JSON.stringify (large)             | 392.53K/s | 330.45K/s | 132.50K/s |    🔴 0.8x |  🟢 2.5x |
+| JSON.stringify (1000 large)        |     362/s |     339/s |     128/s |    🟡 0.9x |  🟢 2.7x |
 
 - **vs Nothing**: Speed relative to no validation or filtering (1.0x = same speed)
 - **vs Zod**: Speed relative to Zod (1.0x = same speed)
-

@@ -15,11 +15,7 @@ export class InlayHintsProvider implements vscode.InlayHintsProvider {
     this.enabled = enabled
   }
 
-  provideInlayHints(
-    document: vscode.TextDocument,
-    range: vscode.Range,
-    _token: vscode.CancellationToken
-  ): vscode.ProviderResult<vscode.InlayHint[]> {
+  provideInlayHints(document: vscode.TextDocument, range: vscode.Range, _token: vscode.CancellationToken): vscode.ProviderResult<vscode.InlayHint[]> {
     if (!this.enabled) {
       return []
     }

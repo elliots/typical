@@ -9,24 +9,15 @@ import { DecorationManager } from './decoration-manager'
 export class HoverProvider implements vscode.HoverProvider {
   constructor(private decorationManager: DecorationManager) {}
 
-  provideHover(
-    document: vscode.TextDocument,
-    position: vscode.Position,
-    _token: vscode.CancellationToken
-  ): vscode.ProviderResult<vscode.Hover> {
+  provideHover(document: vscode.TextDocument, position: vscode.Position, _token: vscode.CancellationToken): vscode.ProviderResult<vscode.Hover> {
     const items = this.decorationManager.getCachedItems(document.uri.fsPath)
     if (!items) {
       return null
     }
 
     // Find item at position
-    const item = items.find((i) => {
-      const range = new vscode.Range(
-        i.startLine - 1,
-        i.startColumn,
-        i.endLine - 1,
-        i.endColumn
-      )
+    const item = items.find(i => {
+      const range = new vscode.Range(i.startLine - 1, i.startColumn, i.endLine - 1, i.endColumn)
       return range.contains(position)
     })
 
@@ -37,7 +28,7 @@ export class HoverProvider implements vscode.HoverProvider {
     return new vscode.Hover(this.createDetailedHover(item))
   }
 
-      private      createDetailedHover(item: ValidationItem): vscode.MarkdownString {
+  private createDetailedHover(item: ValidationItem): vscode.MarkdownString {
     const md = new vscode.MarkdownString()
     md.isTrusted = true
 
@@ -49,9 +40,7 @@ export class HoverProvider implements vscode.HoverProvider {
     md.appendMarkdown(`|----------|-------|\n`)
     md.appendMarkdown(`| **Name** | \`${item.name}\` |\n`)
     md.appendMarkdown(`| **Type** | \`${item.typeString}\` |\n`)
-    md.appendMarkdown(
-      `| **Status** | ${item.status === 'validated' ? 'Validated at runtime' : 'Skipped'} |\n`
-    )
+    md.appendMarkdown(`| **Status** | ${item.status === 'validated' ? 'Validated at runtime' : 'Skipped'} |\n`)
 
     if (item.skipReason) {
       md.appendMarkdown(`| **Reason** | ${item.skipReason} |\n`)

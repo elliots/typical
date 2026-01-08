@@ -304,6 +304,203 @@ void describe('Union Types', () => {
 })
 
 // =============================================================================
+// COMPLEX TYPE SCENARIOS
+// =============================================================================
+
+void describe('Complex Type Scenarios', () => {
+  void test('discriminated union with never property', async () => {
+    // This is a common pattern where one variant has a property that can never exist
+    // The validator should handle this correctly - never properties generate 'false'
+    await transformAndCheck(
+      `type Result<T> =
+        | { success: true; data: T; error: never }
+        | { success: false; data: never; error: string };
+      function handleResult(result: Result<number>): void {}`,
+      ['true === input.success', 'false === input.success', '&& false'], // 'never' becomes 'false'
+    )
+  })
+
+  void test('discriminated union with literal discriminant', async () => {
+    // Classic discriminated union pattern - uses _io helpers
+    await transformAndCheck(
+      `type Action =
+        | { type: 'increment'; amount: number }
+        | { type: 'decrement'; amount: number }
+        | { type: 'reset' };
+      function dispatch(action: Action): void {}`,
+      ['"increment" === input.type', '"decrement" === input.type', '"reset" === input.type'],
+    )
+  })
+
+  void test('nested discriminated unions', async () => {
+    // Discriminated union inside another discriminated union
+    await transformAndCheck(
+      `type Inner = { kind: 'a'; value: number } | { kind: 'b'; value: string };
+      type Outer = { type: 'x'; inner: Inner } | { type: 'y'; data: boolean };
+      function process(outer: Outer): void {}`,
+      ['"x" === input.type', '"y" === input.type'],
+    )
+  })
+
+  void test('union with shared and unique properties', async () => {
+    // Properties that exist in all variants vs some variants
+    await transformAndCheck(
+      `type Entity =
+        | { id: number; type: 'user'; email: string }
+        | { id: number; type: 'org'; domain: string };
+      function getEntity(e: Entity): void {}`,
+      ['"user" === input.type', '"org" === input.type', '"number" === typeof input.id'],
+    )
+  })
+
+  void test('recursive type', async () => {
+    // Self-referential type (like a tree structure)
+    // Uses reusable check function for recursion
+    await transformAndCheck(
+      `interface TreeNode {
+        value: number;
+        children: TreeNode[];
+      }
+      function traverse(node: TreeNode): void {}`,
+      ['_check_TreeNode', '"number" === typeof _v.value', 'Array.isArray(_v.children)'],
+    )
+  })
+
+  void test('mutually recursive types', async () => {
+    // Two types that reference each other
+    await transformAndCheck(
+      `interface Person {
+        name: string;
+        employer?: Company;
+      }
+      interface Company {
+        name: string;
+        employees: Person[];
+      }
+      function hire(company: Company, person: Person): void {}`,
+      ['_check_Company', '_check_Person', 'Array.isArray(_v.employees)'],
+    )
+  })
+
+  void test('deeply nested object type', async () => {
+    // Multiple levels of nesting - validates nested property paths
+    await transformAndCheck(
+      `interface Config {
+        server: {
+          host: string;
+          port: number;
+          ssl: {
+            enabled: boolean;
+          };
+        };
+      }
+      function loadConfig(config: Config): void {}`,
+      ['config.server.host', 'config.server.port', 'config.server.ssl'],
+    )
+  })
+
+  void test('union of object with null and undefined', async () => {
+    // Nullable object type - checks null/undefined first
+    await transformAndCheck(
+      `interface User { name: string; }
+      function getUser(user: User | null | undefined): void {}`,
+      ['null === user', 'undefined === user', '"string" === typeof'],
+    )
+  })
+
+  void test('keyof produces union of literal keys', async () => {
+    // Type with indexed property access
+    await transformAndCheck(
+      `interface User { name: string; age: number; }
+      function getKey(key: keyof User): void {}`,
+      ['"name" === key', '"age" === key'],
+    )
+  })
+
+  void test('tuple validates each position', async () => {
+    // Tuple type with specific positions
+    await transformAndCheck(
+      `type Pair = [string, number];
+      function usePair(pair: Pair): void {}`,
+      ['pair[0]', 'pair[1]', '"string" === typeof', '"number" === typeof'],
+    )
+  })
+
+  void test('intersection of interfaces validates all properties', async () => {
+    // Combining multiple interfaces - checks all properties
+    await transformAndCheck(
+      `interface Named { name: string; }
+      interface Aged { age: number; }
+      function describe(entity: Named & Aged): void {}`,
+      ['"string" === typeof entity.name', '"number" === typeof entity.age'],
+    )
+  })
+
+  void test('union of intersections', async () => {
+    // Complex combination - uses _io helpers
+    await transformAndCheck(
+      `interface Base { id: number; }
+      interface TypeA { type: 'a'; valueA: string; }
+      interface TypeB { type: 'b'; valueB: number; }
+      function process(item: (Base & TypeA) | (Base & TypeB)): void {}`,
+      ['"a" === input.type', '"b" === input.type', '"number" === typeof input.id'],
+    )
+  })
+
+  void test('generic constraints with extends', async () => {
+    // Generic with constraint - the constraint is erased at runtime but base properties remain
+    await transformAndCheck(
+      `interface HasId { id: number; }
+      function findById<T extends HasId>(items: T[], id: number): T | undefined {
+        return items.find(item => item.id === id);
+      }`,
+      ['Array.isArray(items)', '"number" === typeof id'],
+    )
+  })
+
+  void test('readonly properties still validated', async () => {
+    // Readonly should still be validated (it's a compile-time constraint)
+    await transformAndCheck(
+      `interface Immutable {
+        readonly id: number;
+        readonly name: string;
+      }
+      function freeze(obj: Immutable): void {}`,
+      ['"number" === typeof obj.id', '"string" === typeof obj.name'],
+    )
+  })
+
+  void test('optional vs required properties in union', async () => {
+    // Different optionality in union variants - uses _io helpers
+    await transformAndCheck(
+      `type Config =
+        | { mode: 'simple' }
+        | { mode: 'advanced'; timeout: number };
+      function configure(config: Config): void {}`,
+      ['"simple" === input.mode', '"advanced" === input.mode'],
+    )
+  })
+
+  void test('branded types validated as base type', async () => {
+    // Branded types using intersection - runtime check is just the base type
+    await transformAndCheck(
+      `type UserId = string & { readonly __brand: unique symbol };
+      function getUser(id: UserId): void {}`,
+      ['"string" === typeof id'],
+    )
+  })
+
+  void test('template literal type uses regex', async () => {
+    // Template literal types compile to regex patterns
+    await transformAndCheck(
+      `type Email = \`\${string}@\${string}.\${string}\`;
+      function sendEmail(email: Email): void {}`,
+      ['/^.*?@.*?\\..*?$/.test(email)'],
+    )
+  })
+})
+
+// =============================================================================
 // LITERAL TYPES
 // =============================================================================
 
@@ -1376,6 +1573,19 @@ void describe('JSON.parse Transformations', () => {
       { name: 'B', age: 2 },
     ])
   })
+
+  void test('JSON.parse assigned to property should be marked', async () => {
+    // When JSON.parse is assigned to a typed property, it should be transformed
+    await transformAndCheck(
+      `interface Address { street: string; city: string }
+      interface User { name: string; address: Address }
+      function updateAddress(user: User, json: string): User {
+        user.address = JSON.parse(json);
+        return user;
+      }`,
+      ['JSON.parse(json), "JSON.parse"', 'street', 'city'], // Should have filtering validator for the parse
+    )
+  })
 })
 
 // =============================================================================
@@ -2176,6 +2386,20 @@ void describe('Optimisations', () => {
     )
   })
 
+  void test('skip return - property access from validated variable', async () => {
+    // When a variable is assigned from a property of a validated param, return should skip
+    await transformAndCheck(
+      `interface Company { address: Address; }
+      interface Address { street: string; }
+      function getAddress(company: Company): Address {
+        const addr = company.address;
+        return addr;
+      }`,
+      ['/* already valid */'],
+      ['"return value"'],
+    )
+  })
+
   void test('typical-ignore comment skips validation', async () => {
     // @typical-ignore should skip validation entirely
     const result = await compiler.transformSource(
@@ -2200,6 +2424,50 @@ void describe('Optimisations', () => {
       }`,
       ['/* already valid */'], // Return validation skipped
       ['"return value"'], // No return validation
+    )
+  })
+
+  void test('property assignment from validated object DOES dirty (union edge case)', async () => {
+    // Assigning a property from another validated object SHOULD dirty
+    // because discriminated unions could have different constraints per variant
+    // e.g. type Company = { name: 'acme', ... } | { name: 'corp', ... }
+    await transformAndCheck(
+      `interface Address { street: string; }
+      interface Company { address: Address; }
+      function copyAddress(company1: Company, company2: Company): Company {
+        company1.address = company2.address;
+        return company1;
+      }`,
+      ['"return value"'], // Return validation required - company1 was dirtied
+    )
+  })
+
+  void test('property assignment from JSON.parse does not dirty', async () => {
+    // Assigning JSON.parse result to a property should not dirty the parent
+    // because the parsed value is filtered/validated
+    await transformAndCheck(
+      `interface Address { street: string; }
+      interface User { address: Address; }
+      function updateAddress(user: User, json: string): User {
+        user.address = JSON.parse(json);
+        return user;
+      }`,
+      ['/* already valid */'], // Return validation skipped - user still valid
+      ['"return value"'], // No return validation
+    )
+  })
+
+  void test('property assignment from literal DOES dirty (union edge case)', async () => {
+    // Assigning a literal to a property SHOULD dirty the parent
+    // because literals might not satisfy literal type constraints in discriminated unions
+    // e.g. type User = { name: 'elliot' } | { name: 'darlene' }
+    await transformAndCheck(
+      `interface Company { name: string; }
+      function rename(company: Company): Company {
+        company.name = 'something';
+        return company;
+      }`,
+      ['"return value"'], // Return validation required - company was dirtied
     )
   })
 })

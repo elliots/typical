@@ -283,6 +283,21 @@ function getName(user: User): string {
 			},
 		},
 		{
+			name: "skip return - property assigned to variable",
+			input: `interface Company { address: Address; }
+interface Address { street: string; }
+function getAddress(company: Company): Address {
+	const addr = company.address;
+	return addr;
+}`,
+			expectedParts: []string{
+				`/* already valid */`, // Skip - addr inherits validation from company.address
+			},
+			unexpectedParts: []string{
+				`"return value"`,
+			},
+		},
+		{
 			name: "must validate - variable reassigned",
 			input: `function reassigned(x: string): string {
 	x = "new";

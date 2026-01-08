@@ -17,12 +17,12 @@ Shows runtime validation indicators for TypeScript projects using [Typical](http
 
 ## Settings
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `typical.enabled` | `true` | Enable/disable validation indicators |
-| `typical.showInlayHints` | `false` | Show inlay hints for validated items |
-| `typical.validatedColor` | `#4CAF50` | Colour for validated items (green) |
-| `typical.skippedColor` | `#9E9E9E` | Colour for skipped items (grey) |
+| Setting                  | Default   | Description                          |
+| ------------------------ | --------- | ------------------------------------ |
+| `typical.enabled`        | `true`    | Enable/disable validation indicators |
+| `typical.showInlayHints` | `false`   | Show inlay hints for validated items |
+| `typical.validatedColor` | `#4CAF50` | Colour for validated items (green)   |
+| `typical.skippedColor`   | `#9E9E9E` | Colour for skipped items (grey)      |
 
 ## Commands
 

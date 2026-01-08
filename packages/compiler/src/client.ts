@@ -16,17 +16,7 @@ function debugLog(...args: unknown[]): void {
 }
 
 function getBinaryPath(): string {
-  // try local binary first (for development)
-  const localBinPath = join(__dirname, '..', 'bin', 'typical')
-  try {
-    require('fs').accessSync(localBinPath)
-    debugLog(`[CLIENT] Using local binary at ${localBinPath}`)
-    return localBinPath
-  } catch {
-    // continue to platform-specific package
-  }
-
-  // Then use platform-specific package
+  // Find platform-specific package
   const platform = process.platform // darwin, linux, win32
   const arch = process.arch // arm64, x64
   const pkgName = `@elliots/typical-compiler-${platform}-${arch}`
@@ -134,12 +124,7 @@ export class TypicalCompiler {
    * @param ignoreTypes - Optional glob patterns for types to skip
    * @returns Analysis result with validation items
    */
-  async analyseFile(
-    project: ProjectHandle | string,
-    fileName: string,
-    content?: string,
-    ignoreTypes?: string[],
-  ): Promise<AnalyseResult> {
+  async analyseFile(project: ProjectHandle | string, fileName: string, content?: string, ignoreTypes?: string[]): Promise<AnalyseResult> {
     const projectId = typeof project === 'string' ? project : project.id
     return this.request<AnalyseResult>('analyseFile', {
       project: projectId,

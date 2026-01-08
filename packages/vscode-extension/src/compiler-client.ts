@@ -34,21 +34,9 @@ export function findBinary(workspaceRoot: string): string | null {
   // Paths to check in order of preference
   const candidates = [
     // Standard node_modules location (published packages)
-    join(
-      workspaceRoot,
-      'node_modules',
-      `@elliots/typical-compiler-${platform}-${arch}`,
-      'bin',
-      binaryName
-    ),
+    join(workspaceRoot, 'node_modules', `@elliots/typical-compiler-${platform}-${arch}`, 'bin', binaryName),
     // Monorepo development: packages/compiler-{platform}-{arch}/bin/typical
-    join(
-      workspaceRoot,
-      'packages',
-      `compiler-${platform}-${arch}`,
-      'bin',
-      binaryName
-    ),
+    join(workspaceRoot, 'packages', `compiler-${platform}-${arch}`, 'bin', binaryName),
     // Monorepo development: packages/compiler/bin/typical (local build)
     join(workspaceRoot, 'packages', 'compiler', 'bin', binaryName),
   ]
@@ -97,16 +85,13 @@ export function hasTypicalDependency(workspaceRoot: string): boolean {
  */
 export class CompilerClient {
   private process: ChildProcess | null = null
-  private pendingRequests: Map<
-    string,
-    { resolve: (value: unknown) => void; reject: (error: Error) => void }
-  > = new Map()
+  private pendingRequests: Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }> = new Map()
   private buffer: Buffer = Buffer.alloc(0)
   private nextRequestId = 0
 
   constructor(
     private binaryPath: string,
-    private cwd: string
+    private cwd: string,
   ) {}
 
   async start(): Promise<void> {
@@ -125,11 +110,11 @@ export class CompilerClient {
       this.handleData(data)
     })
 
-    this.process.on('error', (err) => {
+    this.process.on('error', err => {
       console.error('Typical compiler process error:', err)
     })
 
-    this.process.on('exit', (code) => {
+    this.process.on('exit', code => {
       debugLog('Compiler exited with code:', code)
       this.process = null
       // Reject any pending requests
@@ -167,12 +152,7 @@ export class CompilerClient {
     return this.request<ProjectHandle>('loadProject', { configFileName })
   }
 
-  async analyseFile(
-    project: ProjectHandle | string,
-    fileName: string,
-    content?: string,
-    ignoreTypes?: string[]
-  ): Promise<AnalyseResult> {
+  async analyseFile(project: ProjectHandle | string, fileName: string, content?: string, ignoreTypes?: string[]): Promise<AnalyseResult> {
     const projectId = typeof project === 'string' ? project : project.id
     return this.request<AnalyseResult>('analyseFile', {
       project: projectId,
@@ -182,11 +162,7 @@ export class CompilerClient {
     })
   }
 
-  async transformFile(
-    project: ProjectHandle | string,
-    fileName: string,
-    content?: string
-  ): Promise<TransformResult> {
+  async transformFile(project: ProjectHandle | string, fileName: string, content?: string): Promise<TransformResult> {
     const projectId = typeof project === 'string' ? project : project.id
     return this.request<TransformResult>('transformFile', {
       project: projectId,
@@ -356,10 +332,7 @@ export class CompilerClient {
     return { messageType, method, payload, bytesConsumed: offset }
   }
 
-  private readBin(
-    buf: Buffer,
-    offset: number
-  ): { data: Buffer; newOffset: number } | null {
+  private readBin(buf: Buffer, offset: number): { data: Buffer; newOffset: number } | null {
     if (offset >= buf.length) return null
 
     const marker = buf[offset++]

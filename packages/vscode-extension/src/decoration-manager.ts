@@ -52,7 +52,7 @@ export class DecorationManager {
         item.startLine - 1, // Convert to 0-based
         item.startColumn,
         item.endLine - 1,
-        item.endColumn
+        item.endColumn,
       )
 
       const decoration: vscode.DecorationOptions = {
@@ -96,9 +96,7 @@ export class DecorationManager {
    * Update configuration and recreate decoration types if colours changed.
    */
   updateConfig(config: TypicalConfig): void {
-    const coloursChanged =
-      config.validatedColor !== this.config.validatedColor ||
-      config.skippedColor !== this.config.skippedColor
+    const coloursChanged = config.validatedColor !== this.config.validatedColor || config.skippedColor !== this.config.skippedColor
 
     this.config = config
 

@@ -137,6 +137,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 		TransformJSONStringify: config.TransformJSONStringify,
 		IgnoreTypes:            config.IgnoreTypes,
 		PureFunctions:          config.PureFunctions,
+		TrustedFunctions:       config.TrustedFunctions,
 	}
 	analyseResult := analyse.AnalyseFile(sourceFile, c, program, analyseConfig)
 
@@ -1097,6 +1098,60 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 							castType := checker.Checker_getTypeFromTypeNode(c, asExpr.Type)
 							if castType != nil && !shouldSkipType(castType) && !shouldSkipComplexType(castType, c) {
 								ctx.validated[varName] = append(ctx.validated[varName], castType)
+							}
+						}
+					}
+				}
+			}
+
+		case ast.KindBinaryExpression:
+			// Handle: x.prop = JSON.parse(string) or x = JSON.parse(string)
+			bin := node.AsBinaryExpression()
+			if bin == nil || bin.OperatorToken.Kind != ast.KindEqualsToken {
+				break
+			}
+
+			// Check if RHS is JSON.parse call
+			if config.TransformJSONParse && bin.Right.Kind == ast.KindCallExpression {
+				callExpr := bin.Right.AsCallExpression()
+				if callExpr != nil {
+					methodName, isJSON := getJSONMethodName(callExpr)
+					if isJSON && methodName == "parse" {
+						// Get target type from the LHS
+						targetType := checker.Checker_GetTypeAtLocation(c, bin.Left)
+						if targetType != nil && !shouldSkipType(targetType) && !shouldSkipComplexType(targetType, c) {
+							if callExpr.Arguments != nil && len(callExpr.Arguments.Nodes) > 0 {
+								arg := callExpr.Arguments.Nodes[0]
+								argText := text[arg.Pos():arg.End()]
+
+								if shouldUseReusableFilter(targetType, nil) {
+									// Use reusable filter function (type is used more than once)
+									typeName := getTypeNameWithChecker(targetType, c)
+									if typeName == "" {
+										typeName = "value"
+									}
+									filterFuncName := getOrCreateFilterFunction(targetType, nil, typeName)
+									if filterFuncName != "" {
+										// Generate: ((_f = _filter_X(JSON.parse(arg)))[0] !== null ? (() => { throw ... })() : _f[1])
+										insertions = append(insertions, insertion{
+											pos:       bin.Right.Pos(),
+											text:      fmt.Sprintf(`((_f = %s(JSON.parse(%s)))[0] !== null ? (() => { throw new TypeError(_f[0].replace(/%%n/g, "JSON.parse")); })() : _f[1])`, filterFuncName, argText),
+											sourcePos: bin.Left.Pos(),
+											skipTo:    bin.Right.End(),
+										})
+										return false
+									}
+								}
+								// Fallback to inline filter validator
+								filteringValidator := gen.GenerateFilteringValidator(targetType, "")
+								// Replace the JSON.parse call with filtered version
+								insertions = append(insertions, insertion{
+									pos:       bin.Right.Pos(),
+									text:      filteringValidator + "(JSON.parse(" + argText + `), "JSON.parse")`,
+									sourcePos: bin.Left.Pos(),
+									skipTo:    bin.Right.End(),
+								})
+								return false
 							}
 						}
 					}

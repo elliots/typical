@@ -27,6 +27,7 @@ export interface NestedUser {
 
 // Typical validation
 export function validateNestedUser(user: NestedUser): NestedUser {
+  user.address1 = JSON.parse(`{street: "${user.address1.street}", city: "${user.address1.city}", country: "${user.address1.country}", zip: "${user.address1.zip}"}`)
   return user
 }
 
@@ -34,10 +35,12 @@ export function validateCompany(company1: Company, company2: Company): Company {
   console.log('Company 1:', JSON.stringify(company1))
   console.log('Company 2:', JSON.stringify(company2))
 
-  const x: Company = JSON.parse(`{name: "${company1.name}", address: {street: "${company1.address.street}", city: "${company1.address.city}", country: "${company1.address.country}", zip: "${company1.address.zip}"}, website: "${company1.website}"}`)
+  const x: Company = JSON.parse(
+    `{name: "${company1.name}", address: {street: "${company1.address.street}", city: "${company1.address.city}", country: "${company1.address.country}", zip: "${company1.address.zip}"}, website: "${company1.website}"}`,
+  )
   return company1
 }
- 
+
 // Test data
 export const testNestedUser: NestedUser = {
   name: 'Bob',
@@ -87,7 +90,7 @@ export function parseUserCast(json: string): unknown {
 }
 
 export function stringifyCompany(company: Company): string {
-  return JSON.stringify(company) as string // Should be marked - stringify cast
+  return JSON.stringify(company) // Should be marked - stringify cast
 }
 
 export function parseWithCast2(json: string): Company {

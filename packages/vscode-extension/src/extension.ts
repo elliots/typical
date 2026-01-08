@@ -33,7 +33,7 @@ function getConfig(): TypicalConfig {
     validatedColor: config.get('validatedColor', '#4CAF50'),
     skippedColor: config.get('skippedColor', '#9E9E9E'),
   }
-} 
+}
 
 function log(message: string): void {
   outputChannel.appendLine(`[${new Date().toISOString()}] ${message}`)
@@ -114,9 +114,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const binaryPath = findBinary(workspaceRoot)
   if (!binaryPath) {
     log('Typical compiler binary not found in node_modules')
-    vscode.window.showWarningMessage(
-      'Typical: Compiler binary not found. Run `npm install` to install dependencies.'
-    )
+    vscode.window.showWarningMessage('Typical: Compiler binary not found. Run `npm install` to install dependencies.')
     return
   }
 
@@ -134,9 +132,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const hoverProvider = new HoverProvider(decorationManager)
   context.subscriptions.push(
     vscode.languages.registerHoverProvider(
-      [{ scheme: 'file', language: 'typescript' }, { scheme: 'file', language: 'typescriptreact' }],
-      hoverProvider
-    )
+      [
+        { scheme: 'file', language: 'typescript' },
+        { scheme: 'file', language: 'typescriptreact' },
+      ],
+      hoverProvider,
+    ),
   )
 
   // Create inlay hints provider
@@ -144,16 +145,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   inlayHintsProvider.setEnabled(config.showInlayHints)
   context.subscriptions.push(
     vscode.languages.registerInlayHintsProvider(
-      [{ scheme: 'file', language: 'typescript' }, { scheme: 'file', language: 'typescriptreact' }],
-      inlayHintsProvider
-    )
+      [
+        { scheme: 'file', language: 'typescript' },
+        { scheme: 'file', language: 'typescriptreact' },
+      ],
+      inlayHintsProvider,
+    ),
   )
 
   // Create preview provider for compiled output
   previewProvider = new PreviewProvider()
-  context.subscriptions.push(
-    vscode.workspace.registerTextDocumentContentProvider(PREVIEW_SCHEME, previewProvider)
-  )
+  context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(PREVIEW_SCHEME, previewProvider))
   context.subscriptions.push({ dispose: () => previewProvider?.dispose() })
 
   // Start the compiler
@@ -172,10 +174,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const config = vscode.workspace.getConfiguration('typical')
       const current = config.get('enabled', true)
       config.update('enabled', !current, vscode.ConfigurationTarget.Workspace)
-      vscode.window.showInformationMessage(
-        `Typical indicators ${!current ? 'enabled' : 'disabled'}`
-      )
-    })
+      vscode.window.showInformationMessage(`Typical indicators ${!current ? 'enabled' : 'disabled'}`)
+    }),
   )
 
   context.subscriptions.push(
@@ -185,7 +185,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await analyseAndDecorate(editor)
         vscode.window.showInformationMessage('Typical: File refreshed')
       }
-    })
+    }),
   )
 
   context.subscriptions.push(
@@ -198,12 +198,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
       const filePath = editor.document.uri.fsPath
       await openPreview(filePath, editor.document.getText())
-    })
+    }),
   )
 
   // Listen for configuration changes
   context.subscriptions.push(
-    vscode.workspace.onDidChangeConfiguration((e) => {
+    vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration('typical')) {
         const newConfig = getConfig()
         decorationManager?.updateConfig(newConfig)
@@ -215,40 +215,36 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           analyseAndDecorate(editor)
         }
       }
-    })
+    }),
   )
 
   // Listen for active editor changes
   context.subscriptions.push(
-    vscode.window.onDidChangeActiveTextEditor((editor) => {
+    vscode.window.onDidChangeActiveTextEditor(editor => {
       if (editor && isTypescriptFile(editor.document)) {
         analyseAndDecorate(editor)
       }
-    })
+    }),
   )
 
   // Listen for document saves
   context.subscriptions.push(
-    vscode.workspace.onDidSaveTextDocument((document) => {
+    vscode.workspace.onDidSaveTextDocument(document => {
       if (isTypescriptFile(document)) {
-        const editor = vscode.window.visibleTextEditors.find(
-          (e) => e.document.uri.fsPath === document.uri.fsPath
-        )
+        const editor = vscode.window.visibleTextEditors.find(e => e.document.uri.fsPath === document.uri.fsPath)
         if (editor) {
           analyseAndDecorateDebounced(editor)
         }
       }
-    })
+    }),
   )
 
   // Listen for document changes (debounced)
   context.subscriptions.push(
-    vscode.workspace.onDidChangeTextDocument((e) => {
+    vscode.workspace.onDidChangeTextDocument(e => {
       if (isTypescriptFile(e.document)) {
         const filePath = e.document.uri.fsPath
-        const editor = vscode.window.visibleTextEditors.find(
-          (e2) => e2.document.uri.fsPath === filePath
-        )
+        const editor = vscode.window.visibleTextEditors.find(e2 => e2.document.uri.fsPath === filePath)
         if (editor) {
           analyseAndDecorateDebounced(editor)
         }
@@ -257,19 +253,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           updatePreviewDebounced(filePath, e.document.getText())
         }
       }
-    })
+    }),
   )
 
   // Clean up preview tracking when preview documents are closed
   context.subscriptions.push(
-    vscode.workspace.onDidCloseTextDocument((doc) => {
+    vscode.workspace.onDidCloseTextDocument(doc => {
       if (doc.uri.scheme === PREVIEW_SCHEME) {
         const filePath = doc.uri.path
         activePreviewFiles.delete(filePath)
         previewProvider?.clear(filePath)
         log(`Preview closed for ${filePath}`)
       }
-    })
+    }),
   )
 
   // Analyse the current editor
@@ -302,10 +298,7 @@ function isTypescriptFile(document: vscode.TextDocument): boolean {
   if (document.uri.scheme === PREVIEW_SCHEME) {
     return false
   }
-  return (
-    document.languageId === 'typescript' ||
-    document.languageId === 'typescriptreact'
-  )
+  return document.languageId === 'typescript' || document.languageId === 'typescriptreact'
 }
 
 function analyseAndDecorateDebounced(editor: vscode.TextEditor): void {

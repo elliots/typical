@@ -1,28 +1,34 @@
 {
   "name": "typical-vscode",
   "displayName": "Typical",
-  "description": "Shows runtime validation indicators for Typical TypeScript projects",
   "version": "0.0.1",
-  "publisher": "elliots",
-  "license": "MIT",
-  "engines": {
-    "vscode": "^1.85.0"
-  },
+  "description": "Shows runtime validation indicators for Typical TypeScript projects",
   "categories": [
-    "Programming Languages",
-    "Linters"
+    "Linters",
+    "Programming Languages"
   ],
   "keywords": [
+    "runtime",
     "typescript",
-    "validation",
     "typical",
-    "runtime"
+    "validation"
   ],
-  "activationEvents": [
-    "onLanguage:typescript",
-    "onLanguage:typescriptreact"
-  ],
+  "license": "MIT",
+  "publisher": "elliots",
   "main": "./dist/extension.js",
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --sourcemap --watch",
+    "package": "vsce package",
+    "dev-install": "pnpm run build && vsce package && code-insiders --install-extension typical-vscode-0.0.1.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.7.0"
+  },
   "contributes": {
     "configuration": {
       "title": "Typical",
@@ -64,17 +70,11 @@
       }
     ]
   },
-  "scripts": {
-    "vscode:prepublish": "npm run build",
-    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify",
-    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --sourcemap --watch",
-    "package": "vsce package",
-    "dev-install": "pnpm run build && vsce package && code-insiders --install-extension typical-vscode-0.0.1.vsix"
-  },
-  "devDependencies": {
-    "@types/node": "^20.10.0",
-    "@types/vscode": "^1.85.0",
-    "esbuild": "^0.20.0",
-    "typescript": "^5.7.0"
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
   }
 }
