@@ -5,14 +5,20 @@ import { CompilerClient, findBinary, hasTypicalDependency } from './compiler-cli
 import { DecorationManager } from './decoration-manager'
 import { HoverProvider } from './hover-provider'
 import { InlayHintsProvider } from './inlay-hints'
+import { PreviewProvider, PREVIEW_SCHEME } from './preview-provider'
 import type { TypicalConfig, ProjectHandle } from './types'
 
 let client: CompilerClient | null = null
 let decorationManager: DecorationManager | null = null
 let inlayHintsProvider: InlayHintsProvider | null = null
+let previewProvider: PreviewProvider | null = null
 let debounceTimer: NodeJS.Timeout | null = null
+let previewDebounceTimer: NodeJS.Timeout | null = null
 let outputChannel: vscode.OutputChannel
 let workspaceRoot: string = ''
+
+// Track which files have an open preview
+const activePreviewFiles = new Set<string>()
 
 // Cache of tsconfig path -> project handle
 const projectCache: Map<string, ProjectHandle> = new Map()
@@ -143,6 +149,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     )
   )
 
+  // Create preview provider for compiled output
+  previewProvider = new PreviewProvider()
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(PREVIEW_SCHEME, previewProvider)
+  )
+  context.subscriptions.push({ dispose: () => previewProvider?.dispose() })
+
   // Start the compiler
   try {
     await client.start()
@@ -172,6 +185,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await analyseAndDecorate(editor)
         vscode.window.showInformationMessage('Typical: File refreshed')
       }
+    })
+  )
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('typical.openPreview', async () => {
+      const editor = vscode.window.activeTextEditor
+      if (!editor || !isTypescriptFile(editor.document)) {
+        vscode.window.showWarningMessage('Typical: Open a TypeScript file first')
+        return
+      }
+
+      const filePath = editor.document.uri.fsPath
+      await openPreview(filePath, editor.document.getText())
     })
   )
 
@@ -219,12 +245,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument((e) => {
       if (isTypescriptFile(e.document)) {
+        const filePath = e.document.uri.fsPath
         const editor = vscode.window.visibleTextEditors.find(
-          (e2) => e2.document.uri.fsPath === e.document.uri.fsPath
+          (e2) => e2.document.uri.fsPath === filePath
         )
         if (editor) {
           analyseAndDecorateDebounced(editor)
         }
+        // Update preview if open for this file
+        if (activePreviewFiles.has(filePath)) {
+          updatePreviewDebounced(filePath, e.document.getText())
+        }
+      }
+    })
+  )
+
+  // Clean up preview tracking when preview documents are closed
+  context.subscriptions.push(
+    vscode.workspace.onDidCloseTextDocument((doc) => {
+      if (doc.uri.scheme === PREVIEW_SCHEME) {
+        const filePath = doc.uri.path
+        activePreviewFiles.delete(filePath)
+        previewProvider?.clear(filePath)
+        log(`Preview closed for ${filePath}`)
       }
     })
   )
@@ -255,6 +298,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 function isTypescriptFile(document: vscode.TextDocument): boolean {
+  // Exclude preview documents to avoid infinite loops
+  if (document.uri.scheme === PREVIEW_SCHEME) {
+    return false
+  }
   return (
     document.languageId === 'typescript' ||
     document.languageId === 'typescriptreact'
@@ -268,6 +315,63 @@ function analyseAndDecorateDebounced(editor: vscode.TextEditor): void {
   debounceTimer = setTimeout(() => {
     analyseAndDecorate(editor)
   }, DEBOUNCE_MS)
+}
+
+function updatePreviewDebounced(filePath: string, content: string): void {
+  if (previewDebounceTimer) {
+    clearTimeout(previewDebounceTimer)
+  }
+  previewDebounceTimer = setTimeout(() => {
+    updatePreview(filePath, content)
+  }, DEBOUNCE_MS)
+}
+
+async function openPreview(filePath: string, content: string): Promise<void> {
+  if (!client || !client.isRunning() || !previewProvider) {
+    return
+  }
+
+  // Track this file as having an open preview
+  activePreviewFiles.add(filePath)
+
+  // Transform and update preview
+  await updatePreview(filePath, content)
+
+  // Open the virtual document
+  const previewUri = vscode.Uri.parse(`${PREVIEW_SCHEME}:${filePath}`)
+  const doc = await vscode.workspace.openTextDocument(previewUri)
+  await vscode.window.showTextDocument(doc, {
+    viewColumn: vscode.ViewColumn.Beside,
+    preserveFocus: true,
+    preview: false,
+  })
+}
+
+async function updatePreview(filePath: string, content: string): Promise<void> {
+  if (!client || !client.isRunning() || !previewProvider) {
+    return
+  }
+
+  // Only update if this file has an active preview
+  if (!activePreviewFiles.has(filePath)) {
+    return
+  }
+
+  const projectHandle = await getProjectForFile(filePath)
+  if (!projectHandle) {
+    previewProvider.setError(filePath, 'No TypeScript project found')
+    return
+  }
+
+  try {
+    log(`Transforming ${filePath} for preview...`)
+    const result = await client.transformFile(projectHandle, filePath, content)
+    previewProvider.update(filePath, result.code)
+    log(`Preview updated for ${filePath}`)
+  } catch (err) {
+    log(`Transform failed for ${filePath}: ${err}`)
+    previewProvider.setError(filePath, String(err))
+  }
 }
 
 async function analyseAndDecorate(editor: vscode.TextEditor): Promise<void> {

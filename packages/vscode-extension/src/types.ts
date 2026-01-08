@@ -36,3 +36,8 @@ export interface TypicalConfig {
   validatedColor: string
   skippedColor: string
 }
+
+export interface TransformResult {
+  code: string
+  sourceMap?: unknown
+}

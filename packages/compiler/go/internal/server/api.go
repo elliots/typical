@@ -96,11 +96,11 @@ func (a *API) LoadProject(configFileName string) (*ProjectResponse, error) {
 	}, nil
 }
 
-func (a *API) TransformFile(projectId, fileName string, ignoreTypes []string, maxGeneratedFunctions int, reusableValidators *string) (*TransformResponse, error) {
-	debugf("[DEBUG] TransformFile called: project=%s file=%s ignoreTypes=%v maxFuncs=%d reusable=%v\n", projectId, fileName, ignoreTypes, maxGeneratedFunctions, reusableValidators)
+func (a *API) TransformFile(projectId, fileName, content string, ignoreTypes []string, maxGeneratedFunctions int, reusableValidators *string) (*TransformResponse, error) {
+	debugf("[DEBUG] TransformFile called: project=%s file=%s contentLen=%d ignoreTypes=%v maxFuncs=%d reusable=%v\n", projectId, fileName, len(content), ignoreTypes, maxGeneratedFunctions, reusableValidators)
 
 	a.mu.Lock()
-	info, ok := a.projects[projectId]
+	_, ok := a.projects[projectId]
 	a.mu.Unlock()
 
 	if !ok {
@@ -110,8 +110,52 @@ func (a *API) TransformFile(projectId, fileName string, ignoreTypes []string, ma
 	fileName = a.toAbsolutePath(fileName)
 	debugf("[DEBUG] Absolute path: %s\n", fileName)
 
+	ctx := context.Background()
+
+	// Build URI for the file
+	uri := lsproto.DocumentUri("file://" + fileName)
+
+	// If content is provided, update the file overlay in the session
+	if content != "" {
+		// Increment version for this file
+		a.mu.Lock()
+		a.fileVersions[fileName]++
+		version := a.fileVersions[fileName]
+		isOpen := a.openFiles[fileName]
+		a.mu.Unlock()
+
+		if !isOpen {
+			// First time seeing this file - use DidOpenFile to create the overlay
+			debugf("[DEBUG] Calling DidOpenFile with URI: %s, version: %d, contentLen: %d\n", uri, version, len(content))
+			project.Session_DidOpenFile(a.session, ctx, uri, version, content, lsproto.LanguageKindTypeScript)
+
+			a.mu.Lock()
+			a.openFiles[fileName] = true
+			a.mu.Unlock()
+			debugf("[DEBUG] Opened file overlay for %s\n", fileName)
+		} else {
+			// File already open - use DidChangeFile with a whole document change
+			changes := []lsproto.TextDocumentContentChangePartialOrWholeDocument{
+				{
+					WholeDocument: &lsproto.TextDocumentContentChangeWholeDocument{
+						Text: content,
+					},
+				},
+			}
+			debugf("[DEBUG] Calling DidChangeFile with URI: %s, version: %d, contentLen: %d\n", uri, version, len(content))
+			project.Session_DidChangeFile(a.session, ctx, uri, version, changes)
+			debugf("[DEBUG] Updated file overlay for %s\n", fileName)
+		}
+	}
+
+	// Use GetLanguageServiceAndProjectsForFile for fresh program with overlay
+	proj, _, _, err := project.Session_GetLanguageServiceAndProjectsForFile(a.session, ctx, uri)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get project for file: %w", err)
+	}
+
 	debugf("[DEBUG] Getting program...\n")
-	program := info.project.GetProgram()
+	program := proj.GetProgram()
 	debugf("[DEBUG] Got program\n")
 
 	sourceFile := program.GetSourceFile(fileName)
@@ -120,7 +164,6 @@ func (a *API) TransformFile(projectId, fileName string, ignoreTypes []string, ma
 	}
 	debugf("[DEBUG] Got source file\n")
 
-	ctx := context.Background()
 	debugf("[DEBUG] Getting type checker...\n")
 	checker, release := program.GetTypeChecker(ctx)
 	defer release()

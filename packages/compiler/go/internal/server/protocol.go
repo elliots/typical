@@ -74,6 +74,7 @@ type ProjectResponse struct {
 type TransformFileParams struct {
 	Project               string   `json:"project"`
 	FileName              string   `json:"fileName"`
+	Content               string   `json:"content,omitempty"`               // Optional: file content for live preview
 	IgnoreTypes           []string `json:"ignoreTypes,omitempty"`           // Glob patterns for types to skip
 	MaxGeneratedFunctions int      `json:"maxGeneratedFunctions,omitempty"` // Max helper functions before error (0 = default 50)
 	ReusableValidators    *string  `json:"reusableValidators,omitempty"`    // "auto" (default), "never", or "always"

@@ -57,6 +57,10 @@
       {
         "command": "typical.refreshFile",
         "title": "Typical: Refresh Current File"
+      },
+      {
+        "command": "typical.openPreview",
+        "title": "Typical: Preview Compiled Output"
       }
     ]
   },

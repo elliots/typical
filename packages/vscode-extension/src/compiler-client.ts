@@ -1,7 +1,7 @@
 import { spawn, ChildProcess } from 'node:child_process'
 import { join } from 'node:path'
 import { existsSync, accessSync } from 'node:fs'
-import type { ProjectHandle, AnalyseResult } from './types'
+import type { ProjectHandle, AnalyseResult, TransformResult } from './types'
 
 const debug = process.env.DEBUG === '1'
 
@@ -179,6 +179,19 @@ export class CompilerClient {
       fileName,
       content,
       ignoreTypes,
+    })
+  }
+
+  async transformFile(
+    project: ProjectHandle | string,
+    fileName: string,
+    content?: string
+  ): Promise<TransformResult> {
+    const projectId = typeof project === 'string' ? project : project.id
+    return this.request<TransformResult>('transformFile', {
+      project: projectId,
+      fileName,
+      content,
     })
   }
 
