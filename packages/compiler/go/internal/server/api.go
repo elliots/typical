@@ -323,6 +323,7 @@ func (a *API) AnalyseFile(projectId, fileName, content string, ignoreTypes []str
 		TransformJSONParse:     true,
 		TransformJSONStringify: true,
 		IgnoreTypes:            transform.CompileIgnorePatterns(ignoreTypes),
+		PureFunctions:          transform.CompileIgnorePatterns([]string{"console.*", "JSON.stringify"}),
 	}
 
 	// Analyse the file

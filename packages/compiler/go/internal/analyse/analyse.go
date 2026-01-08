@@ -61,6 +61,7 @@ type Config struct {
 	TransformJSONParse     bool
 	TransformJSONStringify bool
 	IgnoreTypes            []*regexp.Regexp
+	PureFunctions          []*regexp.Regexp // Functions that don't mutate their arguments
 }
 
 // AnalyseFile performs a single AST pass over the source file.
@@ -584,12 +585,280 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 		return false
 	}
 
-	// Track function context for return type analysis
+	// Track function context for return type analysis and validated variables
 	type funcContext struct {
 		returnType *ast.Node
 		isAsync    bool
+		validated  map[string][]*checker.Type // variables validated in this function
+		bodyStart  int                        // position where function body starts
+		bodyNode   *ast.Node                  // function body for dirty checking
 	}
 	var funcStack []*funcContext
+
+	// Declare recursive functions first
+	var getRootIdentifier func(expr *ast.Node) string
+	var getEntityName func(expr *ast.Node) string
+	var getValidatedType func(expr *ast.Node, validated map[string][]*checker.Type, targetType *checker.Type) (*checker.Type, bool)
+
+	// getRootIdentifier extracts the root variable name from an expression
+	getRootIdentifier = func(expr *ast.Node) string {
+		if expr == nil {
+			return ""
+		}
+		switch expr.Kind {
+		case ast.KindIdentifier:
+			return expr.AsIdentifier().Text
+		case ast.KindPropertyAccessExpression:
+			propAccess := expr.AsPropertyAccessExpression()
+			if propAccess != nil {
+				return getRootIdentifier(propAccess.Expression)
+			}
+		case ast.KindElementAccessExpression:
+			elemAccess := expr.AsElementAccessExpression()
+			if elemAccess != nil {
+				return getRootIdentifier(elemAccess.Expression)
+			}
+		}
+		return ""
+	}
+
+	// isIdentifierNamed checks if a node is an identifier with the given name
+	isIdentifierNamed := func(node *ast.Node, name string) bool {
+		if node == nil || node.Kind != ast.KindIdentifier {
+			return false
+		}
+		return node.AsIdentifier().Text == name
+	}
+
+	// getEntityName extracts full entity name for pure function matching (e.g. "console.log")
+	getEntityName = func(expr *ast.Node) string {
+		if expr == nil {
+			return ""
+		}
+		switch expr.Kind {
+		case ast.KindIdentifier:
+			return expr.AsIdentifier().Text
+		case ast.KindPropertyAccessExpression:
+			propAccess := expr.AsPropertyAccessExpression()
+			if propAccess == nil {
+				return ""
+			}
+			obj := getEntityName(propAccess.Expression)
+			nameNode := propAccess.Name()
+			if nameNode == nil {
+				return obj
+			}
+			prop := ""
+			if nameNode.Kind == ast.KindIdentifier {
+				prop = nameNode.AsIdentifier().Text
+			}
+			if obj != "" && prop != "" {
+				return obj + "." + prop
+			}
+			if prop != "" {
+				return prop
+			}
+			return obj
+		}
+		return ""
+	}
+
+	// getValidatedType checks if an expression is already validated
+	getValidatedType = func(expr *ast.Node, validated map[string][]*checker.Type, targetType *checker.Type) (*checker.Type, bool) {
+		if expr == nil || validated == nil {
+			return nil, false
+		}
+
+		switch expr.Kind {
+		case ast.KindIdentifier:
+			name := expr.AsIdentifier().Text
+			if types, ok := validated[name]; ok {
+				for _, t := range types {
+					if targetType == nil {
+						return t, true
+					}
+					if checker.Checker_isTypeAssignableTo(c, t, targetType) {
+						return t, true
+					}
+				}
+			}
+			return nil, false
+
+		case ast.KindPropertyAccessExpression:
+			propAccess := expr.AsPropertyAccessExpression()
+			if propAccess == nil {
+				return nil, false
+			}
+			parentType, ok := getValidatedType(propAccess.Expression, validated, nil)
+			if !ok {
+				return nil, false
+			}
+			propName := ""
+			nameNode := propAccess.Name()
+			if nameNode != nil && nameNode.Kind == ast.KindIdentifier {
+				propName = nameNode.AsIdentifier().Text
+			}
+			if propName == "" {
+				return nil, false
+			}
+			propSymbol := checker.Checker_getPropertyOfType(c, parentType, propName)
+			if propSymbol == nil {
+				return nil, false
+			}
+			propType := checker.Checker_getTypeOfSymbol(c, propSymbol)
+			if targetType == nil {
+				return propType, true
+			}
+			if checker.Checker_isTypeAssignableTo(c, propType, targetType) {
+				return propType, true
+			}
+			return nil, false
+
+		case ast.KindElementAccessExpression:
+			elemAccess := expr.AsElementAccessExpression()
+			if elemAccess == nil {
+				return nil, false
+			}
+			parentType, ok := getValidatedType(elemAccess.Expression, validated, nil)
+			if !ok {
+				return nil, false
+			}
+			if checker.Checker_isArrayType(c, parentType) {
+				typeArgs := checker.Checker_getTypeArguments(c, parentType)
+				if len(typeArgs) > 0 {
+					elemType := typeArgs[0]
+					if targetType == nil {
+						return elemType, true
+					}
+					if checker.Checker_isTypeAssignableTo(c, elemType, targetType) {
+						return elemType, true
+					}
+				}
+			}
+			return nil, false
+		}
+		return nil, false
+	}
+
+	// isDirty checks if a variable has been modified between two positions
+	isDirty := func(validated map[string][]*checker.Type, varName string, fromPos int, toPos int, bodyNode *ast.Node) bool {
+		if bodyNode == nil {
+			return false
+		}
+
+		// Get the validated type to determine if it's a primitive
+		var validatedType *checker.Type
+		if types, ok := validated[varName]; ok && len(types) > 0 {
+			validatedType = types[0]
+		}
+		varIsPrimitive := isPrimitiveType(validatedType)
+
+		dirty := false
+		leaked := false
+
+		var checkDirty func(n *ast.Node) bool
+		checkDirty = func(n *ast.Node) bool {
+			if dirty {
+				return false
+			}
+
+			pos := n.Pos()
+			if pos < fromPos || pos >= toPos {
+				n.ForEachChild(checkDirty)
+				return false
+			}
+
+			switch n.Kind {
+			case ast.KindBinaryExpression:
+				bin := n.AsBinaryExpression()
+				if bin != nil {
+					opKind := bin.OperatorToken.Kind
+					if opKind == ast.KindEqualsToken ||
+						opKind == ast.KindPlusEqualsToken ||
+						opKind == ast.KindMinusEqualsToken ||
+						opKind == ast.KindAsteriskEqualsToken ||
+						opKind == ast.KindSlashEqualsToken {
+						if isIdentifierNamed(bin.Left, varName) {
+							dirty = true
+							return false
+						}
+						if !varIsPrimitive && getRootIdentifier(bin.Left) == varName {
+							dirty = true
+							return false
+						}
+					}
+				}
+
+			case ast.KindCallExpression:
+				if varIsPrimitive {
+					break
+				}
+				call := n.AsCallExpression()
+				if call != nil && call.Arguments != nil {
+					isPure := false
+					if len(config.PureFunctions) > 0 {
+						funcName := getEntityName(call.Expression)
+						if funcName != "" {
+							for _, re := range config.PureFunctions {
+								if re.MatchString(funcName) {
+									isPure = true
+									break
+								}
+							}
+						}
+					}
+
+					if !isPure {
+						for _, arg := range call.Arguments.Nodes {
+							root := getRootIdentifier(arg)
+							if root == varName {
+								argType := checker.Checker_GetTypeAtLocation(c, arg)
+								if !isPrimitiveType(argType) {
+									leaked = true
+									dirty = true
+									return false
+								}
+							}
+						}
+					}
+				}
+
+			case ast.KindAwaitExpression:
+				if !varIsPrimitive && leaked {
+					dirty = true
+					return false
+				}
+
+			case ast.KindPrefixUnaryExpression:
+				prefix := n.AsPrefixUnaryExpression()
+				if prefix != nil {
+					if prefix.Operator == ast.KindPlusPlusToken || prefix.Operator == ast.KindMinusMinusToken {
+						if isIdentifierNamed(prefix.Operand, varName) {
+							dirty = true
+							return false
+						}
+					}
+				}
+
+			case ast.KindPostfixUnaryExpression:
+				postfix := n.AsPostfixUnaryExpression()
+				if postfix != nil {
+					if postfix.Operator == ast.KindPlusPlusToken || postfix.Operator == ast.KindMinusMinusToken {
+						if isIdentifierNamed(postfix.Operand, varName) {
+							dirty = true
+							return false
+						}
+					}
+				}
+			}
+
+			n.ForEachChild(checkDirty)
+			return false
+		}
+
+		bodyNode.ForEachChild(checkDirty)
+		return dirty
+	}
 
 	// Main visitor
 	var visit ast.Visitor
@@ -609,15 +878,44 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 				break
 			}
 
+			// Get function body for dirty checking
+			var bodyNode *ast.Node
+			var bodyStart int
+			switch node.Kind {
+			case ast.KindFunctionDeclaration:
+				if fd := node.AsFunctionDeclaration(); fd != nil && fd.Body != nil {
+					bodyNode = fd.Body
+					bodyStart = fd.Body.Pos()
+				}
+			case ast.KindFunctionExpression:
+				if fe := node.AsFunctionExpression(); fe != nil && fe.Body != nil {
+					bodyNode = fe.Body
+					bodyStart = fe.Body.Pos()
+				}
+			case ast.KindArrowFunction:
+				if af := node.AsArrowFunction(); af != nil && af.Body != nil {
+					bodyNode = af.Body
+					bodyStart = af.Body.Pos()
+				}
+			case ast.KindMethodDeclaration:
+				if md := node.AsMethodDeclaration(); md != nil && md.Body != nil {
+					bodyNode = md.Body
+					bodyStart = md.Body.Pos()
+				}
+			}
+
 			// Push function context
 			ctx := &funcContext{
 				returnType: getFunctionType(fn),
 				isAsync:    isFunctionAsync(fn),
+				validated:  make(map[string][]*checker.Type),
+				bodyStart:  bodyStart,
+				bodyNode:   bodyNode,
 			}
 			funcStack = append(funcStack, ctx)
 			defer func() { funcStack = funcStack[:len(funcStack)-1] }()
 
-			// Analyse parameters
+			// Analyse parameters and mark them as validated
 			if config.ValidateParameters {
 				for _, param := range getFunctionParameters(fn) {
 					if param.Type != nil {
@@ -628,6 +926,12 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 						}
 						// Only highlight the parameter name, not the type annotation
 						countCheck(paramType, param.Name(), param.Name(), "parameter", paramName)
+
+						// Mark parameter as validated (if it's not skipped)
+						skipReason := getSkipReason(paramType)
+						if skipReason == "" && paramName != "(destructured)" {
+							ctx.validated[paramName] = append(ctx.validated[paramName], paramType)
+						}
 					}
 				}
 			}
@@ -661,7 +965,8 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 					methodName, isJSON := getJSONMethodName(callExpr)
 					if isJSON && methodName == "parse" {
 						actualType := unwrapPromiseType(returnType, ctx.isAsync, c)
-						countFilter(actualType, ctx.returnType, returnStmt.Expression, "json-parse", "JSON.parse return")
+						// Highlight just "JSON.parse", pass nil for endNode so underline only covers "JSON.parse"
+						countFilter(actualType, nil, callExpr.Expression, "json-parse", "JSON.parse")
 						return false
 					}
 				}
@@ -670,8 +975,25 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 			// Regular return validation - highlight just the return expression
 			if config.ValidateReturns && returnType != nil {
 				actualType := unwrapPromiseType(returnType, ctx.isAsync, c)
-				// Use the expression for both start and end position (not the type annotation)
-				countCheck(actualType, returnStmt.Expression, returnStmt.Expression, "return", "return value")
+
+				// Check if the return expression is already validated and not dirty
+				skipValidation := false
+				if _, ok := getValidatedType(returnStmt.Expression, ctx.validated, actualType); ok {
+					rootVar := getRootIdentifier(returnStmt.Expression)
+					if rootVar != "" {
+						if !isDirty(ctx.validated, rootVar, ctx.bodyStart, node.Pos(), ctx.bodyNode) {
+							skipValidation = true
+						}
+					}
+				}
+
+				if skipValidation {
+					// Add as skipped with "already valid" reason
+					addValidationItem(returnStmt.Expression, returnStmt.Expression, "return", "return value", actualType, true, "already validated")
+				} else {
+					// Use the expression for both start and end position (not the type annotation)
+					countCheck(actualType, returnStmt.Expression, returnStmt.Expression, "return", "return value")
+				}
 			}
 
 		case ast.KindAsExpression:
@@ -710,11 +1032,26 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 					methodName, isJSON := getJSONMethodName(innerCall)
 					if isJSON {
 						if methodName == "parse" && config.TransformJSONParse {
-							countFilter(castType, asExpr.Type, node, "json-parse", "JSON.parse as "+typeText)
+							// Highlight just "JSON.parse", pass nil for endNode so underline only covers "JSON.parse"
+							countFilter(castType, nil, innerCall.Expression, "json-parse", "JSON.parse")
+
+							// Mark variable as validated if this is in a variable declaration
+							if node.Parent != nil && node.Parent.Kind == ast.KindVariableDeclaration {
+								varDecl := node.Parent.AsVariableDeclaration()
+								if varDecl != nil && varDecl.Name() != nil && varDecl.Name().Kind == ast.KindIdentifier && len(funcStack) > 0 {
+									varName := varDecl.Name().AsIdentifier().Text
+									ctx := funcStack[len(funcStack)-1]
+									skipReason := getSkipReason(castType)
+									if skipReason == "" {
+										ctx.validated[varName] = append(ctx.validated[varName], castType)
+									}
+								}
+							}
 							return false
 						}
 						if methodName == "stringify" && config.TransformJSONStringify {
-							countFilter(castType, asExpr.Type, node, "json-stringify", "JSON.stringify as "+typeText)
+							// Highlight just "JSON.stringify", pass nil for endNode so underline only covers "JSON.stringify"
+							countFilter(castType, nil, innerCall.Expression, "json-stringify", "JSON.stringify")
 							return false
 						}
 					}
@@ -726,13 +1063,26 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 				// Check if this cast is the initializer of a variable declaration
 				// If so, highlight the variable name instead of the whole cast
 				highlightNode := node
+				var varName string
 				if node.Parent != nil && node.Parent.Kind == ast.KindVariableDeclaration {
 					varDecl := node.Parent.AsVariableDeclaration()
 					if varDecl != nil && varDecl.Name() != nil {
 						highlightNode = varDecl.Name()
+						if varDecl.Name().Kind == ast.KindIdentifier {
+							varName = varDecl.Name().AsIdentifier().Text
+						}
 					}
 				}
 				countCheck(castType, highlightNode, highlightNode, "cast", exprText+" as "+typeText)
+
+				// Mark variable as validated (if it's a variable declaration with a cast)
+				if varName != "" && len(funcStack) > 0 {
+					ctx := funcStack[len(funcStack)-1]
+					skipReason := getSkipReason(castType)
+					if skipReason == "" {
+						ctx.validated[varName] = append(ctx.validated[varName], castType)
+					}
+				}
 			}
 
 		case ast.KindCallExpression:
@@ -747,53 +1097,100 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 			}
 
 			var targetType *checker.Type
-			var targetTypeNode *ast.Node
 
 			// Check for explicit type argument: JSON.parse<User>(...)
 			if callExpr.TypeArguments != nil && len(callExpr.TypeArguments.Nodes) > 0 {
 				typeArgNode := callExpr.TypeArguments.Nodes[0]
 				targetType = checker.Checker_getTypeFromTypeNode(c, typeArgNode)
-				targetTypeNode = typeArgNode
+			}
+
+			// For stringify, also check if argument has "as T" cast: JSON.stringify(x as T)
+			if methodName == "stringify" && targetType == nil && config.TransformJSONStringify {
+				if callExpr.Arguments != nil && len(callExpr.Arguments.Nodes) > 0 {
+					arg := callExpr.Arguments.Nodes[0]
+					if arg.Kind == ast.KindAsExpression {
+						asExpr := arg.AsAsExpression()
+						if asExpr != nil && asExpr.Type != nil {
+							targetType = checker.Checker_getTypeFromTypeNode(c, asExpr.Type)
+						}
+					}
+				}
+			}
+
+			// For stringify, infer type from argument's declared type: JSON.stringify(typedVar)
+			if methodName == "stringify" && targetType == nil && config.TransformJSONStringify {
+				if callExpr.Arguments != nil && len(callExpr.Arguments.Nodes) > 0 {
+					arg := callExpr.Arguments.Nodes[0]
+					// Get the type of the argument from the checker
+					argType := checker.Checker_GetTypeAtLocation(c, arg)
+					if argType != nil && !shouldSkipType(argType) {
+						// Only use inferred type if it's a concrete object type (not any/unknown)
+						flags := checker.Type_flags(argType)
+						if flags&checker.TypeFlagsObject != 0 || flags&checker.TypeFlagsUnion != 0 {
+							targetType = argType
+						}
+					}
+				}
 			}
 
 			if targetType != nil {
 				if methodName == "parse" && config.TransformJSONParse {
-					countFilter(targetType, targetTypeNode, node, "json-parse", "JSON.parse<...>")
+					// Highlight just "JSON.parse", pass nil for endNode so underline only covers "JSON.parse"
+					countFilter(targetType, nil, callExpr.Expression, "json-parse", "JSON.parse")
 					return false
 				}
 				if methodName == "stringify" && config.TransformJSONStringify {
-					countFilter(targetType, targetTypeNode, node, "json-stringify", "JSON.stringify<...>")
+					// Highlight just "JSON.stringify", pass nil for endNode so underline only covers "JSON.stringify"
+					countFilter(targetType, nil, callExpr.Expression, "json-stringify", "JSON.stringify")
 					return false
 				}
 			}
 
 		case ast.KindVariableDeclaration:
 			varDecl := node.AsVariableDeclaration()
-			if varDecl == nil || varDecl.Type == nil || varDecl.Initializer == nil {
+			if varDecl == nil || varDecl.Initializer == nil {
 				break
 			}
 
-			if !config.TransformJSONParse {
-				break
+			// Get variable name
+			var varName string
+			if varDecl.Name() != nil && varDecl.Name().Kind == ast.KindIdentifier {
+				varName = varDecl.Name().AsIdentifier().Text
 			}
 
-			if varDecl.Initializer.Kind != ast.KindCallExpression {
-				break
+			// Handle aliasing: const y = x where x is validated
+			if varName != "" && len(funcStack) > 0 && varDecl.Initializer.Kind == ast.KindIdentifier {
+				initName := varDecl.Initializer.AsIdentifier().Text
+				ctx := funcStack[len(funcStack)-1]
+				if types, ok := ctx.validated[initName]; ok {
+					// Copy validated types to the new variable
+					ctx.validated[varName] = append(ctx.validated[varName], types...)
+				}
 			}
 
-			callExpr := varDecl.Initializer.AsCallExpression()
-			if callExpr == nil {
-				break
-			}
+			// Handle: const x: T = JSON.parse(string)
+			if varDecl.Type != nil && config.TransformJSONParse && varDecl.Initializer.Kind == ast.KindCallExpression {
+				callExpr := varDecl.Initializer.AsCallExpression()
+				if callExpr != nil {
+					methodName, isJSON := getJSONMethodName(callExpr)
+					if isJSON && methodName == "parse" {
+						targetType := checker.Checker_getTypeFromTypeNode(c, varDecl.Type)
+						// Highlight just "JSON.parse" (the property access expression), not the whole variable declaration
+						// Pass nil for typeNode so the underline only covers "JSON.parse"
+						countFilter(targetType, nil, callExpr.Expression, "json-parse", "JSON.parse")
 
-			methodName, isJSON := getJSONMethodName(callExpr)
-			if !isJSON || methodName != "parse" {
-				break
+						// Mark variable as validated
+						if varName != "" && len(funcStack) > 0 {
+							ctx := funcStack[len(funcStack)-1]
+							skipReason := getSkipReason(targetType)
+							if skipReason == "" {
+								ctx.validated[varName] = append(ctx.validated[varName], targetType)
+							}
+						}
+						return false
+					}
+				}
 			}
-
-			targetType := checker.Checker_getTypeFromTypeNode(c, varDecl.Type)
-			countFilter(targetType, varDecl.Type, node, "json-parse", "JSON.parse variable")
-			return false
 		}
 
 		node.ForEachChild(visit)

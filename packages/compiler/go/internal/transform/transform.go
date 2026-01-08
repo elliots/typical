@@ -65,6 +65,26 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 		return line + 1 // Convert to 1-based
 	}
 
+	// Helper to skip leading trivia (whitespace) - must match analyse package
+	skipTrivia := func(pos int) int {
+		for pos < len(text) {
+			ch := text[pos]
+			if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
+				pos++
+			} else {
+				break
+			}
+		}
+		return pos
+	}
+
+	// Helper to get "line:col" key for skipped returns lookup (1-based line, 0-based col)
+	getPosKey := func(pos int) string {
+		pos = skipTrivia(pos) // Skip leading whitespace to match analyse package
+		line, col := posToLineCol(pos, lineStarts)
+		return fmt.Sprintf("%d:%d", line+1, col) // 1-based line, 0-based col
+	}
+
 	// Create generator with config's max functions limit and ignore patterns
 	maxFuncs := config.MaxGeneratedFunctions
 	if maxFuncs == 0 {
@@ -106,20 +126,32 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 		return fmt.Sprintf("anon_%p", t)
 	}
 
-	// First pass: count type usages (only when ReusableValidators is "auto")
-	// This allows us to only hoist functions that are used more than once
-	// AND enables composable validators (nested types call reusable functions)
-	if config.ReusableValidators == ReusableValidatorsAuto {
-		// Use the analyse package for unified AST traversal
-		analyseConfig := analyse.Config{
-			ValidateParameters:     config.ValidateParameters,
-			ValidateReturns:        config.ValidateReturns,
-			ValidateCasts:          config.ValidateCasts,
-			TransformJSONParse:     config.TransformJSONParse,
-			TransformJSONStringify: config.TransformJSONStringify,
-			IgnoreTypes:            config.IgnoreTypes,
+	// Run unified analysis pass - this gives us:
+	// 1. Type usage counts for reusable validators
+	// 2. Validation items with already-valid detection
+	analyseConfig := analyse.Config{
+		ValidateParameters:     config.ValidateParameters,
+		ValidateReturns:        config.ValidateReturns,
+		ValidateCasts:          config.ValidateCasts,
+		TransformJSONParse:     config.TransformJSONParse,
+		TransformJSONStringify: config.TransformJSONStringify,
+		IgnoreTypes:            config.IgnoreTypes,
+		PureFunctions:          config.PureFunctions,
+	}
+	analyseResult := analyse.AnalyseFile(sourceFile, c, program, analyseConfig)
+
+	// Build lookup for skipped returns (already validated)
+	// Key is "line:column" of the return expression
+	skippedReturns := make(map[string]bool)
+	for _, item := range analyseResult.Items {
+		if item.Kind == "return" && item.Status == "skipped" && item.SkipReason == "already validated" {
+			key := fmt.Sprintf("%d:%d", item.StartLine, item.StartColumn)
+			skippedReturns[key] = true
 		}
-		analyseResult := analyse.AnalyseFile(sourceFile, c, program, analyseConfig)
+	}
+
+	// Copy type usage results (only when ReusableValidators is "auto")
+	if config.ReusableValidators == ReusableValidatorsAuto {
 
 		// Copy results to local maps
 		for k, v := range analyseResult.CheckTypeUsage {
@@ -548,25 +580,12 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 
 						if !shouldSkipType(actualType) && !shouldSkipComplexType(actualType, c) {
 							debugf("[DEBUG] Actual return type not skipped, validating...\n")
-							// Check if the return expression is already validated
-							vs := &validationState{validated: ctx.validated, checker: c}
-							skipValidation := false
-
-							// Check if the return expression itself is already validated
-							if _, ok := vs.getValidatedType(returnStmt.Expression, actualType); ok {
-								// Check if any variables in the expression have been dirtied
-								rootVar := getRootIdentifier(returnStmt.Expression)
-								if rootVar != "" {
-									if !isDirty(c, ctx.validated, rootVar, ctx.bodyStart, node.Pos(), ctx.bodyNode, config.PureFunctions) {
-										debugf("[DEBUG] Skipping validation for %s: already validated and not dirty\n", rootVar)
-										skipValidation = true
-									}
-								}
+							// Check if the return expression is already validated (from analyse pass)
+							exprPosKey := getPosKey(returnStmt.Expression.Pos())
+							skipValidation := skippedReturns[exprPosKey]
+							if skipValidation {
+								debugf("[DEBUG] Skipping validation: already validated (from analyse)\n")
 							}
-
-							// Note: We don't try to validate object literals { name, age } by checking
-							// individual properties. That's too complex. We only skip validation when
-							// returning a validated variable directly (or its properties).
 
 							if skipValidation {
 								// Emit /* already valid */ comment after "return "
@@ -1440,19 +1459,6 @@ func escapeString(s string) string {
 	return s
 }
 
-// isPrimitiveType checks if a type is a primitive (string, number, boolean, bigint, null, undefined, symbol)
-func isPrimitiveType(t *checker.Type) bool {
-	if t == nil {
-		return false
-	}
-	flags := checker.Type_flags(t)
-	// Check for primitive types
-	return flags&(checker.TypeFlagsString|checker.TypeFlagsNumber|checker.TypeFlagsBoolean|
-		checker.TypeFlagsBigInt|checker.TypeFlagsNull|checker.TypeFlagsUndefined|
-		checker.TypeFlagsStringLiteral|checker.TypeFlagsNumberLiteral|checker.TypeFlagsBooleanLiteral|
-		checker.TypeFlagsVoid|checker.TypeFlagsESSymbol|checker.TypeFlagsESSymbolLike) != 0
-}
-
 // sanitizeTypeName converts a type string to a valid JavaScript identifier.
 // Replaces special characters with underscores.
 func sanitizeTypeName(name string) string {
@@ -1705,37 +1711,6 @@ func getTypeNameWithChecker(t *checker.Type, c *checker.Checker) string {
 	return getTypeName(t)
 }
 
-// getRootIdentifier returns the root identifier from a property access chain.
-// e.g., `user.address.city` → "user", `arr[0].name` → "arr", `x` → "x"
-func getRootIdentifier(expr *ast.Node) string {
-	if expr == nil {
-		return ""
-	}
-	switch expr.Kind {
-	case ast.KindIdentifier:
-		return expr.AsIdentifier().Text
-	case ast.KindPropertyAccessExpression:
-		propAccess := expr.AsPropertyAccessExpression()
-		if propAccess != nil {
-			return getRootIdentifier(propAccess.Expression)
-		}
-	case ast.KindElementAccessExpression:
-		elemAccess := expr.AsElementAccessExpression()
-		if elemAccess != nil {
-			return getRootIdentifier(elemAccess.Expression)
-		}
-	}
-	return ""
-}
-
-// isIdentifier checks if an expression is an identifier with the given name
-func isIdentifier(expr *ast.Node, name string) bool {
-	if expr != nil && expr.Kind == ast.KindIdentifier {
-		return expr.AsIdentifier().Text == name
-	}
-	return false
-}
-
 // getJSONMethodName checks if a call expression is JSON.parse or JSON.stringify.
 // Returns the method name ("parse" or "stringify") and true if it's a JSON method,
 // or empty string and false otherwise.
@@ -1766,238 +1741,6 @@ func getJSONMethodName(callExpr *ast.CallExpression) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-// validationState holds state for checking if an expression is already validated
-type validationState struct {
-	validated map[string][]*checker.Type
-	checker   *checker.Checker
-}
-
-// getValidatedType checks if an expression is already validated and returns the type if so.
-// It handles identifiers, property access (user.name), and element access (arr[0]).
-// Returns (validatedType, true) if the expression has a validated type assignable to targetType,
-// or (nil, false) if not validated or not assignable.
-func (vs *validationState) getValidatedType(expr *ast.Node, targetType *checker.Type) (*checker.Type, bool) {
-	if expr == nil || vs.validated == nil {
-		return nil, false
-	}
-
-	switch expr.Kind {
-	case ast.KindIdentifier:
-		name := expr.AsIdentifier().Text
-		if types, ok := vs.validated[name]; ok {
-			for _, t := range types {
-				// If targetType is nil, just check if anything is validated
-				if targetType == nil {
-					return t, true
-				}
-				// Check if validated type is assignable to target type
-				if checker.Checker_isTypeAssignableTo(vs.checker, t, targetType) {
-					return t, true
-				}
-			}
-		}
-		return nil, false
-
-	case ast.KindPropertyAccessExpression:
-		propAccess := expr.AsPropertyAccessExpression()
-		if propAccess == nil {
-			return nil, false
-		}
-
-		// Get type of the parent expression (recursively)
-		parentType, ok := vs.getValidatedType(propAccess.Expression, nil)
-		if !ok {
-			return nil, false
-		}
-
-		// Get the property type from the parent type
-		propName := ""
-		nameNode := propAccess.Name()
-		if nameNode != nil && nameNode.Kind == ast.KindIdentifier {
-			propName = nameNode.AsIdentifier().Text
-		}
-		if propName == "" {
-			return nil, false
-		}
-
-		propSymbol := checker.Checker_getPropertyOfType(vs.checker, parentType, propName)
-		if propSymbol == nil {
-			return nil, false
-		}
-		propType := checker.Checker_getTypeOfSymbol(vs.checker, propSymbol)
-
-		// Check if property type is assignable to target
-		if targetType == nil {
-			return propType, true
-		}
-		if checker.Checker_isTypeAssignableTo(vs.checker, propType, targetType) {
-			return propType, true
-		}
-		return nil, false
-
-	case ast.KindElementAccessExpression:
-		elemAccess := expr.AsElementAccessExpression()
-		if elemAccess == nil {
-			return nil, false
-		}
-
-		// Get type of the parent expression (recursively)
-		parentType, ok := vs.getValidatedType(elemAccess.Expression, nil)
-		if !ok {
-			return nil, false
-		}
-
-		// Get element type for arrays
-		if checker.Checker_isArrayType(vs.checker, parentType) {
-			typeArgs := checker.Checker_getTypeArguments(vs.checker, parentType)
-			if len(typeArgs) > 0 {
-				elemType := typeArgs[0]
-				if targetType == nil {
-					return elemType, true
-				}
-				if checker.Checker_isTypeAssignableTo(vs.checker, elemType, targetType) {
-					return elemType, true
-				}
-			}
-		}
-		return nil, false
-	}
-	return nil, false
-}
-
-// isDirty checks if a variable has been modified or potentially mutated between two positions.
-// It considers type-aware rules: primitives are only dirty on reassignment,
-// objects are dirty if passed to functions (unless the passed value is a primitive property).
-func isDirty(c *checker.Checker, validated map[string][]*checker.Type, varName string, fromPos int, toPos int, bodyNode *ast.Node, pureFunctions []*regexp.Regexp) bool {
-	if bodyNode == nil {
-		return false
-	}
-
-	// Get the validated type to determine if it's a primitive
-	var validatedType *checker.Type
-	if types, ok := validated[varName]; ok && len(types) > 0 {
-		validatedType = types[0]
-	}
-	varIsPrimitive := isPrimitiveType(validatedType)
-
-	dirty := false
-	leaked := false // Track if object reference has been "leaked" (passed to a function)
-
-	var check func(n *ast.Node) bool
-	check = func(n *ast.Node) bool {
-		if dirty {
-			return false // Already dirty, stop checking
-		}
-
-		pos := n.Pos()
-		// Only check nodes between fromPos and toPos
-		if pos < fromPos || pos >= toPos {
-			// Still need to recurse into children that might overlap
-			n.ForEachChild(check)
-			return false
-		}
-
-		switch n.Kind {
-		case ast.KindBinaryExpression:
-			bin := n.AsBinaryExpression()
-			if bin != nil {
-				opKind := bin.OperatorToken.Kind
-				// Check for assignment operators
-				if opKind == ast.KindEqualsToken ||
-					opKind == ast.KindPlusEqualsToken ||
-					opKind == ast.KindMinusEqualsToken ||
-					opKind == ast.KindAsteriskEqualsToken ||
-					opKind == ast.KindSlashEqualsToken {
-					// Direct assignment: varName = ...
-					if isIdentifier(bin.Left, varName) {
-						dirty = true
-						return false
-					}
-					// Property/element assignment: varName.prop = ... or varName[i] = ...
-					if !varIsPrimitive && getRootIdentifier(bin.Left) == varName {
-						dirty = true
-						return false
-					}
-				}
-			}
-
-		case ast.KindCallExpression:
-			if varIsPrimitive {
-				// Primitives are copied when passed, so calls don't dirty them
-				break
-			}
-			// Check if varName (or any nested property containing an object) is passed as argument
-			call := n.AsCallExpression()
-			if call != nil && call.Arguments != nil {
-				// Check if the called function is pure/readonly
-				isPure := false
-				if len(pureFunctions) > 0 {
-					funcName := getEntityName(call.Expression)
-					if funcName != "" {
-						for _, re := range pureFunctions {
-							if re.MatchString(funcName) {
-								isPure = true
-								break
-							}
-						}
-					}
-				}
-
-				if !isPure {
-					for _, arg := range call.Arguments.Nodes {
-						root := getRootIdentifier(arg)
-						if root == varName {
-							// Check what's actually being passed
-							// If it's the whole object or an object property, it's dirty
-							// If it's a primitive property, it's not dirty
-							argType := checker.Checker_GetTypeAtLocation(c, arg)
-							if !isPrimitiveType(argType) {
-								leaked = true
-								dirty = true
-								return false
-							}
-						}
-					}
-				}
-			}
-
-		case ast.KindAwaitExpression:
-			// Await only dirties if the object was leaked before
-			if !varIsPrimitive && leaked {
-				dirty = true
-				return false
-			}
-
-		case ast.KindPostfixUnaryExpression:
-			// x++, x--
-			postfix := n.AsPostfixUnaryExpression()
-			if postfix != nil && isIdentifier(postfix.Operand, varName) {
-				dirty = true
-				return false
-			}
-
-		case ast.KindPrefixUnaryExpression:
-			// ++x, --x
-			prefix := n.AsPrefixUnaryExpression()
-			if prefix != nil {
-				if prefix.Operator == ast.KindPlusPlusToken || prefix.Operator == ast.KindMinusMinusToken {
-					if isIdentifier(prefix.Operand, varName) {
-						dirty = true
-						return false
-					}
-				}
-			}
-		}
-
-		// Continue checking children
-		n.ForEachChild(check)
-		return false
-	}
-
-	bodyNode.ForEachChild(check)
-	return dirty
 }
 
 // getEntityName extracts the full name from an entity name (identifier or qualified name).

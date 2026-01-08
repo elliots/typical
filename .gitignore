@@ -13,3 +13,5 @@ test/fixtures
 packages/compiler/go/typescript-go/
 packages/compiler/go/.tsgolint-cache/
 
+
+*.vsix

@@ -33,9 +33,11 @@ export function validateNestedUser(user: NestedUser): NestedUser {
 export function validateCompany(company1: Company, company2: Company): Company {
   console.log('Company 1:', JSON.stringify(company1))
   console.log('Company 2:', JSON.stringify(company2))
+
+  const x: Company = JSON.parse(`{name: "${company1.name}", address: {street: "${company1.address.street}", city: "${company1.address.city}", country: "${company1.address.country}", zip: "${company1.address.zip}"}, website: "${company1.website}"}`)
   return company1
 }
-
+ 
 // Test data
 export const testNestedUser: NestedUser = {
   name: 'Bob',
@@ -73,6 +75,28 @@ export function noValidateNestedUser(user: any): any {
 // Zod validation
 export function zodValidateNestedUser(user: any): any {
   return zodNestedUser.parse(user)
+}
+
+// JSON.parse/stringify examples that Typical should mark
+export function parseUser(json: string): NestedUser {
+  return JSON.parse(json) // Should be marked - return with type annotation
+}
+
+export function parseUserCast(json: string): unknown {
+  return JSON.parse(json) as NestedUser // Should be marked - cast
+}
+
+export function stringifyCompany(company: Company): string {
+  return JSON.stringify(company) as string // Should be marked - stringify cast
+}
+
+export function parseWithCast2(json: string): Company {
+  return JSON.parse(json) as Company // Should be marked - cast with return type
+}
+
+export function assignedParse(json: string): void {
+  const user: NestedUser = JSON.parse(json) // Should be marked - typed variable
+  console.log(user)
 }
 
 // Nested object validation benchmarks
