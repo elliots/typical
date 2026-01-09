@@ -73,17 +73,27 @@ type Generator struct {
 const MaxTypeDepth = 20
 
 // getTypeKey returns a unique key for a type based on its symbol name.
-// Returns empty string for anonymous types (which won't cause cycles).
+// Returns empty string for anonymous types (which won't cause cycles in normal circumstances).
+// We only use pointer-based keys for named types - anonymous inline types should not trigger
+// cycle detection because they're defined inline and won't have true recursive references.
 func getTypeKey(t *checker.Type) string {
 	if sym := checker.Type_symbol(t); sym != nil && sym.Name != "" {
-		return sym.Name
-	}
-	// For object types without symbols, use the type's flags + first few properties
-	// This helps catch anonymous object types that might recurse
-	flags := checker.Type_flags(t)
-	if flags&checker.TypeFlagsObject != 0 {
-		// Use pointer for anonymous objects as a last resort
-		return fmt.Sprintf("anon_%p", t)
+		name := sym.Name
+		if len(name) == 0 {
+			return ""
+		}
+		// Skip TypeScript-Go internal type names
+		// These are synthetic symbols like "__type" or "\xfetype" used for anonymous inline types.
+		// The \xfe byte (254) is a special marker used by typescript-go for internal symbols.
+		if name[0] == '_' && len(name) > 1 && name[1] == '_' {
+			// Skip "__type", "__object", etc.
+			return ""
+		}
+		if name[0] == '\xfe' {
+			// Skip "\xfetype" - typescript-go's marker for anonymous types
+			return ""
+		}
+		return name
 	}
 	return ""
 }

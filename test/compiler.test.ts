@@ -998,6 +998,36 @@ void describe('Edge Cases - Advanced TypeScript', () => {
   })
 
   registerTestCase({
+    name: 'deeply nested inline object types',
+    source: `
+      interface X {
+        y: {
+          z: {
+            a: {
+              hello: {
+                world: 'thing'
+              }[]
+            }
+          }
+        }
+      }
+      export function run(input: X): string { return input.y.z.a.hello[0].world }
+    `,
+    // Should validate the nested properties - check for deep property access
+    expectStrings: ['input.y.z.a'],
+    cases: [
+      { input: { y: { z: { a: { hello: [{ world: 'thing' }] } } } }, result: 'thing' },
+      { input: { y: { z: { a: { hello: [{ world: 'other' }] } } } }, error: 'to be "thing"' },
+      { input: { y: { z: { a: { hello: 'not array' } } } }, error: 'to be array' },
+      { input: { y: { z: { a: {} } } }, error: 'hello' },
+      { input: { y: { z: {} } }, error: 'a' },
+      { input: { y: {} }, error: 'z' },
+      { input: {}, error: 'y' },
+      { input: null, error: 'to be X' },
+    ],
+  })
+
+  registerTestCase({
     name: 'never type return',
     source: `export function run(input: string): never { throw new Error(input) }`,
     // Never return should not add validation since the function never returns
