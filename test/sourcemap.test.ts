@@ -145,7 +145,7 @@ function parseMappings(mappings: string): number[][][] {
 function findOriginalPosition(
   sourceMap: RawSourceMap,
   genLine: number, // 0-based
-  genCol: number   // 0-based
+  genCol: number, // 0-based
 ): { line: number; column: number; source: string } | null {
   const lines = parseMappings(sourceMap.mappings)
 
@@ -168,8 +168,8 @@ function findOriginalPosition(
 
   return {
     source: sourceMap.sources[matchedSegment[1]],
-    line: matchedSegment[2],     // 0-based
-    column: matchedSegment[3],   // 0-based
+    line: matchedSegment[2], // 0-based
+    column: matchedSegment[3], // 0-based
   }
 }
 
@@ -202,10 +202,7 @@ void describe('Source Map Structure', () => {
 
     assert.ok(result.sourceMap, 'Source map should be present')
     const validChars = /^[A-Za-z0-9+\/,;]*$/
-    assert.ok(
-      validChars.test(result.sourceMap.mappings),
-      `Mappings contain invalid characters: ${result.sourceMap.mappings}`
-    )
+    assert.ok(validChars.test(result.sourceMap.mappings), `Mappings contain invalid characters: ${result.sourceMap.mappings}`)
   })
 })
 
@@ -249,10 +246,7 @@ export function run(user: User): string {
 
     // Mapping lines should roughly correspond to output lines
     // (may have some empty lines represented by consecutive semicolons)
-    assert.ok(
-      mappingLines >= 1,
-      `Should have mappings for output (got ${mappingLines} for ${transformedLines} output lines)`
-    )
+    assert.ok(mappingLines >= 1, `Should have mappings for output (got ${mappingLines} for ${transformedLines} output lines)`)
   })
 
   it('validation code maps back to type annotation', async () => {
@@ -344,10 +338,7 @@ void describe('Source Map Edge Cases', () => {
 
     // Transformed might have slightly different line count due to inline validation
     // but should be in the same ballpark
-    assert.ok(
-      transformedLines >= sourceLines - 2 && transformedLines <= sourceLines + 5,
-      `Line count should be similar: source=${sourceLines}, transformed=${transformedLines}`
-    )
+    assert.ok(transformedLines >= sourceLines - 2 && transformedLines <= sourceLines + 5, `Line count should be similar: source=${sourceLines}, transformed=${transformedLines}`)
   })
 })
 
@@ -483,8 +474,7 @@ export function validateCompany(company1: Company, company2: Company): Company {
         for (const segment of segments) {
           if (segment.length >= 4) {
             const srcLine = segment[2]
-            assert.ok(srcLine >= 0 && srcLine < sourceLines.length,
-              `Source line ${srcLine} should be valid (0-${sourceLines.length - 1})`)
+            assert.ok(srcLine >= 0 && srcLine < sourceLines.length, `Source line ${srcLine} should be valid (0-${sourceLines.length - 1})`)
           }
         }
       }
@@ -525,10 +515,7 @@ export function validateCompany(company1: Company, company2: Company): Company {
       if (segments.length > 0 && segments[0].length >= 4) {
         const mappedSrcLine = segments[0][2]
         // The mapped source line should be at or near the original function line
-        assert.ok(
-          Math.abs(mappedSrcLine - validateNestedUserLine) <= 2,
-          `validateNestedUser should map near line ${validateNestedUserLine}, got ${mappedSrcLine}`
-        )
+        assert.ok(Math.abs(mappedSrcLine - validateNestedUserLine) <= 2, `validateNestedUser should map near line ${validateNestedUserLine}, got ${mappedSrcLine}`)
       }
     }
 
@@ -537,10 +524,7 @@ export function validateCompany(company1: Company, company2: Company): Company {
       const segments = mappingLines[transformedCompanyLine]
       if (segments.length > 0 && segments[0].length >= 4) {
         const mappedSrcLine = segments[0][2]
-        assert.ok(
-          Math.abs(mappedSrcLine - validateCompanyLine) <= 2,
-          `validateCompany should map near line ${validateCompanyLine}, got ${mappedSrcLine}`
-        )
+        assert.ok(Math.abs(mappedSrcLine - validateCompanyLine) <= 2, `validateCompany should map near line ${validateCompanyLine}, got ${mappedSrcLine}`)
       }
     }
   })
@@ -590,10 +574,7 @@ export function validateCompany(company1: Company, company2: Company): Company {
         console.log(`Expected to map near line ${company2ParamLineIdx}: "${sourceLines[company2ParamLineIdx]}"`)
 
         // The validation should map to the function declaration line (where the param is)
-        assert.ok(
-          Math.abs(mappedSrcLine - company2ParamLineIdx) <= 1,
-          `_check_Company(company2) should map to line ${company2ParamLineIdx} (company2: Company), got line ${mappedSrcLine}`
-        )
+        assert.ok(Math.abs(mappedSrcLine - company2ParamLineIdx) <= 1, `_check_Company(company2) should map to line ${company2ParamLineIdx} (company2: Company), got line ${mappedSrcLine}`)
       }
     }
   })

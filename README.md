@@ -356,6 +356,50 @@ The generated validation code is optimised for runtime performance:
 - **Union early bail-out** - Union type checks use if-else chains so the first matching type succeeds immediately
 - **Skip comments** - Add `// @typical-ignore` before a function to skip all validation for it
 
+## VSCode Extension
+
+A VSCode extension is available that shows runtime validation indicators directly in your editor. It's not yet published to the marketplace, but you can build and install it locally.
+
+### Features
+
+- **Subtle underlines** on validated parameters, return values, type casts, and JSON operations
+  - Green dotted underline = validated at runtime
+  - Grey dotted underline = skipped (e.g., generic types)
+- **Hover tooltips** explaining what's being validated and why
+- **Optional inlay hints** showing validation status inline
+- **Preview command** to see the compiled output with validation code
+
+### Building and Installing
+
+```bash
+# Navigate to the extension directory
+cd packages/vscode-extension
+
+# Install dependencies
+pnpm install
+
+# Build and package the extension
+pnpm run build
+pnpm run package
+
+# Install the .vsix file
+code --install-extension typical-vscode-0.0.1.vsix
+```
+
+Or use the convenience script:
+
+```bash
+cd packages/vscode-extension
+pnpm run dev-install
+```
+
+### Requirements
+
+- Your project must have `@elliots/typical` or `@elliots/typical-compiler` as a dependency
+- The extension uses the compiler binary from your project's `node_modules`
+
+---
+
 ## Debugging
 
 Set `DEBUG=1` for verbose logging:
@@ -370,15 +414,15 @@ DEBUG=1 npm run build
 
 These TypeScript features have no runtime representation and are skipped:
 
-| Feature | Why | Example |
-|---------|-----|---------|
-| Generic type parameters | No runtime type info for `T` | `function process<T>(x: T): T` |
-| Conditional types | Compile-time only | `T extends string ? A : B` |
-| `infer` keyword | Compile-time type inference | `T extends Array<infer U> ? U : never` |
-| `keyof` operator | Compile-time key extraction | `keyof User` |
-| Indexed access types | Compile-time type lookup | `User['name']` |
-| Unique symbols | Symbol identity not checkable | `declare const id: unique symbol` |
-| Index signature values | Would require iterating all keys | `{ [key: string]: number }` |
+| Feature                 | Why                              | Example                                |
+| ----------------------- | -------------------------------- | -------------------------------------- |
+| Generic type parameters | No runtime type info for `T`     | `function process<T>(x: T): T`         |
+| Conditional types       | Compile-time only                | `T extends string ? A : B`             |
+| `infer` keyword         | Compile-time type inference      | `T extends Array<infer U> ? U : never` |
+| `keyof` operator        | Compile-time key extraction      | `keyof User`                           |
+| Indexed access types    | Compile-time type lookup         | `User['name']`                         |
+| Unique symbols          | Symbol identity not checkable    | `declare const id: unique symbol`      |
+| Index signature values  | Would require iterating all keys | `{ [key: string]: number }`            |
 
 ### Other limitations
 
@@ -390,6 +434,7 @@ These TypeScript features have no runtime representation and are skipped:
 ### What IS validated
 
 Despite these limitations, Typical validates most practical TypeScript patterns:
+
 - All primitive types (string, number, boolean, bigint, symbol, null, undefined)
 - Object properties and nested objects
 - Arrays and tuples (including variadic tuples)

@@ -1,4 +1,3 @@
-
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert'
 import ts from 'typescript'
@@ -46,30 +45,18 @@ function registerTestCase(testCase: TestCase) {
     if (testCase.expectStrings) {
       for (const pattern of testCase.expectStrings) {
         if (typeof pattern === 'string') {
-          assert.ok(
-            transformed.code.includes(pattern),
-            `Expected output to contain: ${pattern}\n\nOutput:\n${transformed.code}`
-          )
+          assert.ok(transformed.code.includes(pattern), `Expected output to contain: ${pattern}\n\nOutput:\n${transformed.code}`)
         } else {
-          assert.ok(
-            pattern.test(transformed.code),
-            `Expected output to match: ${pattern}\n\nOutput:\n${transformed.code}`
-          )
+          assert.ok(pattern.test(transformed.code), `Expected output to match: ${pattern}\n\nOutput:\n${transformed.code}`)
         }
       }
     }
     if (testCase.notExpectStrings) {
       for (const pattern of testCase.notExpectStrings) {
         if (typeof pattern === 'string') {
-          assert.ok(
-            !transformed.code.includes(pattern),
-            `Expected output NOT to contain: ${pattern}\n\nOutput:\n${transformed.code}`
-          )
+          assert.ok(!transformed.code.includes(pattern), `Expected output NOT to contain: ${pattern}\n\nOutput:\n${transformed.code}`)
         } else {
-          assert.ok(
-            !pattern.test(transformed.code),
-            `Expected output NOT to match: ${pattern}\n\nOutput:\n${transformed.code}`
-          )
+          assert.ok(!pattern.test(transformed.code), `Expected output NOT to match: ${pattern}\n\nOutput:\n${transformed.code}`)
         }
       }
     }
@@ -95,9 +82,7 @@ function registerTestCase(testCase: TestCase) {
 
     // 5. Run each case
     for (const caseDef of testCase.cases) {
-      const caseName = caseDef.name
-        ? caseDef.name
-        : `input=${typeof caseDef.input === 'bigint' ? String(caseDef.input) + 'n' : JSON.stringify(caseDef.input)}`
+      const caseName = caseDef.name ? caseDef.name : `input=${typeof caseDef.input === 'bigint' ? String(caseDef.input) + 'n' : JSON.stringify(caseDef.input)}`
 
       if (caseDef.error) {
         try {
@@ -110,10 +95,7 @@ function registerTestCase(testCase: TestCase) {
         } catch (e: any) {
           if (e.code === 'ERR_ASSERTION') throw e // Re-throw assertion failures
           if (typeof caseDef.error === 'string') {
-            assert.ok(
-              e.message.includes(caseDef.error),
-              `[${caseName}] Expected error to contain "${caseDef.error}", got "${e.message}"`
-            )
+            assert.ok(e.message.includes(caseDef.error), `[${caseName}] Expected error to contain "${caseDef.error}", got "${e.message}"`)
           } else {
             assert.match(e.message, caseDef.error, `[${caseName}] Error message mismatch`)
           }
@@ -456,7 +438,7 @@ void describe('Utility Types', () => {
       { input: { name: 'Alice' }, result: 'Alice' },
       { input: { name: 123 }, error: 'to be string' },
       // Extra properties allowed in structural typing, but Pick ensures we check 'name'
-      { input: { name: 'Alice', id: 1 }, result: 'Alice' }, 
+      { input: { name: 'Alice', id: 1 }, result: 'Alice' },
     ],
   })
 
@@ -520,9 +502,7 @@ void describe('Function Types', () => {
       }
     `,
     expectStrings: ['"return value"'], // Return validation
-    cases: [
-      { input: 1, result: { name: 'AsyncUser1' } },
-    ],
+    cases: [{ input: 1, result: { name: 'AsyncUser1' } }],
   })
 
   registerTestCase({
@@ -586,10 +566,10 @@ void describe('Destructured Parameters', () => {
     // The compiler should validate the *parameter object* structure.
     cases: [
       { input: { addr: { city: 'NYC' } }, result: 'NYC' },
-      // Note: If typical validates bindings, it checks 'city'. 
+      // Note: If typical validates bindings, it checks 'city'.
       // If it validates parameters, it checks the whole object.
       // Let's see what happens.
-      { input: { addr: { city: 123 } }, error: 'to be string' }, 
+      { input: { addr: { city: 123 } }, error: 'to be string' },
     ],
   })
 })
@@ -638,25 +618,25 @@ void describe('Complex Typing', () => {
     expectStrings: ['_check_TreeNode'],
     cases: [
       { input: { value: 'root' }, result: 'root0' },
-      { 
-        input: { 
-          value: 'root', 
-          children: [{ value: 'child1' }, { value: 'child2', children: [] }] 
-        }, 
-        result: 'root2' 
+      {
+        input: {
+          value: 'root',
+          children: [{ value: 'child1' }, { value: 'child2', children: [] }],
+        },
+        result: 'root2',
       },
       // Deep error handling requires matching the exact format
       // Typical might not recurse deep into the structure for the error message *path* correctly in complex cases
       // or the error message might be slightly different.
       // Let's broaden the error expectation.
-      
+
       // Recursive validation - child with wrong type
       { input: { value: 'root', children: [{ value: 123 }] }, error: 'to be string' },
 
       // The error message for array is "to be undefined | array" because the property is optional
       // But actually, checking the previous failure output, it might be "to be undefined | TreeNode[]" or similar.
       // Let's use a regex to be more flexible about what it expects (array or object or type name).
-      { input: { value: 'root', children: 'invalid' }, error: /to be .*array/i }, 
+      { input: { value: 'root', children: 'invalid' }, error: /to be .*array/i },
     ],
   })
 
@@ -758,7 +738,6 @@ void describe('Complex Typing', () => {
   })
 })
 
-
 void describe('Complexity Limit', () => {
   // Manual test for compilation error
   it('errors on overly complex types', async () => {
@@ -836,9 +815,7 @@ void describe('Special Types', () => {
     name: 'unknown type (no validation)',
     source: `export function run(input: unknown): unknown { return input }`,
     notExpectStrings: ['_v', 'typeof'],
-    cases: [
-      { input: 'anything', result: 'anything' },
-    ],
+    cases: [{ input: 'anything', result: 'anything' }],
   })
 
   registerTestCase({
@@ -848,9 +825,7 @@ void describe('Special Types', () => {
       export function run(input: any): any { return config }
     `,
     notExpectStrings: ['throw new TypeError'],
-    cases: [
-      { input: null, result: { host: 'localhost' } },
-    ],
+    cases: [{ input: null, result: { host: 'localhost' } }],
   })
 })
 
@@ -907,12 +882,12 @@ void describe('Configuration Options', () => {
     config: { ignoreTypes: ['Ignored'] },
     expectStrings: [
       'to be User', // User should be validated
-      'validation skipped: type \'Ignored\' matches ignoreTypes', // Ignored should be skipped
-    ], 
+      "validation skipped: type 'Ignored' matches ignoreTypes", // Ignored should be skipped
+    ],
     cases: [
-      { 
-        input: { name: 'Alice' }, 
-        result: { u: { name: 'Alice' }, i: { name: 'Alice' } } 
+      {
+        input: { name: 'Alice' },
+        result: { u: { name: 'Alice' }, i: { name: 'Alice' } },
       },
     ],
   })
@@ -927,20 +902,16 @@ void describe('Optimisations', () => {
     name: 'skip redundant validation (identity)',
     source: `export function run(input: string): string { return input }`,
     expectStrings: ['/* already valid */'],
-    cases: [
-      { input: 'hello', result: 'hello' },
-    ],
+    cases: [{ input: 'hello', result: 'hello' }],
   })
 
   registerTestCase({
     name: 'skip redundant validation (subtype to supertype)',
     source: `export function run(input: string): string | null { return input }`,
     expectStrings: ['/* already valid */'],
-    cases: [
-      { input: 'hello', result: 'hello' },
-    ],
+    cases: [{ input: 'hello', result: 'hello' }],
   })
-  
+
   registerTestCase({
     name: 'must validate (reassignment)',
     source: `
@@ -952,9 +923,7 @@ void describe('Optimisations', () => {
     // If it was optimized away, it would say /* already valid */
     // Since we dirtied it (conceptually), it might re-validate.
     // However, flow analysis is complex. Let's just check it runs.
-    cases: [
-      { input: 'hello', result: 'world' },
-    ],
+    cases: [{ input: 'hello', result: 'world' }],
   })
 })
 
@@ -1032,9 +1001,7 @@ void describe('Edge Cases - Advanced TypeScript', () => {
     source: `export function run(input: string): never { throw new Error(input) }`,
     // Never return should not add validation since the function never returns
     notExpectStrings: ['return value'],
-    cases: [
-      { input: 'error message', error: 'error message' },
-    ],
+    cases: [{ input: 'error message', error: 'error message' }],
   })
 
   registerTestCase({
@@ -1149,9 +1116,7 @@ void describe('Edge Cases - Advanced TypeScript', () => {
     `,
     // Should validate literal 'result' and string value
     expectStrings: ['"result"'],
-    cases: [
-      { input: 'hello', result: { type: 'result', value: 'hello' } },
-    ],
+    cases: [{ input: 'hello', result: { type: 'result', value: 'hello' } }],
   })
 })
 
@@ -1207,7 +1172,7 @@ void describe('Error Messages', () => {
       // Long strings (>50 chars) should be truncated at 47 chars with ...
       {
         input: 'this is a very long string that exceeds fifty characters and should be truncated',
-        error: /got string \(this is a very long string that exceeds fifty c\.\.\.\)/
+        error: /got string \(this is a very long string that exceeds fifty c\.\.\.\)/,
       },
     ],
   })
@@ -1270,4 +1235,3 @@ void describe('Source Map Generation', () => {
     assert.ok(nonEmptySegments.length > 0, 'Should have non-empty mapping segments')
   })
 })
-
