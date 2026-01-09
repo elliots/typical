@@ -135,7 +135,7 @@ async function main() {
 
   // Build everything (Go binaries for all platforms + TypeScript packages)
   console.log('\n==> Building all packages...')
-  exec('pnpm run build:all', { cwd: rootDir })
+  exec('pnpm run build', { cwd: rootDir })
 
   // Verify all binaries exist
   console.log('\n==> Verifying binaries...')

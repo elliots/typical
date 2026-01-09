@@ -7,7 +7,14 @@
 
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert'
+import { writeFileSync, mkdirSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { TypicalCompiler, type RawSourceMap } from '@elliots/typical-compiler'
+
+// Use the source test directory, not dist
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const OUTPUT_DIR = join(__dirname, '..', '..', 'test', 'output')
 
 let compiler: TypicalCompiler
 
@@ -380,5 +387,214 @@ void describe('VLQ Encoding', () => {
     const lines = parseMappings('AAAA,CAAC')
     assert.strictEqual(lines.length, 1)
     assert.strictEqual(lines[0].length, 2)
+  })
+})
+
+void describe('Source Map Output Files', () => {
+  const nestedTypesSource = `// Template literal types
+type Email = \`\${string}@\${string}.\${string}\`
+type ZipCode = \`\${number}\`
+type CountryCode = \`\${string}-\${string}\`
+
+export interface Address {
+  street: string
+  city: string
+  country: CountryCode
+  zip: ZipCode
+}
+
+export interface Company {
+  name: string
+  address: Address
+  website: \`https://\${string}\`
+}
+
+export interface NestedUser {
+  name: string
+  age: number
+  email: Email
+  address1: Address
+  address2: Address
+  company: Company
+}
+
+// Typical validation
+export function validateNestedUser(user: NestedUser): NestedUser {
+  user.address1 = JSON.parse(\`{street: "\${user.address1.street}", city: "\${user.address1.city}", country: "\${user.address1.country}", zip: "\${user.address1.zip}"}\`)
+  return user
+}
+
+export function validateCompany(company1: Company, company2: Company): Company {
+  console.log('Company 1:', JSON.stringify(company1))
+  console.log('Company 2:', JSON.stringify(company2))
+
+  const x: Company = JSON.parse(
+    \`{name: "\${company1.name}", address: {street: "\${company1.address.street}", city: "\${company1.address.city}", country: "\${company1.address.country}", zip: "\${company1.address.zip}"}, website: "\${company1.website}"}\`,
+  )
+  return company1
+}
+`
+
+  it('outputs source map files for nested types', async () => {
+    const result = await compiler.transformSource('nested-types.ts', nestedTypesSource)
+
+    assert.ok(result.sourceMap, 'Source map should be present')
+
+    // Create output directory
+    mkdirSync(OUTPUT_DIR, { recursive: true })
+
+    // Write the files with corrected source map for IDE debugging
+    writeFileSync(join(OUTPUT_DIR, 'nested-types.original.ts'), nestedTypesSource)
+    writeFileSync(join(OUTPUT_DIR, 'nested-types.transformed.ts'), result.code + '\n//# sourceMappingURL=nested-types.transformed.ts.map')
+
+    // Fix the source map file/sources for IDE usage
+    const fixedSourceMap = {
+      ...result.sourceMap,
+      file: 'nested-types.transformed.ts',
+      sources: ['nested-types.original.ts'],
+    }
+    writeFileSync(join(OUTPUT_DIR, 'nested-types.transformed.ts.map'), JSON.stringify(fixedSourceMap, null, 2))
+
+    // Verify source map structure
+    assert.strictEqual(result.sourceMap.version, 3)
+    assert.deepStrictEqual(result.sourceMap.sources, ['nested-types.ts'])
+    assert.ok(result.sourceMap.sourcesContent?.[0] === nestedTypesSource)
+  })
+
+  it('maps validation code back to correct source lines', async () => {
+    const result = await compiler.transformSource('nested-types.ts', nestedTypesSource)
+
+    assert.ok(result.sourceMap, 'Source map should be present')
+
+    const sourceLines = nestedTypesSource.split('\n')
+    const transformedLines = result.code.split('\n')
+    const mappingLines = parseMappings(result.sourceMap.mappings)
+
+    // The transformed code should have mappings
+    assert.ok(mappingLines.length > 0, 'Should have mapping lines')
+
+    // Count how many generated lines map back to source
+    let mappedLineCount = 0
+    for (let genLine = 0; genLine < mappingLines.length; genLine++) {
+      const segments = mappingLines[genLine]
+      if (segments.length > 0) {
+        mappedLineCount++
+        // Each segment should have valid source position
+        for (const segment of segments) {
+          if (segment.length >= 4) {
+            const srcLine = segment[2]
+            assert.ok(srcLine >= 0 && srcLine < sourceLines.length,
+              `Source line ${srcLine} should be valid (0-${sourceLines.length - 1})`)
+          }
+        }
+      }
+    }
+
+    // Most generated lines should have mappings
+    const mappingRatio = mappedLineCount / transformedLines.length
+    assert.ok(mappingRatio > 0.5, `At least 50% of lines should have mappings (got ${(mappingRatio * 100).toFixed(1)}%)`)
+  })
+
+  it('validates function positions map correctly', async () => {
+    const result = await compiler.transformSource('nested-types.ts', nestedTypesSource)
+
+    assert.ok(result.sourceMap, 'Source map should be present')
+
+    // Find the function declarations in source
+    const sourceLines = nestedTypesSource.split('\n')
+    const validateNestedUserLine = sourceLines.findIndex(l => l.includes('function validateNestedUser'))
+    const validateCompanyLine = sourceLines.findIndex(l => l.includes('function validateCompany'))
+
+    assert.ok(validateNestedUserLine >= 0, 'Should find validateNestedUser in source')
+    assert.ok(validateCompanyLine >= 0, 'Should find validateCompany in source')
+
+    // Find them in transformed code
+    const transformedLines = result.code.split('\n')
+    const transformedNestedUserLine = transformedLines.findIndex(l => l.includes('function validateNestedUser'))
+    const transformedCompanyLine = transformedLines.findIndex(l => l.includes('function validateCompany'))
+
+    assert.ok(transformedNestedUserLine >= 0, 'Should find validateNestedUser in transformed')
+    assert.ok(transformedCompanyLine >= 0, 'Should find validateCompany in transformed')
+
+    // Use source map to verify the functions map back correctly
+    const mappingLines = parseMappings(result.sourceMap.mappings)
+
+    // Check validateNestedUser line mapping
+    if (transformedNestedUserLine < mappingLines.length) {
+      const segments = mappingLines[transformedNestedUserLine]
+      if (segments.length > 0 && segments[0].length >= 4) {
+        const mappedSrcLine = segments[0][2]
+        // The mapped source line should be at or near the original function line
+        assert.ok(
+          Math.abs(mappedSrcLine - validateNestedUserLine) <= 2,
+          `validateNestedUser should map near line ${validateNestedUserLine}, got ${mappedSrcLine}`
+        )
+      }
+    }
+
+    // Check validateCompany line mapping
+    if (transformedCompanyLine < mappingLines.length) {
+      const segments = mappingLines[transformedCompanyLine]
+      if (segments.length > 0 && segments[0].length >= 4) {
+        const mappedSrcLine = segments[0][2]
+        assert.ok(
+          Math.abs(mappedSrcLine - validateCompanyLine) <= 2,
+          `validateCompany should map near line ${validateCompanyLine}, got ${mappedSrcLine}`
+        )
+      }
+    }
+  })
+
+  it('validation call maps to parameter type annotation', async () => {
+    const result = await compiler.transformSource('nested-types.ts', nestedTypesSource)
+
+    assert.ok(result.sourceMap, 'Source map should be present')
+
+    const sourceLines = nestedTypesSource.split('\n')
+    const transformedLines = result.code.split('\n')
+    const mappingLines = parseMappings(result.sourceMap.mappings)
+
+    // Find the line with _check_Company(company2) in transformed code
+    const checkCompany2LineIdx = transformedLines.findIndex(l => l.includes('_check_Company(company2)'))
+    assert.ok(checkCompany2LineIdx >= 0, 'Should find _check_Company(company2) in transformed code')
+
+    // Find the column position of _check_Company(company2)
+    const checkCompany2Line = transformedLines[checkCompany2LineIdx]
+    const checkCompany2Col = checkCompany2Line.indexOf('_check_Company(company2)')
+
+    // Find the source line with "company2: Company"
+    const company2ParamLineIdx = sourceLines.findIndex(l => l.includes('company2: Company'))
+    assert.ok(company2ParamLineIdx >= 0, 'Should find company2: Company in source')
+
+    // Get the mapping for this generated position
+    if (checkCompany2LineIdx < mappingLines.length) {
+      const segments = mappingLines[checkCompany2LineIdx]
+
+      // Find the segment that covers the _check_Company(company2) column
+      let matchedSegment: number[] | null = null
+      for (const segment of segments) {
+        if (segment[0] <= checkCompany2Col) {
+          matchedSegment = segment
+        } else {
+          break
+        }
+      }
+
+      if (matchedSegment && matchedSegment.length >= 4) {
+        const mappedSrcLine = matchedSegment[2]
+        const mappedSrcCol = matchedSegment[3]
+
+        console.log(`_check_Company(company2) at gen line ${checkCompany2LineIdx}, col ${checkCompany2Col}`)
+        console.log(`Maps to source line ${mappedSrcLine}, col ${mappedSrcCol}`)
+        console.log(`Source line content: "${sourceLines[mappedSrcLine]}"`)
+        console.log(`Expected to map near line ${company2ParamLineIdx}: "${sourceLines[company2ParamLineIdx]}"`)
+
+        // The validation should map to the function declaration line (where the param is)
+        assert.ok(
+          Math.abs(mappedSrcLine - company2ParamLineIdx) <= 1,
+          `_check_Company(company2) should map to line ${company2ParamLineIdx} (company2: Company), got line ${mappedSrcLine}`
+        )
+      }
+    }
   })
 })

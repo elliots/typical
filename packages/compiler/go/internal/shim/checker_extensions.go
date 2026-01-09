@@ -90,3 +90,9 @@ func TupleType_elementInfos(t *checker.TupleType) []checker.TupleElementInfo {
 	}
 	return ((*tupleTypeLayout)(unsafe.Pointer(t))).elementInfos
 }
+
+// Checker_stringType returns the checker's built-in string type.
+// This is needed to query string index signatures using Checker_getIndexTypeOfType.
+func Checker_stringType(v *checker.Checker) *checker.Type {
+	return ((*extra_Checker)(unsafe.Pointer(v))).stringType
+}

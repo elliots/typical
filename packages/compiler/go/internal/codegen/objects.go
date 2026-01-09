@@ -250,6 +250,18 @@ func (g *Generator) objectCheck(t *checker.Type, expr string) string {
 		checks = append(checks, check)
 	}
 
+	// Check for string index signature and validate all values
+	stringType := checker.Checker_stringType(g.checker)
+	if stringType != nil {
+		indexValueType := checker.Checker_getIndexTypeOfType(g.checker, t, stringType)
+		if indexValueType != nil {
+			// Generate a check for index signature values
+			// Use Object.values().every() to validate all values
+			valueCheck := g.generateCheck(indexValueType, "v")
+			checks = append(checks, fmt.Sprintf("Object.values(input).every((v: any) => %s)", valueCheck))
+		}
+	}
+
 	// Build function body
 	funcBody := "true"
 	if len(checks) > 0 {

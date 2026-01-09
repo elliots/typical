@@ -1482,6 +1482,26 @@ func (g *Generator) objectValidation(t *checker.Type, expr string, nameExpr stri
 		}
 	}
 
+	// Check for string index signature and validate all values
+	stringType := checker.Checker_stringType(g.checker)
+	if stringType != nil {
+		indexValueType := checker.Checker_getIndexTypeOfType(g.checker, t, stringType)
+		if indexValueType != nil {
+			// Generate validation for index signature values
+			// Use for...in loop to validate all values
+			idx := g.funcIdx
+			g.funcIdx++
+			kVar := fmt.Sprintf("_k%d", idx)
+			vVar := fmt.Sprintf("_v%d", idx)
+			valNameExpr := g.appendArrayIndex(nameExpr, kVar)
+			valueValidation := g.generateValidation(indexValueType, vVar, valNameExpr)
+			if valueValidation != "" {
+				sb.WriteString(fmt.Sprintf(`for (const %s in %s) { const %s: any = %s[%s]; %s} `,
+					kVar, expr, vVar, expr, kVar, valueValidation))
+			}
+		}
+	}
+
 	return sb.String()
 }
 

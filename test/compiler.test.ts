@@ -697,18 +697,36 @@ void describe('Complex Typing', () => {
     name: 'index signature mixed with specific keys',
     source: `
       interface Dict {
-        [key: string]: number;
+        [key: string]: string | number;
         special: number;
       }
       export function run(input: Dict): number { return input.special }
     `,
-    // Only validates explicitly named properties, not index signature values
-    // This is a known limitation - index signatures are not validated at runtime
+    // Validates all values against the index signature type using for...in loop
+    expectStrings: ['for (const _k'],
     cases: [
       { input: { special: 1, other: 2 }, result: 1 },
       { input: { special: '1' }, error: 'to be number' },
-      // Index signature values are NOT validated - this is a known limitation
-      { input: { special: 1, other: '2' }, result: 1 },
+      // Index signature values ARE validated
+      { input: { special: 1, other: true }, error: 'to be string | number' },
+    ],
+  })
+
+  registerTestCase({
+    name: 'simple index signature',
+    source: `
+      interface StringDict {
+        [key: string]: string;
+      }
+      export function run(input: StringDict): string { return Object.values(input).join(',') }
+    `,
+    // Validates all values against the index signature type using for...in loop
+    expectStrings: ['for (const _k'],
+    cases: [
+      { input: { a: 'hello', b: 'world' }, result: 'hello,world' },
+      { input: {}, result: '' },
+      { input: { a: 123 }, error: 'to be string' },
+      { input: { a: 'ok', b: null }, error: 'to be string' },
     ],
   })
 
