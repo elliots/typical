@@ -1252,8 +1252,34 @@ func (g *Generator) unionValidation(t *checker.Type, expr string, nameExpr strin
 
 // intersectionValidation generates validation for intersection types.
 func (g *Generator) intersectionValidation(t *checker.Type, expr string, nameExpr string) string {
-	// For intersections, validate each constituent
 	members := t.Types()
+
+	// Handle branded/opaque types: primitive & { readonly __brand: ... }
+	// These are compile-time only - at runtime, just validate the primitive.
+	// A branded type has exactly 2 parts: a primitive and an object (the brand).
+	if len(members) == 2 {
+		var primitiveType *checker.Type
+		var objectType *checker.Type
+
+		for _, m := range members {
+			mFlags := checker.Type_flags(m)
+			// Check for primitive types (string, number, bigint, symbol)
+			if mFlags&(checker.TypeFlagsString|checker.TypeFlagsNumber|checker.TypeFlagsBigInt|checker.TypeFlagsESSymbol) != 0 {
+				primitiveType = m
+			} else if mFlags&checker.TypeFlagsObject != 0 {
+				objectType = m
+			}
+		}
+
+		// If we have a primitive and an object, check if the object looks like a brand
+		// (has only phantom/brand properties like __brand, _tag, _type, etc.)
+		if primitiveType != nil && objectType != nil && g.isBrandObject(objectType) {
+			// Just validate the primitive - the brand is compile-time only
+			return g.generateValidation(primitiveType, expr, nameExpr)
+		}
+	}
+
+	// For regular intersections, validate each constituent
 	var statements []string
 	for _, memberType := range members {
 		stmt := g.generateValidation(memberType, expr, nameExpr)
@@ -1262,6 +1288,33 @@ func (g *Generator) intersectionValidation(t *checker.Type, expr string, nameExp
 		}
 	}
 	return strings.Join(statements, "")
+}
+
+// isBrandObject checks if an object type looks like a branding/phantom type.
+// These are objects with only properties like __brand, _tag, _type, __opaque, etc.
+// that are used only for compile-time type discrimination.
+func (g *Generator) isBrandObject(t *checker.Type) bool {
+	props := checker.Checker_getPropertiesOfType(g.checker, t)
+	if len(props) == 0 {
+		return false
+	}
+
+	// All properties must look like brand markers
+	for _, prop := range props {
+		name := prop.Name
+		// Common branding patterns: __brand, _brand, __tag, _tag, __type, __opaque, __nominal
+		if !strings.HasPrefix(name, "__") && !strings.HasPrefix(name, "_") {
+			return false
+		}
+		// Additional check: brand properties typically contain "brand", "tag", "type", "opaque", "nominal"
+		lower := strings.ToLower(name)
+		if !strings.Contains(lower, "brand") && !strings.Contains(lower, "tag") &&
+			!strings.Contains(lower, "type") && !strings.Contains(lower, "opaque") &&
+			!strings.Contains(lower, "nominal") {
+			return false
+		}
+	}
+	return true
 }
 
 // objectValidation generates validation for object types.

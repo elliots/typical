@@ -940,3 +940,170 @@ void describe('Optimisations', () => {
   })
 })
 
+// =============================================================================
+// EDGE CASES - ADVANCED TYPESCRIPT FEATURES
+// =============================================================================
+
+void describe('Edge Cases - Advanced TypeScript', () => {
+  registerTestCase({
+    name: 'readonly array',
+    source: `export function run(input: readonly string[]): number { return input.length }`,
+    expectStrings: ['Array.isArray'],
+    cases: [
+      { input: ['a', 'b', 'c'], result: 3 },
+      { input: [], result: 0 },
+      { input: [1, 2], error: 'to be string' },
+      { input: 'not array', error: 'to be array' },
+    ],
+  })
+
+  registerTestCase({
+    name: 'readonly tuple',
+    source: `export function run(input: readonly [string, number]): string { return input[0] }`,
+    expectStrings: ['Array.isArray'],
+    cases: [
+      { input: ['hello', 42], result: 'hello' },
+      { input: [123, 42], error: 'to be string' },
+      { input: ['hello', 'world'], error: 'to be number' },
+    ],
+  })
+
+  registerTestCase({
+    name: 'deeply nested arrays',
+    source: `export function run(input: string[][][]): string { return input[0][0][0] }`,
+    expectStrings: ['Array.isArray'],
+    cases: [
+      { input: [[['deep']]], result: 'deep' },
+      { input: [[[123]]], error: 'to be string' },
+      { input: [['not nested enough']], error: 'to be array' },
+    ],
+  })
+
+  registerTestCase({
+    name: 'never type return',
+    source: `export function run(input: string): never { throw new Error(input) }`,
+    // Never return should not add validation since the function never returns
+    notExpectStrings: ['return value'],
+    cases: [
+      { input: 'error message', error: 'error message' },
+    ],
+  })
+
+  registerTestCase({
+    name: 'branded type (string & brand)',
+    source: `
+      type UserId = string & { readonly __brand: 'UserId' }
+      export function run(input: UserId): string { return input }
+    `,
+    // Branded types are strings at runtime - just validate string
+    expectStrings: ['"string" === typeof'],
+    cases: [
+      { input: 'user-123', result: 'user-123' },
+      { input: 123, error: 'to be string' },
+    ],
+  })
+
+  registerTestCase({
+    name: 'abstract class parameter',
+    source: `
+      abstract class Animal { abstract speak(): string }
+      class Dog extends Animal { speak() { return 'woof' } }
+      export function run(input: Animal): string { return input.speak() }
+      export { Dog }
+    `,
+    // Abstract class should use instanceof check
+    expectStrings: ['instanceof Animal'],
+    cases: [
+      // Note: Can't easily test instanceof in this harness without class being in scope
+    ],
+  })
+
+  registerTestCase({
+    name: 'overloaded function',
+    source: `
+      function process(x: string): string
+      function process(x: number): number
+      function process(x: string | number): string | number { return x }
+      export { process as run }
+    `,
+    // Should validate based on the implementation signature (string | number)
+    cases: [
+      { input: 'hello', result: 'hello' },
+      { input: 42, result: 42 },
+      { input: true, error: 'to be string' }, // First union member in error
+    ],
+  })
+
+  registerTestCase({
+    name: 'mapped type (resolved)',
+    source: `
+      type MyReadonly<T> = { readonly [K in keyof T]: T[K] }
+      interface User { name: string; age: number }
+      export function run(input: MyReadonly<User>): string { return input.name }
+    `,
+    expectStrings: ['input.name', 'input.age'],
+    cases: [
+      { input: { name: 'Alice', age: 30 }, result: 'Alice' },
+      { input: { name: 123, age: 30 }, error: 'to be string' },
+      { input: { name: 'Alice' }, error: 'to be number' },
+    ],
+  })
+
+  registerTestCase({
+    name: 'conditional type (resolved)',
+    source: `
+      type StringOrNumber<T> = T extends string ? string : number
+      export function run(input: StringOrNumber<'test'>): string { return input }
+    `,
+    // StringOrNumber<'test'> resolves to string since 'test' extends string
+    expectStrings: ['"string" === typeof'],
+    cases: [
+      { input: 'hello', result: 'hello' },
+      { input: 123, error: 'to be string' },
+    ],
+  })
+
+  registerTestCase({
+    name: 'Extract utility type',
+    source: `
+      type Letters = 'a' | 'b' | 'c'
+      export function run(input: Extract<Letters, 'a' | 'b'>): string { return input }
+    `,
+    // Extract<'a'|'b'|'c', 'a'|'b'> = 'a' | 'b'
+    cases: [
+      { input: 'a', result: 'a' },
+      { input: 'b', result: 'b' },
+      { input: 'c', error: "'a' | 'b'" },
+      { input: 'd', error: "'a' | 'b'" },
+    ],
+  })
+
+  registerTestCase({
+    name: 'Exclude utility type',
+    source: `
+      type Letters = 'a' | 'b' | 'c'
+      export function run(input: Exclude<Letters, 'a'>): string { return input }
+    `,
+    // Exclude<'a'|'b'|'c', 'a'> = 'b' | 'c'
+    cases: [
+      { input: 'b', result: 'b' },
+      { input: 'c', result: 'c' },
+      { input: 'a', error: "'b' | 'c'" },
+    ],
+  })
+
+  registerTestCase({
+    name: 'const assertion return type',
+    source: `
+      export function run(input: string): { readonly type: 'result'; readonly value: string } {
+        return { type: 'result', value: input } as const
+      }
+    `,
+    // Should validate literal 'result' and string value
+    expectStrings: ['"result"'],
+    cases: [
+      { input: 'hello', result: { type: 'result', value: 'hello' } },
+    ],
+  })
+})
+
