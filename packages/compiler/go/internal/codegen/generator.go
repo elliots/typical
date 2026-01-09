@@ -61,6 +61,11 @@ type Generator struct {
 	// Available reusable check functions - maps type key to function name
 	// When set, the generator will call these functions instead of inlining validation
 	availableCheckFunctions map[string]string // type key (from checker.TypeToString) -> "_check_X"
+
+	// Track if we need the _got helper function for error messages
+	needsGotHelper bool
+	// Track if we've already emitted the _got helper in the current function scope
+	gotHelperEmitted bool
 }
 
 // MaxTypeDepth limits how deep we recurse into type hierarchies.
@@ -164,6 +169,7 @@ func (g *Generator) GenerateValidator(t *checker.Type, typeName string) Validato
 	g.funcIdx = 0
 	g.visiting = make(map[string]bool)
 	g.depth = 0
+	g.needsGotHelper = false
 
 	// Generate validation statements
 	statements := g.generateValidation(t, "_v", "_n")
@@ -172,6 +178,12 @@ func (g *Generator) GenerateValidator(t *checker.Type, typeName string) Validato
 	// Use explicit 'any' types for strict mode compatibility
 	var sb strings.Builder
 	sb.WriteString("((_v: any, _n: string) => { ")
+
+	// Add _got helper if needed (for error messages with actual values)
+	if g.needsGotHelper {
+		sb.WriteString(gotHelperCode)
+		sb.WriteString("; ")
+	}
 
 	// Add helper functions
 	for _, fn := range g.ioFuncs {
@@ -225,6 +237,7 @@ func (g *Generator) GenerateValidatorFromNode(t *checker.Type, typeNode *ast.Nod
 	g.funcIdx = 0
 	g.visiting = make(map[string]bool)
 	g.depth = 0
+	g.needsGotHelper = false
 
 	// Generate validation statements using node for better detection
 	statements := g.generateValidationFromNode(t, typeNode, "_v", "_n")
@@ -233,6 +246,12 @@ func (g *Generator) GenerateValidatorFromNode(t *checker.Type, typeNode *ast.Nod
 	// Use explicit 'any' types for strict mode compatibility
 	var sb strings.Builder
 	sb.WriteString("((_v: any, _n: string) => { ")
+
+	// Add _got helper if needed (for error messages with actual values)
+	if g.needsGotHelper {
+		sb.WriteString(gotHelperCode)
+		sb.WriteString("; ")
+	}
 
 	// Add helper functions
 	for _, fn := range g.ioFuncs {
@@ -285,6 +304,7 @@ func (g *Generator) GenerateInlineValidationContinued(t *checker.Type, typeNode 
 	g.depth = 0
 	g.complexityError = ""
 	g.typeStack = nil
+	g.needsGotHelper = false
 
 	return g.generateInlineValidationInternal(t, typeNode, paramName)
 }
@@ -400,6 +420,27 @@ func (g *Generator) validationError(condition, nameExpr, expected, gotExpr strin
 	return fmt.Sprintf(`if (!(%s)) %s; `, condition, g.throwOrReturn(errorMsg))
 }
 
+// gotType generates a simple "got" expression showing the type (for type mismatches).
+// Returns expressions like: typeof x, "null", "Array", constructor name
+func (g *Generator) gotType(expr string) string {
+	// Simple typeof check, handles null specially
+	return fmt.Sprintf(`(%s===null?"null":%s?.constructor?.name??typeof %s)`, expr, expr, expr)
+}
+
+// gotWithValue generates a "got" expression that includes both the type and the actual value.
+// Use this for value mismatches (literals, enums) where seeing the actual value helps debugging.
+// For primitives: shows "type (value)" with truncated value
+// For objects: shows constructor name
+// The helper function _got is added once per validator when needed.
+func (g *Generator) gotWithValue(expr string) string {
+	g.needsGotHelper = true
+	return fmt.Sprintf(`_got(%s)`, expr)
+}
+
+// gotHelperCode is the _got helper function for showing values in error messages.
+// Only used for literal/enum mismatches where seeing the actual value matters.
+const gotHelperCode = `const _got=(v)=>{const t=typeof v;if(v===null)return"null";if(t==="object")return v?.constructor?.name??"object";if(t==="function")return"function";const s=String(v);return t+" ("+(s.length>50?s.slice(0,47)+"...":s)+")"}`
+
 // unconditionalError generates an unconditional error statement.
 // Used for cases like 'never' type or depth limit exceeded.
 func (g *Generator) unconditionalError(nameExpr, message string) string {
@@ -453,6 +494,7 @@ func (g *Generator) GenerateCheckFunction(t *checker.Type, typeName string) Chec
 	g.funcIdx = 0
 	g.visiting = make(map[string]bool)
 	g.depth = 0
+	g.needsGotHelper = false
 	g.returnErrors = true
 
 	// Generate validation statements that return errors
@@ -464,6 +506,12 @@ func (g *Generator) GenerateCheckFunction(t *checker.Type, typeName string) Chec
 	// Build the check function
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("const %s = (_v: any): string | null => { ", funcName))
+
+	// Add _got helper if needed
+	if g.needsGotHelper {
+		sb.WriteString(gotHelperCode)
+		sb.WriteString("; ")
+	}
 
 	// Add helper functions
 	for _, fn := range g.ioFuncs {
@@ -521,6 +569,7 @@ func (g *Generator) GenerateCheckFunctionFromNode(t *checker.Type, typeNode *ast
 	g.funcIdx = 0
 	g.visiting = make(map[string]bool)
 	g.depth = 0
+	g.needsGotHelper = false
 	g.returnErrors = true
 
 	// Generate validation statements that return errors
@@ -532,6 +581,12 @@ func (g *Generator) GenerateCheckFunctionFromNode(t *checker.Type, typeNode *ast
 	// Build the check function
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("const %s = (_v: any): string | null => { ", funcName))
+
+	// Add _got helper if needed
+	if g.needsGotHelper {
+		sb.WriteString(gotHelperCode)
+		sb.WriteString("; ")
+	}
 
 	// Add helper functions
 	for _, fn := range g.ioFuncs {
@@ -609,6 +664,7 @@ func (g *Generator) GenerateFilterFunction(t *checker.Type, typeName string) Fil
 	g.funcIdx = 0
 	g.visiting = make(map[string]bool)
 	g.depth = 0
+	g.needsGotHelper = false
 	g.returnTupleErrors = true
 
 	// Generate filtering validation statements that return [error, null] tuples
@@ -620,6 +676,12 @@ func (g *Generator) GenerateFilterFunction(t *checker.Type, typeName string) Fil
 	// Build the filter function - returns [error, result] tuple
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("const %s = (_v: any): [string | null, any] => { ", funcName))
+
+	// Add _got helper if needed
+	if g.needsGotHelper {
+		sb.WriteString(gotHelperCode)
+		sb.WriteString("; ")
+	}
 
 	// Add helper functions
 	for _, fn := range g.ioFuncs {
@@ -677,6 +739,7 @@ func (g *Generator) GenerateFilterFunctionFromNode(t *checker.Type, typeNode *as
 	g.funcIdx = 0
 	g.visiting = make(map[string]bool)
 	g.depth = 0
+	g.needsGotHelper = false
 	g.returnTupleErrors = true
 
 	// Generate filtering validation statements that return [error, null] tuples
@@ -690,6 +753,12 @@ func (g *Generator) GenerateFilterFunctionFromNode(t *checker.Type, typeNode *as
 	// Build the filter function - returns [error, result] tuple
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("const %s = (_v: any): [string | null, any] => { ", funcName))
+
+	// Add _got helper if needed
+	if g.needsGotHelper {
+		sb.WriteString(gotHelperCode)
+		sb.WriteString("; ")
+	}
 
 	// Add helper functions
 	for _, fn := range g.ioFuncs {
@@ -718,9 +787,17 @@ func (g *Generator) generateInlineValidationInternal(t *checker.Type, typeNode *
 		validation = g.generateValidation(t, paramName, `"`+paramName+`"`)
 	}
 
-	// If there are helper functions, prepend them to the validation
-	if len(g.ioFuncs) > 0 {
+	// If there are helper functions or _got helper, prepend them to the validation
+	// Only emit _got helper if needed AND not already emitted in this function scope
+	shouldEmitGot := g.needsGotHelper && !g.gotHelperEmitted
+	if len(g.ioFuncs) > 0 || shouldEmitGot {
 		var sb strings.Builder
+		// Add _got helper if needed and not already emitted
+		if shouldEmitGot {
+			sb.WriteString(gotHelperCode)
+			sb.WriteString("; ")
+			g.gotHelperEmitted = true
+		}
 		for _, fn := range g.ioFuncs {
 			sb.WriteString(fn)
 			sb.WriteString("; ")
@@ -912,7 +989,7 @@ func (g *Generator) generateValidation(t *checker.Type, expr string, nameExpr st
 			// Already visiting this type - skip to avoid infinite recursion
 			// For recursive types, we just validate object-ness
 			check := fmt.Sprintf(`typeof %s === "object" || typeof %s === "function" || typeof %s === "undefined"`, expr, expr, expr)
-			return g.validationError(check, nameExpr, "object", fmt.Sprintf("typeof %s", expr))
+			return g.validationError(check, nameExpr, "object", g.gotType(expr))
 		}
 		// Mark as visiting before any recursive calls
 		g.visiting[typeKey] = true
@@ -954,7 +1031,7 @@ func (g *Generator) generateValidation(t *checker.Type, expr string, nameExpr st
 				typeName = sym.Name
 			}
 			check := fmt.Sprintf(`"function" === typeof %s`, expr)
-			return g.validationError(check, nameExpr, typeName, fmt.Sprintf("typeof %s", expr))
+			return g.validationError(check, nameExpr, typeName, g.gotType(expr))
 		}
 		return g.objectValidation(t, expr, nameExpr)
 	}
@@ -1098,6 +1175,7 @@ func (g *Generator) primitiveValidation(t *checker.Type, expr string, nameExpr s
 
 	var expected string
 	var check string
+	isLiteral := false // Literals benefit from showing actual value in error
 
 	switch {
 	// Literal types must be checked BEFORE their base types
@@ -1107,6 +1185,7 @@ func (g *Generator) primitiveValidation(t *checker.Type, expr string, nameExpr s
 			if str, ok := lt.Value().(string); ok {
 				expected = fmt.Sprintf("%q", str)
 				check = fmt.Sprintf(`%q === %s`, str, expr)
+				isLiteral = true
 			}
 		}
 		if check == "" {
@@ -1118,6 +1197,7 @@ func (g *Generator) primitiveValidation(t *checker.Type, expr string, nameExpr s
 		if lt != nil {
 			expected = fmt.Sprintf("%v", lt.Value())
 			check = fmt.Sprintf(`%v === %s`, lt.Value(), expr)
+			isLiteral = true
 		}
 		if check == "" {
 			expected = "number"
@@ -1129,6 +1209,7 @@ func (g *Generator) primitiveValidation(t *checker.Type, expr string, nameExpr s
 			if b, ok := lt.Value().(bool); ok {
 				expected = fmt.Sprintf("%t", b)
 				check = fmt.Sprintf(`%t === %s`, b, expr)
+				isLiteral = true
 			}
 		}
 		if check == "" {
@@ -1160,7 +1241,12 @@ func (g *Generator) primitiveValidation(t *checker.Type, expr string, nameExpr s
 		return ""
 	}
 
-	return g.validationError(check, nameExpr, expected, fmt.Sprintf("typeof %s", expr))
+	// For literals, show actual value to help debugging (e.g., "got string (user)" when expecting "admin")
+	// For type mismatches, just show the type (e.g., "got number" when expecting string)
+	if isLiteral {
+		return g.validationError(check, nameExpr, expected, g.gotWithValue(expr))
+	}
+	return g.validationError(check, nameExpr, expected, g.gotType(expr))
 }
 
 // unionValidation generates validation for union types using if-else chain.
@@ -1366,8 +1452,7 @@ func (g *Generator) objectValidation(t *checker.Type, expr string, nameExpr stri
 
 	// Check it's an object and not null
 	check := fmt.Sprintf(`typeof %s === "object" && %s !== null`, expr, expr)
-	gotExpr := fmt.Sprintf(`(%s === null ? "null" : typeof %s)`, expr, expr)
-	sb.WriteString(g.validationError(check, nameExpr, typeName, gotExpr))
+	sb.WriteString(g.validationError(check, nameExpr, typeName, g.gotType(expr)))
 
 	// Validate each property
 	props := checker.Checker_getPropertiesOfType(g.checker, t)
@@ -1406,7 +1491,7 @@ func (g *Generator) arrayValidation(t *checker.Type, expr string, nameExpr strin
 
 	// Check it's an array
 	check := fmt.Sprintf(`Array.isArray(%s)`, expr)
-	sb.WriteString(g.validationError(check, nameExpr, "array", fmt.Sprintf("typeof %s", expr)))
+	sb.WriteString(g.validationError(check, nameExpr, "array", g.gotType(expr)))
 
 	// Get element type and validate each element
 	typeArgs := checker.Checker_getTypeArguments(g.checker, t)
@@ -1439,7 +1524,7 @@ func (g *Generator) arrayValidationFromNode(t *checker.Type, typeNode *ast.Node,
 
 	// Check it's an array
 	check := fmt.Sprintf(`Array.isArray(%s)`, expr)
-	sb.WriteString(g.validationError(check, nameExpr, "array", fmt.Sprintf("typeof %s", expr)))
+	sb.WriteString(g.validationError(check, nameExpr, "array", g.gotType(expr)))
 
 	// Get element type from AST node
 	if typeNode.Kind == ast.KindArrayType {
@@ -1695,12 +1780,12 @@ func (g *Generator) templateLiteralValidation(t *checker.Type, expr string, name
 	if pattern == nil {
 		// Fallback to string validation
 		check := fmt.Sprintf(`"string" === typeof %s`, expr)
-		return g.validationError(check, nameExpr, "template literal", fmt.Sprintf("typeof %s", expr))
+		return g.validationError(check, nameExpr, "template literal", g.gotWithValue(expr))
 	}
 
 	check := pattern.RenderAsCheck(expr)
 	expected := pattern.getExpectedDescription()
-	return g.validationError(check, nameExpr, expected, fmt.Sprintf("typeof %s", expr))
+	return g.validationError(check, nameExpr, expected, g.gotWithValue(expr))
 }
 
 // escapeJSString escapes a string for safe embedding in a JavaScript double-quoted string literal.
@@ -1722,6 +1807,8 @@ func (g *Generator) reset() {
 	g.visiting = make(map[string]bool)
 	g.depth = 0
 	g.complexityError = ""
+	g.needsGotHelper = false
+	g.gotHelperEmitted = false
 }
 
 // getTypeReferenceName extracts the type name from a type reference AST node.

@@ -1107,3 +1107,119 @@ void describe('Edge Cases - Advanced TypeScript', () => {
   })
 })
 
+// =============================================================================
+// ERROR MESSAGES - Type vs Value mismatches
+// =============================================================================
+
+void describe('Error Messages', () => {
+  // Type mismatches only show the type, not the value
+  registerTestCase({
+    name: 'type mismatch shows type only',
+    source: `export function run(input: string): string { return input }`,
+    cases: [
+      // For type mismatches, we just show the type (not the value)
+      { input: 123, error: /got Number/ },
+      { input: true, error: /got Boolean/ },
+      { input: null, error: /got null/ },
+      { input: {}, error: /got Object/ },
+      { input: [], error: /got Array/ },
+      { input: new Date(), error: /got Date/ },
+    ],
+  })
+
+  // Literal mismatches (right type, wrong value) show the actual value
+  registerTestCase({
+    name: 'literal mismatch shows actual value',
+    source: `export function run(input: "admin"): string { return input }`,
+    // The _got helper should be present for literal checks
+    expectStrings: ['_got'],
+    cases: [
+      // When the type is correct but value is wrong, show the actual value
+      { input: 'user', error: /got string \(user\)/ },
+      { input: 'guest', error: /got string \(guest\)/ },
+      // Even type mismatches show the value for literals (helpful for debugging)
+      { input: 123, error: /got number \(123\)/ },
+    ],
+  })
+
+  registerTestCase({
+    name: 'numeric literal mismatch shows value',
+    source: `export function run(input: 42): number { return input }`,
+    expectStrings: ['_got'],
+    cases: [
+      { input: 100, error: /got number \(100\)/ },
+      { input: -1, error: /got number \(-1\)/ },
+    ],
+  })
+
+  registerTestCase({
+    name: 'long string values are truncated',
+    source: `export function run(input: "short"): string { return input }`,
+    cases: [
+      // Long strings (>50 chars) should be truncated at 47 chars with ...
+      {
+        input: 'this is a very long string that exceeds fifty characters and should be truncated',
+        error: /got string \(this is a very long string that exceeds fifty c\.\.\.\)/
+      },
+    ],
+  })
+})
+
+// =============================================================================
+// SOURCE MAP GENERATION
+// =============================================================================
+
+void describe('Source Map Generation', () => {
+  it('returns source map with transformed code', async () => {
+    const source = `export function run(input: string): string { return input }`
+    const result = await compiler.transformSource('test.ts', source)
+
+    assert.ok(result.sourceMap, 'Source map should be present')
+    assert.strictEqual(result.sourceMap.version, 3, 'Source map version should be 3')
+    assert.ok(Array.isArray(result.sourceMap.sources), 'sources should be an array')
+    assert.strictEqual(result.sourceMap.sources[0], 'test.ts', 'Source should be test.ts')
+    assert.ok(result.sourceMap.mappings, 'Mappings should be present')
+    assert.ok(result.sourceMap.mappings.length > 0, 'Mappings should not be empty')
+  })
+
+  it('source map includes original content', async () => {
+    const source = `export function run(input: string): string { return input }`
+    const result = await compiler.transformSource('test.ts', source)
+
+    assert.ok(result.sourceMap, 'Source map should be present')
+    assert.ok(Array.isArray(result.sourceMap.sourcesContent), 'sourcesContent should be an array')
+    assert.strictEqual(result.sourceMap.sourcesContent![0], source, 'sourcesContent should match original source')
+  })
+
+  it('mappings use valid VLQ encoding', async () => {
+    const source = `export function run(input: string): string { return input }`
+    const result = await compiler.transformSource('test.ts', source)
+
+    assert.ok(result.sourceMap, 'Source map should be present')
+    const mappings = result.sourceMap.mappings
+
+    // VLQ mappings should only contain valid Base64 characters and separators
+    const validChars = /^[A-Za-z0-9+\/,;]*$/
+    assert.ok(validChars.test(mappings), `Mappings contain invalid characters: ${mappings}`)
+  })
+
+  it('complex transformation produces correct mapping structure', async () => {
+    const source = `
+      interface User { name: string; age: number }
+      export function run(user: User): string {
+        return user.name
+      }
+    `
+    const result = await compiler.transformSource('test.ts', source)
+
+    assert.ok(result.sourceMap, 'Source map should be present')
+    // Transformations add validation code, so mappings should have segments
+    const segments = result.sourceMap.mappings.split(';')
+    assert.ok(segments.length > 0, 'Should have line mappings')
+
+    // At least some lines should have mappings (non-empty segments)
+    const nonEmptySegments = segments.filter(s => s.length > 0)
+    assert.ok(nonEmptySegments.length > 0, 'Should have non-empty mapping segments')
+  })
+})
+

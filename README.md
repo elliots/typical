@@ -366,10 +366,41 @@ DEBUG=1 npm run build
 
 ## Limitations
 
-- Generic type parameters (`T`) cannot be validated - no runtime type information
-- Type-only imports of classes aren't checked (can't do instanceof on type-only imports)
-- Validation of functions is just not done. Need to think about that one.
-- Some complex types may not be fully supported yet. If you find any that fail, please open an issue!
+### Types that cannot be validated at runtime
+
+These TypeScript features have no runtime representation and are skipped:
+
+| Feature | Why | Example |
+|---------|-----|---------|
+| Generic type parameters | No runtime type info for `T` | `function process<T>(x: T): T` |
+| Conditional types | Compile-time only | `T extends string ? A : B` |
+| `infer` keyword | Compile-time type inference | `T extends Array<infer U> ? U : never` |
+| `keyof` operator | Compile-time key extraction | `keyof User` |
+| Indexed access types | Compile-time type lookup | `User['name']` |
+| Unique symbols | Symbol identity not checkable | `declare const id: unique symbol` |
+| Index signature values | Would require iterating all keys | `{ [key: string]: number }` |
+
+### Other limitations
+
+- **Type-only imports** - `import type { MyClass }` can't use instanceof (class doesn't exist at runtime)
+- **Function signatures** - Only validates `typeof === 'function'`, not parameter/return types
+- **Function overloads** - Validates the implementation signature, not individual overload signatures
+- **Complex library types** - DOM types, React types, etc. may exceed complexity limits (configurable via `maxGeneratedFunctions`)
+
+### What IS validated
+
+Despite these limitations, Typical validates most practical TypeScript patterns:
+- All primitive types (string, number, boolean, bigint, symbol, null, undefined)
+- Object properties and nested objects
+- Arrays and tuples (including variadic tuples)
+- Union and intersection types
+- Literal types and template literal types
+- Enums (string and numeric)
+- Utility types (Partial, Required, Pick, Omit, Record, Extract, Exclude)
+- Mapped and conditional types (when resolved to concrete types)
+- Branded/opaque types (validates the underlying primitive)
+- Class instances (via instanceof)
+- Built-in types (Date, Map, Set, URL, Error, etc.)
 
 ---
 

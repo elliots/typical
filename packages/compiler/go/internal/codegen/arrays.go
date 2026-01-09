@@ -37,7 +37,7 @@ func (g *Generator) tupleValidation(t *checker.Type, expr string, nameExpr strin
 	// Check it's an array - use optimised error message
 	errorNameExpr := g.errorName(nameExpr)
 	errorMsg := concatStrings(`"Expected "`, errorNameExpr)
-	errorMsg = concatStrings(errorMsg, fmt.Sprintf(`" to be tuple, got " + typeof %s`, expr))
+	errorMsg = concatStrings(errorMsg, fmt.Sprintf(`" to be tuple, got " + %s`, g.gotType(expr)))
 	sb.WriteString(fmt.Sprintf(`if (!Array.isArray(%s)) %s; `, expr, g.throwOrReturn(errorMsg)))
 
 	// Get tuple element types
