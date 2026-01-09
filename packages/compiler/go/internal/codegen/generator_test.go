@@ -590,9 +590,9 @@ function validate(user: SimpleUser): void {}
 		t.Error("Validator should check _v.age")
 	}
 
-	// Check error message formatting
-	if !strings.Contains(validator, `"Expected " + _n`) {
-		t.Error("Validator should have error message with name parameter")
+	// Check that _te helper is used with _n parameter
+	if !strings.Contains(validator, `_te(_n`) {
+		t.Error("Validator should use _te helper with name parameter")
 	}
 }
 
@@ -683,7 +683,7 @@ interface User {
 	// Check function structure - should NOT throw, should return error or null
 	expectedParts := []string{
 		"const _check_User = (_v: any): string | null => {", // Function signature
-		`return "Expected %n`,                               // Should return error with %n placeholder (optimised)
+		`return _te("%n`,                                    // Should return _te helper call with %n placeholder
 		"return null;",                                      // Return null on success
 	}
 
@@ -698,9 +698,9 @@ interface User {
 		t.Error("Check function should NOT throw - it should return error messages")
 	}
 
-	// Check that %n placeholder is used instead of _n
-	if strings.Contains(checkFunc, `"Expected " + _n`) {
-		t.Error("Check function should use %n placeholder, not _n parameter")
+	// Check that %n placeholder is used in the _te calls
+	if !strings.Contains(checkFunc, `_te("%n"`) {
+		t.Error("Check function should use %n placeholder in _te calls")
 	}
 
 	// Check function name
@@ -785,11 +785,11 @@ interface User {
 	// Filter function structure - should return [error, result] tuple
 	expectedParts := []string{
 		"const _filter_User = (_v: any): [string | null, any] => {", // Function signature with tuple return
-		`return ["Expected %n`,                                       // Should return error tuple with %n placeholder (optimised)
-		"return [null, _r];",                                         // Return success tuple
-		"const _r: any = {};",                                        // Result object
-		"_r.name = _v.name",                                          // Property assignment
-		"_r.age = _v.age",                                            // Property assignment
+		`return [_te("%n`,                                           // Should return _te helper call in tuple with %n placeholder
+		"return [null, _r];",                                        // Return success tuple
+		"const _r: any = {};",                                       // Result object
+		"_r.name = _v.name",                                         // Property assignment
+		"_r.age = _v.age",                                           // Property assignment
 	}
 
 	for _, part := range expectedParts {

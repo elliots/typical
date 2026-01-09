@@ -95,9 +95,9 @@ function registerTestCase(testCase: TestCase) {
         } catch (e: any) {
           if (e.code === 'ERR_ASSERTION') throw e // Re-throw assertion failures
           if (typeof caseDef.error === 'string') {
-            assert.ok(e.message.includes(caseDef.error), `[${caseName}] Expected error to contain "${caseDef.error}", got "${e.message}"`)
+            assert.ok(e.message.includes(caseDef.error), `[${caseName}] Expected error to contain "${caseDef.error}", got "${e.message}"\n\nTransformed code:\n${transformed.code}\n\nTranspiled JS:\n${js}`)
           } else {
-            assert.match(e.message, caseDef.error, `[${caseName}] Error message mismatch`)
+            assert.match(e.message, caseDef.error, `[${caseName}] Error message mismatch\n\nTransformed code:\n${transformed.code}\n\nTranspiled JS:\n${js}`)
           }
         }
       } else {
@@ -249,7 +249,7 @@ void describe('Array and Tuple Types', () => {
     cases: [
       { input: ['age: ', 30], result: 'age: 30' },
       { input: ['age: ', '30'], error: 'to be number' },
-      { input: ['age: '], error: 'to have 2 elements' }, // Length check error message
+      { input: ['age: '], error: 'to be 2 elements' }, // Length check error message
     ],
   })
 })
@@ -881,7 +881,7 @@ void describe('Configuration Options', () => {
     `,
     config: { ignoreTypes: ['Ignored'] },
     expectStrings: [
-      'to be User', // User should be validated
+      '"User"', // User should be validated (passed to _te helper)
       "validation skipped: type 'Ignored' matches ignoreTypes", // Ignored should be skipped
     ],
     cases: [
@@ -1126,6 +1126,7 @@ void describe('Edge Cases - Advanced TypeScript', () => {
 
 void describe('Error Messages', () => {
   // Type mismatches only show the type, not the value
+  // Uses constructor.name for objects (Object, Array, Date) and typeof for primitives (number, boolean)
   registerTestCase({
     name: 'type mismatch shows type only',
     source: `export function run(input: string): string { return input }`,
@@ -1144,8 +1145,8 @@ void describe('Error Messages', () => {
   registerTestCase({
     name: 'literal mismatch shows actual value',
     source: `export function run(input: "admin"): string { return input }`,
-    // The _got helper should be present for literal checks
-    expectStrings: ['_got'],
+    // The _te helper should be present for literal checks (TypeError with value display)
+    expectStrings: ['_te'],
     cases: [
       // When the type is correct but value is wrong, show the actual value
       { input: 'user', error: /got string \(user\)/ },
@@ -1158,7 +1159,7 @@ void describe('Error Messages', () => {
   registerTestCase({
     name: 'numeric literal mismatch shows value',
     source: `export function run(input: 42): number { return input }`,
-    expectStrings: ['_got'],
+    expectStrings: ['_te'],
     cases: [
       { input: 100, error: /got number \(100\)/ },
       { input: -1, error: /got number \(-1\)/ },
@@ -1174,6 +1175,45 @@ void describe('Error Messages', () => {
         input: 'this is a very long string that exceeds fifty characters and should be truncated',
         error: /got string \(this is a very long string that exceeds fifty c\.\.\.\)/,
       },
+    ],
+  })
+
+  // Regression: as casts inside expressions (like console.log) must generate valid expression code
+  registerTestCase({
+    name: 'as cast inside expression context (console.log)',
+    source: `
+      interface User { name: string }
+      export function run(input: any): User {
+        console.log('user:', input as User)
+        return input as User
+      }
+    `,
+    cases: [
+      { input: { name: 'Alice' }, result: { name: 'Alice' } },
+      { input: { name: 123 }, error: 'to be string' },
+    ],
+  })
+})
+
+// =============================================================================
+// PLAYGROUND EXAMPLES (regression tests)
+// =============================================================================
+
+void describe('Playground Examples', () => {
+  registerTestCase({
+    name: 'JSON.parse with template literal type',
+    source: `
+      interface User {
+        name: string;
+        email: \`\${string}@\${string}.\${string}\`;
+      }
+      export function run(input: string): User {
+        return JSON.parse(input) as User;
+      }
+    `,
+    cases: [
+      { input: JSON.stringify({ name: 'Alice', email: 'alice@example.com' }), result: { name: 'Alice', email: 'alice@example.com' } },
+      { input: JSON.stringify({ name: 'Alice', email: 'not@quite' }), error: 'email' },
     ],
   })
 })

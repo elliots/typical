@@ -23,9 +23,9 @@
     }
   },
   "scripts": {
-    "build": "tsc",
-    "build:go": "./go/scripts/sync-shims.sh && cd go && go build -o ../bin/typical ./cmd/typical",
-    "test": "npx tsx test/e2e.ts"
+    "build": "npm run build:ts && npm run build:go",
+    "build:ts": "tsc",
+    "build:go": "./go/scripts/sync-shims.sh && cd go && go build -o ../bin/typical ./cmd/typical"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

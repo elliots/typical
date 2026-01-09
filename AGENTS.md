@@ -1,7 +1,7 @@
 # CLAUDE.md - Typical Package Guide
 
 Important: Use Australian english spelling and grammar conventions.
-Important: Build the binaries with `npm run build`
+Important: Build everything with `npm run build`
 
 ## What is Typical?
 
@@ -67,8 +67,8 @@ The core transformation logic is in Go:
 # Build everything
 pnpm run build
 
-# Build Go binary (from packages/compiler)
-cd packages/compiler/go && go build -o ../bin/typical ./cmd/typical
+# Just build the compiler/go binary
+cd packages/compiler/go && npm run build
 
 # Run all samples
 npm run samples

@@ -222,10 +222,12 @@ void describe('Source Map Accuracy', () => {
     assert.ok(originalReturnIdx >= 0, 'Original should contain "return x"')
     assert.ok(transformedReturnIdx >= 0, 'Transformed should contain "return"')
 
-    // Parse the source map and verify we can find a mapping
+    // Parse the source map and verify we can find mappings
+    // Note: with hoisted helpers (_te), the first line may be helper code with no mapping
     const lines = parseMappings(result.sourceMap.mappings)
     assert.ok(lines.length > 0, 'Should have at least one line of mappings')
-    assert.ok(lines[0].length > 0, 'First line should have mappings')
+    const linesWithMappings = lines.filter(l => l.length > 0)
+    assert.ok(linesWithMappings.length > 0, 'At least one line should have mappings')
   })
 
   it('maps multiline code correctly', async () => {

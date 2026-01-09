@@ -224,8 +224,9 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 		flags := checker.Type_flags(t)
 		objectFlags := checker.Type_objectFlags(t)
 		isArray := checker.Checker_isArrayType(c, t)
+		isTuple := checker.IsTupleType(t)
 
-		if flags&checker.TypeFlagsObject != 0 && !isArray {
+		if flags&checker.TypeFlagsObject != 0 && !isArray && !isTuple {
 			if isBuiltinClassType(t) {
 				return
 			}
@@ -257,6 +258,14 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 			typeArgs := checker.Checker_getTypeArguments(c, t)
 			if len(typeArgs) > 0 {
 				countNestedTypes(typeArgs[0], usage, types)
+			}
+		}
+
+		if isTuple {
+			// For tuples, count each element type
+			typeArgs := checker.Checker_getTypeArguments(c, t)
+			for _, elemType := range typeArgs {
+				countNestedTypes(elemType, usage, types)
 			}
 		}
 
@@ -344,8 +353,9 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 		// Count nested types
 		flags := checker.Type_flags(t)
 		isArray := checker.Checker_isArrayType(c, t)
+		isTuple := checker.IsTupleType(t)
 
-		if flags&checker.TypeFlagsObject != 0 && !isArray {
+		if flags&checker.TypeFlagsObject != 0 && !isArray && !isTuple {
 			objectFlags := checker.Type_objectFlags(t)
 			if objectFlags&(checker.ObjectFlagsInterface|checker.ObjectFlagsAnonymous|checker.ObjectFlagsReference) != 0 {
 				props := checker.Checker_getPropertiesOfType(c, t)
@@ -362,6 +372,14 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 			typeArgs := checker.Checker_getTypeArguments(c, t)
 			if len(typeArgs) > 0 {
 				countNestedTypes(typeArgs[0], result.CheckTypeUsage, result.CheckTypeObjects)
+			}
+		}
+
+		if isTuple {
+			// For tuples, count each element type
+			typeArgs := checker.Checker_getTypeArguments(c, t)
+			for _, elemType := range typeArgs {
+				countNestedTypes(elemType, result.CheckTypeUsage, result.CheckTypeObjects)
 			}
 		}
 
@@ -404,8 +422,9 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 		// Count nested types
 		flags := checker.Type_flags(t)
 		isArray := checker.Checker_isArrayType(c, t)
+		isTuple := checker.IsTupleType(t)
 
-		if flags&checker.TypeFlagsObject != 0 && !isArray {
+		if flags&checker.TypeFlagsObject != 0 && !isArray && !isTuple {
 			objectFlags := checker.Type_objectFlags(t)
 			if objectFlags&(checker.ObjectFlagsInterface|checker.ObjectFlagsAnonymous|checker.ObjectFlagsReference) != 0 {
 				props := checker.Checker_getPropertiesOfType(c, t)
@@ -422,6 +441,14 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 			typeArgs := checker.Checker_getTypeArguments(c, t)
 			if len(typeArgs) > 0 {
 				countNestedTypes(typeArgs[0], result.FilterTypeUsage, result.FilterTypeObjects)
+			}
+		}
+
+		if isTuple {
+			// For tuples, count each element type
+			typeArgs := checker.Checker_getTypeArguments(c, t)
+			for _, elemType := range typeArgs {
+				countNestedTypes(elemType, result.FilterTypeUsage, result.FilterTypeObjects)
 			}
 		}
 

@@ -27,8 +27,8 @@ func TestTransformFile(t *testing.T) {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`"string" === typeof name`,      // Uses param name directly (inline)
-				`"Expected name to be string`,   // Error message (optimised single string)
+				`"string" === typeof name`,       // Uses param name directly (inline)
+				`_te("name", "string", name)`,    // _te helper call
 				`throw new TypeError`,
 			},
 		},
@@ -39,8 +39,8 @@ func TestTransformFile(t *testing.T) {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`"number" === typeof x`,      // Uses param name directly (inline)
-				`"Expected x to be number`,   // Error message (optimised single string)
+				`"number" === typeof x`,     // Uses param name directly (inline)
+				`_te("x", "number", x)`,     // _te helper call
 			},
 		},
 		{
@@ -149,7 +149,7 @@ function greet(user: User): void {
 				`typeof user === "object"`, // Uses param name directly
 				`user !== null`,            // Uses param name directly
 				`user.name`,                // Property access on param
-				`"Expected user.name`,      // Error message with param name (optimised - compile-time concatenation)
+				`_te("user.name"`,          // _te helper call with name
 			},
 		},
 		{
@@ -159,9 +159,9 @@ function greet(user: User): void {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`Array.isArray(nums)`,       // Uses param name directly
-				`nums.length`,               // Loop over array using param name
-				`"Expected nums[" + _i0 +`,  // Array index in error message (dynamic index part)
+				`Array.isArray(nums)`,              // Uses param name directly
+				`nums.length`,                      // Loop over array using param name
+				`_te("nums[" + _i0 + "]"`,          // _te helper call with array index expression
 			},
 		},
 		{
@@ -171,7 +171,7 @@ function greet(user: User): void {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`"Expected name to be string`, // Optimised single string
+				`_te("name", "string", name)`, // _te helper call with variable name
 			},
 		},
 	}
@@ -392,7 +392,7 @@ function getUser(data: unknown): User {
 	return user;
 }`,
 			expectedParts: []string{
-				`/* as removed */`,    // Cast was validated
+				`_check_User`,         // Cast uses check function
 				`/* already valid */`, // Return validation skipped
 			},
 			unexpectedParts: []string{

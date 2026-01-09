@@ -1,0 +1,199 @@
+/* CSS Variables - TypeScript colours for easy theming */
+:root {
+  /* Primary colours */
+  --color-primary: #3178c6;
+  --color-primary-dark: #235a97;
+  --color-primary-light: #4a90d9;
+
+  /* Background colours */
+  --color-bg: #ffffff;
+  --color-bg-alt: #f7f7f7;
+  --color-bg-code: #1e1e1e;
+
+  /* Text colours */
+  --color-text: #1a1a1a;
+  --color-text-light: #6b6b6b;
+  --color-text-inverse: #ffffff;
+
+  /* Accent colours */
+  --color-success: #4caf50;
+  --color-error: #f44336;
+  --color-warning: #ff9800;
+
+  /* Code syntax colours */
+  --color-code-keyword: #569cd6;
+  --color-code-string: #ce9178;
+  --color-code-number: #b5cea8;
+  --color-code-function: #dcdcaa;
+  --color-code-type: #4ec9b0;
+  --color-code-comment: #6a9955;
+  --color-code-property: #9cdcfe;
+  --color-code-error: #f48771;
+
+  /* Spacing */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 2rem;
+  --spacing-xl: 4rem;
+
+  /* Typography - matches TypeScript website exactly */
+  --font-sans: "Segoe UI Web (West European)", "Segoe UI", -apple-system, system-ui, Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: Menlo, Monaco, Consolas, "Andale Mono", "Ubuntu Mono", "Courier New", monospace;
+
+  /* Layout */
+  --max-width: 1200px;
+  --header-height: 60px;
+
+  /* Borders */
+  --border-radius: 4px;
+  --border-radius-lg: 8px;
+}
+
+/* Reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Typography - matches TypeScript website */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 200;
+  line-height: 1.3;
+}
+
+h1 {
+  font-size: 2.5rem;
+  font-weight: 200;
+}
+
+h2 {
+  font-size: 2rem;
+  font-weight: 200;
+}
+
+h3 {
+  font-size: 1.25rem;
+  font-weight: 400;
+}
+
+p {
+  margin-bottom: var(--spacing-md);
+}
+
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Code */
+code, pre {
+  font-family: var(--font-mono);
+}
+
+code {
+  background: var(--color-bg-alt);
+  padding: 0.2em 0.4em;
+  border-radius: var(--border-radius);
+  font-size: 0.9em;
+}
+
+pre {
+  background: var(--color-bg-code);
+  color: var(--color-text-inverse);
+  padding: var(--spacing-md);
+  border-radius: var(--border-radius-lg);
+  overflow-x: auto;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* Utility classes */
+.container {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 var(--spacing-lg);
+}
+
+.text-center {
+  text-align: center;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Button styles */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-sm) var(--spacing-lg);
+  border: none;
+  border-radius: var(--border-radius);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s, transform 0.1s;
+}
+
+.btn:hover {
+  text-decoration: none;
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn-primary {
+  background: var(--color-bg);
+  color: var(--color-primary);
+}
+
+.btn-primary:hover {
+  background: var(--color-bg-alt);
+}
+
+.btn-outline {
+  background: transparent;
+  color: var(--color-text-inverse);
+  border: 2px solid var(--color-text-inverse);
+}
+
+.btn-outline:hover {
+  background: rgba(255, 255, 255, 0.1);
+}

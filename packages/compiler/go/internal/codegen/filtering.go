@@ -7,9 +7,17 @@ import (
 	"github.com/microsoft/typescript-go/shim/checker"
 )
 
+// filteringThrow generates a throw statement using the _te helper.
+// This uses the shared _te helper which is hoisted at file level.
+// The throw happens at the call site (not in _te) so stack traces are correct.
+func (g *Generator) filteringThrow(nameExpr, expected, expr string) string {
+	g.needsTeHelper = true
+	g.fileNeedsTeHelper = true
+	return fmt.Sprintf(`throw new TypeError(_te(%s, %s, %s))`, nameExpr, escapeJSStringQuoted(expected), expr)
+}
+
 // filteringError builds an error message for filtering validation.
-// This optimizes string concatenation when nameExpr is a string literal.
-// Returns the error message expression ready for use in throw/return.
+// Used for return [error, null] statements in filter functions.
 func filteringError(nameExpr, expected, gotExpr string) string {
 	// Build: "Expected " + nameExpr + " to be <expected>, got " + gotExpr
 	// Optimized when nameExpr is a literal
@@ -17,11 +25,6 @@ func filteringError(nameExpr, expected, gotExpr string) string {
 	msg = concatStrings(msg, fmt.Sprintf(`" to be %s, got "`, escapeJSString(expected)))
 	msg = concatStrings(msg, gotExpr)
 	return msg
-}
-
-// filteringThrow generates a throw statement with optimized error message.
-func filteringThrow(nameExpr, expected, gotExpr string) string {
-	return fmt.Sprintf(`throw new TypeError(%s)`, filteringError(nameExpr, expected, gotExpr))
 }
 
 // filteringReturn generates a return [error, null] statement with optimized error message.
@@ -49,6 +52,8 @@ func (g *Generator) GenerateFilteringValidator(t *checker.Type, typeName string)
 
 	var sb strings.Builder
 	sb.WriteString("((_v: any, _n: string) => { ")
+
+	// Note: _got helper is hoisted at file level by the transformer, not inlined here
 
 	// Add helper functions
 	for _, fn := range g.ioFuncs {
@@ -92,13 +97,13 @@ func (g *Generator) generateFilteringValidation(t *checker.Type, expr string, na
 	// Handle null - just validate and assign
 	if flags&checker.TypeFlagsNull != 0 {
 		return fmt.Sprintf(`if (%s !== null) %s; const %s = null; `,
-			expr, filteringThrow(nameExpr, "null", fmt.Sprintf("typeof %s", expr)), resultExpr)
+			expr, g.filteringThrow(nameExpr, "null", fmt.Sprintf("typeof %s", expr)), resultExpr)
 	}
 
 	// Handle undefined
 	if flags&checker.TypeFlagsUndefined != 0 || flags&checker.TypeFlagsVoid != 0 {
 		return fmt.Sprintf(`if (%s !== undefined) %s; const %s = undefined; `,
-			expr, filteringThrow(nameExpr, "undefined", fmt.Sprintf("typeof %s", expr)), resultExpr)
+			expr, g.filteringThrow(nameExpr, "undefined", fmt.Sprintf("typeof %s", expr)), resultExpr)
 	}
 
 	// Primitives - just validate and assign
@@ -189,7 +194,7 @@ func (g *Generator) primitiveFilteringValidation(t *checker.Type, expr string, n
 	}
 
 	return fmt.Sprintf(`if (!(%s)) %s; const %s = %s; `,
-		check, filteringThrow(nameExpr, expected, fmt.Sprintf("typeof %s", expr)), resultExpr, expr)
+		check, g.filteringThrow(nameExpr, expected, fmt.Sprintf("typeof %s", expr)), resultExpr, expr)
 }
 
 // objectFilteringValidation - validates AND reconstructs the object
@@ -201,9 +206,8 @@ func (g *Generator) objectFilteringValidation(t *checker.Type, expr string, name
 	if g.isClassType(t) {
 		sym := checker.Type_symbol(t)
 		if sym != nil && !g.isTypeOnlyImport(sym) {
-			gotExpr := fmt.Sprintf(`(%s === null ? "null" : %s?.constructor?.name ?? typeof %s)`, expr, expr, expr)
 			sb.WriteString(fmt.Sprintf(`if (!(%s instanceof %s)) %s; `,
-				expr, sym.Name, filteringThrow(nameExpr, sym.Name+" instance", gotExpr)))
+				expr, sym.Name, g.filteringThrow(nameExpr, sym.Name+" instance", expr)))
 			sb.WriteString(fmt.Sprintf("const %s = %s; ", resultExpr, expr))
 			return sb.String()
 		}
@@ -216,9 +220,8 @@ func (g *Generator) objectFilteringValidation(t *checker.Type, expr string, name
 	}
 
 	// Check it's an object and not null
-	gotExpr := fmt.Sprintf(`(%s === null ? "null" : typeof %s)`, expr, expr)
 	sb.WriteString(fmt.Sprintf(`if (typeof %s !== "object" || %s === null) %s; `,
-		expr, expr, filteringThrow(nameExpr, typeName, gotExpr)))
+		expr, expr, g.filteringThrow(nameExpr, typeName, expr)))
 
 	// Create result object
 	sb.WriteString(fmt.Sprintf("const %s: any = {}; ", resultExpr))
@@ -286,7 +289,7 @@ func (g *Generator) arrayFilteringValidation(t *checker.Type, expr string, nameE
 
 	// Check it's an array
 	sb.WriteString(fmt.Sprintf(`if (!Array.isArray(%s)) %s; `,
-		expr, filteringThrow(nameExpr, "array", fmt.Sprintf("typeof %s", expr))))
+		expr, g.filteringThrow(nameExpr, "array", fmt.Sprintf("typeof %s", expr))))
 
 	// Get element type
 	typeArgs := checker.Checker_getTypeArguments(g.checker, t)
@@ -333,7 +336,7 @@ func (g *Generator) tupleFilteringValidation(t *checker.Type, expr string, nameE
 
 	// Check it's an array
 	sb.WriteString(fmt.Sprintf(`if (!Array.isArray(%s)) %s; `,
-		expr, filteringThrow(nameExpr, "tuple", fmt.Sprintf("typeof %s", expr))))
+		expr, g.filteringThrow(nameExpr, "tuple", fmt.Sprintf("typeof %s", expr))))
 
 	// Get tuple elements
 	typeArgs := checker.Checker_getTypeArguments(g.checker, t)
@@ -426,7 +429,7 @@ func (g *Generator) unionFilteringValidation(t *checker.Type, expr string, nameE
 	// Final else - throw error
 	expected := g.getUnionDescription(t)
 	sb.WriteString(fmt.Sprintf(`} else { %s; } `,
-		filteringThrow(nameExpr, expected, fmt.Sprintf("typeof %s", expr))))
+		g.filteringThrow(nameExpr, expected, fmt.Sprintf("typeof %s", expr))))
 
 	return sb.String()
 }

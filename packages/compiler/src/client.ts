@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { encodeRequest, decodeResponse, MessageType } from './protocol.js'
 import type { ProjectHandle, TransformResult, AnalyseResult } from './types.js'
+import { existsSync } from 'node:fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
@@ -16,6 +17,14 @@ function debugLog(...args: unknown[]): void {
 }
 
 function getBinaryPath(): string {
+
+  // use bin/typical in development
+  const devPath = join(__dirname, '../bin/typical')
+  if (existsSync(devPath)) {
+    debugLog(`[CLIENT] Using development binary at ${devPath}`)
+    return devPath
+  }
+
   // Find platform-specific package
   const platform = process.platform // darwin, linux, win32
   const arch = process.arch // arm64, x64

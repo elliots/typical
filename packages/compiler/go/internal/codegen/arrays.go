@@ -34,11 +34,8 @@ func (g *Generator) arrayCheck(t *checker.Type, expr string) string {
 func (g *Generator) tupleValidation(t *checker.Type, expr string, nameExpr string) string {
 	var sb strings.Builder
 
-	// Check it's an array - use optimised error message
-	errorNameExpr := g.errorName(nameExpr)
-	errorMsg := concatStrings(`"Expected "`, errorNameExpr)
-	errorMsg = concatStrings(errorMsg, fmt.Sprintf(`" to be tuple, got " + %s`, g.gotType(expr)))
-	sb.WriteString(fmt.Sprintf(`if (!Array.isArray(%s)) %s; `, expr, g.throwOrReturn(errorMsg)))
+	// Check it's an array
+	sb.WriteString(g.validationError(fmt.Sprintf(`Array.isArray(%s)`, expr), nameExpr, "tuple", expr))
 
 	// Get tuple element types
 	typeArgs := checker.Checker_getTypeArguments(g.checker, t)
@@ -60,26 +57,34 @@ func (g *Generator) tupleValidation(t *checker.Type, expr string, nameExpr strin
 				}
 			}
 			if minLen > 0 {
-				lenErrorMsg := concatStrings(`"Expected "`, errorNameExpr)
-				lenErrorMsg = concatStrings(lenErrorMsg, fmt.Sprintf(`" to have at least %d elements, got " + %s.length`, minLen, expr))
-				sb.WriteString(fmt.Sprintf(`if (%s.length < %d) %s; `, expr, minLen, g.throwOrReturn(lenErrorMsg)))
+				sb.WriteString(g.validationError(
+					fmt.Sprintf(`%s.length >= %d`, expr, minLen),
+					nameExpr,
+					fmt.Sprintf("at least %d elements", minLen),
+					fmt.Sprintf(`%s.length`, expr)))
 			}
 		} else if combinedFlags&checker.ElementFlagsOptional != 0 {
 			// Has optional elements - check max length
-			lenErrorMsg := concatStrings(`"Expected "`, errorNameExpr)
-			lenErrorMsg = concatStrings(lenErrorMsg, fmt.Sprintf(`" to have at most %d elements, got " + %s.length`, len(typeArgs), expr))
-			sb.WriteString(fmt.Sprintf(`if (%s.length > %d) %s; `, expr, len(typeArgs), g.throwOrReturn(lenErrorMsg)))
+			sb.WriteString(g.validationError(
+				fmt.Sprintf(`%s.length <= %d`, expr, len(typeArgs)),
+				nameExpr,
+				fmt.Sprintf("at most %d elements", len(typeArgs)),
+				fmt.Sprintf(`%s.length`, expr)))
 		} else {
 			// Fixed length tuple
-			lenErrorMsg := concatStrings(`"Expected "`, errorNameExpr)
-			lenErrorMsg = concatStrings(lenErrorMsg, fmt.Sprintf(`" to have %d elements, got " + %s.length`, len(typeArgs), expr))
-			sb.WriteString(fmt.Sprintf(`if (%s.length !== %d) %s; `, expr, len(typeArgs), g.throwOrReturn(lenErrorMsg)))
+			sb.WriteString(g.validationError(
+				fmt.Sprintf(`%s.length === %d`, expr, len(typeArgs)),
+				nameExpr,
+				fmt.Sprintf("%d elements", len(typeArgs)),
+				fmt.Sprintf(`%s.length`, expr)))
 		}
 	} else {
 		// Fallback - assume fixed length
-		lenErrorMsg := concatStrings(`"Expected "`, errorNameExpr)
-		lenErrorMsg = concatStrings(lenErrorMsg, fmt.Sprintf(`" to have %d elements, got " + %s.length`, len(typeArgs), expr))
-		sb.WriteString(fmt.Sprintf(`if (%s.length !== %d) %s; `, expr, len(typeArgs), g.throwOrReturn(lenErrorMsg)))
+		sb.WriteString(g.validationError(
+			fmt.Sprintf(`%s.length === %d`, expr, len(typeArgs)),
+			nameExpr,
+			fmt.Sprintf("%d elements", len(typeArgs)),
+			fmt.Sprintf(`%s.length`, expr)))
 	}
 
 	// Check if we have variadic tuple (with rest element)

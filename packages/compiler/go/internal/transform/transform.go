@@ -504,6 +504,21 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 				if returnStmt != nil && returnStmt.Expression != nil && ctx.returnType != nil {
 					returnType := checker.Checker_getTypeFromTypeNode(c, ctx.returnType)
 
+					// Check if return expression is an "as" cast (but NOT "as const")
+					// If it's a real type cast, skip return validation and let KindAsExpression handle it.
+					// For "as const", we still want to validate the return type.
+					if returnStmt.Expression.Kind == ast.KindAsExpression {
+						asExpr := returnStmt.Expression.AsAsExpression()
+						if asExpr != nil && asExpr.Type != nil {
+							typeText := strings.TrimSpace(text[asExpr.Type.Pos():asExpr.Type.End()])
+							if typeText != "const" {
+								// Real type cast - let KindAsExpression handler deal with it
+								break
+							}
+							// "as const" - fall through to do normal return validation
+						}
+					}
+
 					// Check if return expression is JSON.parse() - transform it with return type
 					if config.TransformJSONParse && returnStmt.Expression.Kind == ast.KindCallExpression {
 						callExpr := returnStmt.Expression.AsCallExpression()
@@ -780,17 +795,21 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 							// Use reusable check function (type is used more than once)
 							checkFuncName := getOrCreateCheckFunction(castType, asExpr.Type, typeName)
 							if checkFuncName != "" {
-								// Generate: if ((_e = _check_X(expr)) !== null) throw new TypeError(_e.replace(/%n/g, "expr"));
-								checkAndThrow := generateCheckAndThrow(checkFuncName, text[exprStart:exprEnd], escapeString(exprText))
+								// Generate expression-compatible pattern using comma operator:
+								// ((_e = _check_X(expr)) !== null ? (() => { throw new TypeError(_e.replace(/%n/g, "name")); })() : expr)
+								// This works inside expressions unlike the if-statement pattern
+								escapedName := escapeString(exprText)
 								insertions = append(insertions, insertion{
 									pos:       node.Pos(),
-									text:      "(" + checkAndThrow,
+									text:      fmt.Sprintf(`((_e = %s(%s)) !== null ? (() => { throw new TypeError(_e.replace(/%%n/g, "%s")); })() : `, checkFuncName, text[exprStart:exprEnd], escapedName),
 									sourcePos: castTypePos,
+									skipTo:    exprEnd,
 								})
 								insertions = append(insertions, insertion{
 									pos:       exprEnd,
-									text:      ")/* as removed */",
+									text:      text[exprStart:exprEnd] + ")",
 									sourcePos: castTypePos,
+									skipTo:    node.End(),
 								})
 							}
 						} else {
@@ -809,22 +828,12 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 							} else if result.Code != "" {
 								// Wrap the entire as expression
 								// (expr as Type) -> validator(expr, "expr as Type")
+								// Use skipTo to skip the entire "as Type" part
 								insertions = append(insertions, insertion{
 									pos:       node.Pos(),
-									text:      result.Code + "(",
+									text:      result.Code + "(" + text[exprStart:exprEnd] + `, "` + escapeString(exprText) + `")`,
 									sourcePos: castTypePos,
-								})
-								insertions = append(insertions, insertion{
-									pos:       exprEnd,
-									text:      `, "` + escapeString(exprText) + `")`,
-									sourcePos: castTypePos,
-								})
-								// We need to remove " as Type" part
-								// Insert empty to mark for removal
-								insertions = append(insertions, insertion{
-									pos:       exprEnd,
-									text:      "/* as removed */",
-									sourcePos: castTypePos,
+									skipTo:    node.End(),
 								})
 							}
 						}
@@ -1154,11 +1163,18 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 
 	debugf("[DEBUG] Visitor complete for %s, building source map with %d insertions...\n", fileName, len(insertions))
 
-	// If reusable validators were generated, prepend them at the start of the file
+	// If reusable validators or helpers were generated, prepend them at the start of the file
 	// Note: checkFunctions and filterFunctions only contain functions for types used more than once
 	// (due to shouldUseReusableCheck/shouldUseReusableFilter checks)
-	if len(checkFunctions) > 0 || len(filterFunctions) > 0 {
+	needsTeHelper := gen.NeedsTeHelper()
+	if len(checkFunctions) > 0 || len(filterFunctions) > 0 || needsTeHelper {
 		var hoistedCode strings.Builder
+
+		// Add the _te helper if any validator uses it (for TypeError with value display)
+		if needsTeHelper {
+			hoistedCode.WriteString(codegen.TeHelperCode)
+			hoistedCode.WriteString(";\n")
+		}
 
 		// Add the shared error variables
 		if len(checkFunctions) > 0 {
@@ -1187,8 +1203,8 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 			sourcePos: -1, // No source mapping for generated code
 		}}, insertions...)
 
-		debugf("[DEBUG] Hoisted %d check functions and %d filter functions\n",
-			len(checkFunctions), len(filterFunctions))
+		debugf("[DEBUG] Hoisted %d check functions, %d filter functions, te helper: %v\n",
+			len(checkFunctions), len(filterFunctions), needsTeHelper)
 	}
 
 	// Build result with source map

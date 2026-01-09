@@ -36,6 +36,9 @@ build_platform() {
   echo "    Created: $output_file"
 }
 
+# Build dev binary
+go build -o "$GO_DIR/bin/typical" ./cmd/typical
+
 # Build all platforms
 build_platform darwin arm64 darwin-arm64
 build_platform darwin amd64 darwin-x64
@@ -43,6 +46,12 @@ build_platform linux arm64 linux-arm64
 build_platform linux amd64 linux-x64
 build_platform windows arm64 win32-arm64
 build_platform windows amd64 win32-x64
+
+# Build WASM (js/wasm for browser compatibility)
+echo "==> Building for js/wasm -> compiler-wasm..."
+mkdir -p "$PACKAGES_DIR/compiler-wasm/bin"
+GOOS=js GOARCH=wasm go build -o "$PACKAGES_DIR/compiler-wasm/bin/typical.wasm" ./cmd/typical-wasm
+echo "    Created: $PACKAGES_DIR/compiler-wasm/bin/typical.wasm"
 
 echo ""
 echo "==> All binaries built successfully!"
@@ -60,3 +69,10 @@ for npm_platform in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-arm64 wi
     echo "  compiler-$npm_platform: $size"
   fi
 done
+
+# WASM size
+wasm_binary="$PACKAGES_DIR/compiler-wasm/bin/typical.wasm"
+if [ -f "$wasm_binary" ]; then
+  size=$(ls -lh "$wasm_binary" | awk '{print $5}')
+  echo "  compiler-wasm: $size"
+fi
