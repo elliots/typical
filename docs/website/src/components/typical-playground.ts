@@ -157,7 +157,7 @@ export class TypicalPlayground extends LitElement {
   static styles = css`
     :host {
       display: block;
-      height: 100vh;
+      height: calc(100vh - 60px); /* Account for header height */
       background: var(--color-bg, #ffffff);
     }
 
@@ -165,41 +165,6 @@ export class TypicalPlayground extends LitElement {
       display: flex;
       flex-direction: column;
       height: 100%;
-    }
-
-    /* Header */
-    .playground-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0.75rem 1rem;
-      background: var(--color-primary, #3178c6);
-      color: white;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-    }
-
-    .playground-header h1 {
-      font-size: 1.25rem;
-      font-weight: 400;
-      margin: 0;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .playground-header h1 a {
-      color: white;
-      text-decoration: none;
-    }
-
-    .playground-header h1 a:hover {
-      text-decoration: underline;
-    }
-
-    .header-controls {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
     }
 
     /* Examples dropdown */
@@ -210,25 +175,27 @@ export class TypicalPlayground extends LitElement {
     .examples-btn {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
-      padding: 0.5rem 1rem;
-      background: rgba(255, 255, 255, 0.15);
-      border: 1px solid rgba(255, 255, 255, 0.3);
+      gap: 0.35rem;
+      padding: 0.25rem 0.5rem;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.2);
       border-radius: 4px;
-      color: white;
+      color: #999;
       font-family: inherit;
-      font-size: 0.9rem;
+      font-size: 0.8rem;
       cursor: pointer;
-      transition: background 0.2s;
+      transition: all 0.2s;
     }
 
     .examples-btn:hover {
-      background: rgba(255, 255, 255, 0.25);
+      background: rgba(255, 255, 255, 0.1);
+      color: white;
+      border-color: rgba(255, 255, 255, 0.3);
     }
 
     .examples-btn svg {
-      width: 16px;
-      height: 16px;
+      width: 12px;
+      height: 12px;
     }
 
     .examples-menu {
@@ -1089,47 +1056,34 @@ ${jsCode}
 
     return html`
       <div class="playground-container">
-        <!-- Header -->
-        <header class="playground-header">
-          <h1>
-            <a href="/">Typical</a> Playground
-          </h1>
-          <div class="header-controls">
-            <!-- Examples dropdown -->
-            <div class="examples-dropdown">
-              <button class="examples-btn" @click=${this.toggleExamples}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M4 6h16M4 12h16M4 18h16"/>
-                </svg>
-                Examples
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M6 9l6 6 6-6"/>
-                </svg>
-              </button>
-              <div class="examples-menu ${this.examplesOpen ? 'open' : ''}">
-                ${EXAMPLES.map(
-                  (example, i) => html`
-                  <button
-                    class="example-item ${this.selectedExample === i ? 'active' : ''}"
-                    @click=${() => this.selectExample(i)}
-                  >
-                    <div class="example-name">${example.name}</div>
-                    <div class="example-desc">${example.description}</div>
-                  </button>
-                `,
-                )}
-              </div>
-            </div>
-
-          </div>
-        </header>
-
         <!-- Main editor area -->
         <main class="playground-main">
           <!-- Input panel -->
           <div class="editor-panel">
             <div class="panel-header">
               <span class="panel-label">Input (TypeScript)</span>
+              <!-- Examples dropdown -->
+              <div class="examples-dropdown">
+                <button class="examples-btn" @click=${this.toggleExamples}>
+                  Examples
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M6 9l6 6 6-6"/>
+                  </svg>
+                </button>
+                <div class="examples-menu ${this.examplesOpen ? 'open' : ''}">
+                  ${EXAMPLES.map(
+                    (example, i) => html`
+                    <button
+                      class="example-item ${this.selectedExample === i ? 'active' : ''}"
+                      @click=${() => this.selectExample(i)}
+                    >
+                      <div class="example-name">${example.name}</div>
+                      <div class="example-desc">${example.description}</div>
+                    </button>
+                  `,
+                  )}
+                </div>
+              </div>
             </div>
             <div class="editor-container" id="input-editor"></div>
           </div>

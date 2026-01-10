@@ -1,8 +1,10 @@
 import { LitElement, html, css } from 'lit'
-import { customElement } from 'lit/decorators.js'
+import { customElement, property } from 'lit/decorators.js'
 
 @customElement('typical-header')
 export class TypicalHeader extends LitElement {
+  @property({ type: String }) page = ''
+
   static styles = css`
     :host {
       display: block;
@@ -35,6 +37,11 @@ export class TypicalHeader extends LitElement {
     .logo:hover {
       text-decoration: none;
       opacity: 0.9;
+    }
+
+    .page-name {
+      opacity: 0.8;
+      font-weight: 400;
     }
 
     .logo-icon {
@@ -104,6 +111,7 @@ export class TypicalHeader extends LitElement {
         <a href="/" class="logo">
           <span class="logo-icon">T</span>
           <span>Typical</span>
+          ${this.page ? html`<span class="page-name">${this.page}</span>` : ''}
         </a>
         <nav>
           <a href="https://github.com/elliots/typical#readme" target="_blank">Docs</a>
