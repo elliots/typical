@@ -1,5 +1,5 @@
-import { LitElement, html, css } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { LitElement, html, css } from 'lit'
+import { customElement } from 'lit/decorators.js'
 
 @customElement('typical-footer')
 export class TypicalFooter extends LitElement {
@@ -127,10 +127,10 @@ export class TypicalFooter extends LitElement {
         margin: 0;
       }
     }
-  `;
+  `
 
   render() {
-    const year = new Date().getFullYear();
+    const year = new Date().getFullYear()
 
     return html`
       <footer>
@@ -167,12 +167,12 @@ export class TypicalFooter extends LitElement {
           </div>
         </div>
       </footer>
-    `;
+    `
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    'typical-footer': TypicalFooter;
+    'typical-footer': TypicalFooter
   }
 }

@@ -56,7 +56,7 @@ export class Go {
   importObject: WebAssembly.Imports
 
   constructor() {
-    this._exitPromise = new Promise((resolve) => {
+    this._exitPromise = new Promise(resolve => {
       this._resolveExitPromise = resolve
     })
 
@@ -230,13 +230,16 @@ export class Go {
           this._nextCallbackTimeoutID++
           this._scheduledTimeouts.set(
             id,
-            setTimeout(() => {
-              this._resume()
-              while (this._scheduledTimeouts.has(id)) {
-                console.warn('scheduleTimeoutEvent: missed timeout event')
+            setTimeout(
+              () => {
                 this._resume()
-              }
-            }, getInt64(sp + 8)),
+                while (this._scheduledTimeouts.has(id)) {
+                  console.warn('scheduleTimeoutEvent: missed timeout event')
+                  this._resume()
+                }
+              },
+              getInt64(sp + 8),
+            ),
           )
           this.mem.setInt32(sp + 16, id, true)
         },
@@ -382,10 +385,7 @@ export class Go {
         // func valueInstanceOf(v ref, t ref) bool
         'syscall/js.valueInstanceOf': (sp: number) => {
           sp >>>= 0
-          this.mem.setUint8(
-            sp + 24,
-            (loadValue(sp + 8) as object) instanceof (loadValue(sp + 16) as new (...args: any[]) => any) ? 1 : 0,
-          )
+          this.mem.setUint8(sp + 24, (loadValue(sp + 8) as object) instanceof (loadValue(sp + 16) as new (...args: any[]) => any) ? 1 : 0)
         },
 
         // func copyBytesToGo(dst []byte, src ref) (int, bool)
@@ -471,19 +471,19 @@ export class Go {
     const argc = this.argv.length
 
     const argvPtrs: number[] = []
-    this.argv.forEach((arg) => {
+    this.argv.forEach(arg => {
       argvPtrs.push(strPtr(arg))
     })
     argvPtrs.push(0)
 
     const keys = Object.keys(this.env).sort()
-    keys.forEach((key) => {
+    keys.forEach(key => {
       argvPtrs.push(strPtr(`${key}=${this.env[key]}`))
     })
     argvPtrs.push(0)
 
     const argv = offset
-    argvPtrs.forEach((ptr) => {
+    argvPtrs.forEach(ptr => {
       this.mem.setUint32(offset, ptr, true)
       this.mem.setUint32(offset + 4, 0, true)
       offset += 8

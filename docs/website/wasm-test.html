@@ -1,104 +1,104 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-  <title>WASM Test</title>
-</head>
-<body>
-  <h1>WASM Compiler Test</h1>
-  <pre id="output">Loading...</pre>
-  <script type="module">
-    const output = document.getElementById('output');
-    function log(msg) {
-      console.log(msg);
-      output.textContent += '\n' + msg;
-    }
+  <head>
+    <title>WASM Test</title>
+  </head>
+  <body>
+    <h1>WASM Compiler Test</h1>
+    <pre id="output">Loading...</pre>
+    <script type="module">
+      const output = document.getElementById('output');
+      function log(msg) {
+        console.log(msg);
+        output.textContent += '\n' + msg;
+      }
 
-    async function test() {
-      try {
-        log('Importing ZenFS...');
-        const { fs } = await import('@zenfs/core');
-        log('ZenFS loaded. fs.mkdirSync = ' + typeof fs.mkdirSync);
-
-        // Create /tmp directory that Go expects
-        log('Creating /tmp directory...');
+      async function test() {
         try {
-          fs.mkdirSync('/tmp', { recursive: true });
-          log('/tmp created');
-        } catch (e) {
-          log('/tmp already exists or error: ' + e.message);
-        }
-
-        // Test file operations
-        log('Testing file operations...');
-        const testDir = '/tmp/test-' + Date.now();
-        fs.mkdirSync(testDir, { recursive: true });
-        log('Created directory: ' + testDir);
-
-        const testFile = testDir + '/test.ts';
-        fs.writeFileSync(testFile, 'const x: number = 1;');
-        log('Wrote file: ' + testFile);
-
-        const content = fs.readFileSync(testFile, 'utf-8');
-        log('Read file content: ' + content);
-
-        const stat = fs.statSync(testFile);
-        log('Stat: size=' + stat.size + ' isFile=' + stat.isFile());
-
-        // List /tmp contents
-        const tmpContents = fs.readdirSync('/tmp');
-        log('/tmp contents: ' + JSON.stringify(tmpContents));
-
-        log('Importing compiler module...');
-        const module = await import('/@fs/Users/elliot/repos/typical/packages/compiler-wasm/dist/index.js');
-        log('Module loaded: ' + Object.keys(module).join(', '));
-
-        const { WasmTypicalCompiler, wrapSyncFSForGo, wasmPath } = module;
-
-        log('Wrapping ZenFS for Go WASM...');
-        const wrappedFs = wrapSyncFSForGo(fs);
-        log('Wrapped fs.mkdir = ' + typeof wrappedFs.mkdir);
-
-        log('Creating compiler with wrapped ZenFS and wasmPath: ' + wasmPath);
-        const compiler = new WasmTypicalCompiler({ wasmPath, fs: wrappedFs });
-
-        log('Starting compiler...');
-        await compiler.start();
-        log('Compiler started!');
-
-        // List /tmp again to see what Go created
-        const tmpContents2 = fs.readdirSync('/tmp');
-        log('/tmp contents after compiler start: ' + JSON.stringify(tmpContents2));
-
-        log('Transforming source...');
-        const result = await compiler.transformSource('test.ts', 'function greet(name: string): string { return name; }');
-        log('Result: ' + JSON.stringify(result, null, 2));
-
-      } catch (e) {
-        log('ERROR: ' + e.message);
-        log('Stack: ' + e.stack);
-
-        // Try to list /tmp to debug
-        try {
+          log('Importing ZenFS...');
           const { fs } = await import('@zenfs/core');
-          const tmpContents = fs.readdirSync('/tmp');
-          log('DEBUG /tmp contents: ' + JSON.stringify(tmpContents));
+          log('ZenFS loaded. fs.mkdirSync = ' + typeof fs.mkdirSync);
 
-          // List the subdirs
-          for (const dir of tmpContents) {
-            try {
-              const subContents = fs.readdirSync('/tmp/' + dir);
-              log('DEBUG /tmp/' + dir + ' contents: ' + JSON.stringify(subContents));
-            } catch (e2) {
-              log('DEBUG /tmp/' + dir + ' error: ' + e2.message);
-            }
+          // Create /tmp directory that Go expects
+          log('Creating /tmp directory...');
+          try {
+            fs.mkdirSync('/tmp', { recursive: true });
+            log('/tmp created');
+          } catch (e) {
+            log('/tmp already exists or error: ' + e.message);
           }
-        } catch (e2) {
-          log('DEBUG error: ' + e2.message);
+
+          // Test file operations
+          log('Testing file operations...');
+          const testDir = '/tmp/test-' + Date.now();
+          fs.mkdirSync(testDir, { recursive: true });
+          log('Created directory: ' + testDir);
+
+          const testFile = testDir + '/test.ts';
+          fs.writeFileSync(testFile, 'const x: number = 1;');
+          log('Wrote file: ' + testFile);
+
+          const content = fs.readFileSync(testFile, 'utf-8');
+          log('Read file content: ' + content);
+
+          const stat = fs.statSync(testFile);
+          log('Stat: size=' + stat.size + ' isFile=' + stat.isFile());
+
+          // List /tmp contents
+          const tmpContents = fs.readdirSync('/tmp');
+          log('/tmp contents: ' + JSON.stringify(tmpContents));
+
+          log('Importing compiler module...');
+          const module = await import('/@fs/Users/elliot/repos/typical/packages/compiler-wasm/dist/index.js');
+          log('Module loaded: ' + Object.keys(module).join(', '));
+
+          const { WasmTypicalCompiler, wrapSyncFSForGo, wasmPath } = module;
+
+          log('Wrapping ZenFS for Go WASM...');
+          const wrappedFs = wrapSyncFSForGo(fs);
+          log('Wrapped fs.mkdir = ' + typeof wrappedFs.mkdir);
+
+          log('Creating compiler with wrapped ZenFS and wasmPath: ' + wasmPath);
+          const compiler = new WasmTypicalCompiler({ wasmPath, fs: wrappedFs });
+
+          log('Starting compiler...');
+          await compiler.start();
+          log('Compiler started!');
+
+          // List /tmp again to see what Go created
+          const tmpContents2 = fs.readdirSync('/tmp');
+          log('/tmp contents after compiler start: ' + JSON.stringify(tmpContents2));
+
+          log('Transforming source...');
+          const result = await compiler.transformSource('test.ts', 'function greet(name: string): string { return name; }');
+          log('Result: ' + JSON.stringify(result, null, 2));
+
+        } catch (e) {
+          log('ERROR: ' + e.message);
+          log('Stack: ' + e.stack);
+
+          // Try to list /tmp to debug
+          try {
+            const { fs } = await import('@zenfs/core');
+            const tmpContents = fs.readdirSync('/tmp');
+            log('DEBUG /tmp contents: ' + JSON.stringify(tmpContents));
+
+            // List the subdirs
+            for (const dir of tmpContents) {
+              try {
+                const subContents = fs.readdirSync('/tmp/' + dir);
+                log('DEBUG /tmp/' + dir + ' contents: ' + JSON.stringify(subContents));
+              } catch (e2) {
+                log('DEBUG /tmp/' + dir + ' error: ' + e2.message);
+              }
+            }
+          } catch (e2) {
+            log('DEBUG error: ' + e2.message);
+          }
         }
       }
-    }
 
-    test();
-  </script>
-</body>
+      test();
+    </script>
+  </body>
 </html>

@@ -1,14 +1,14 @@
-import { LitElement, html, css } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { LitElement, html, css } from 'lit'
+import { customElement } from 'lit/decorators.js'
 
-import './typical-header.js';
-import './typical-hero.js';
-import './typical-features.js';
-import './typical-how-it-works.js';
-import './typical-comparison.js';
-import './typical-testimonial.js';
-import './typical-production.js';
-import './typical-footer.js';
+import './typical-header.js'
+import './typical-hero.js'
+import './typical-features.js'
+import './typical-how-it-works.js'
+import './typical-comparison.js'
+import './typical-testimonial.js'
+import './typical-production.js'
+import './typical-footer.js'
 
 @customElement('typical-app')
 export class TypicalApp extends LitElement {
@@ -17,7 +17,7 @@ export class TypicalApp extends LitElement {
       display: block;
       min-height: 100vh;
     }
-  `;
+  `
 
   render() {
     return html`
@@ -31,12 +31,12 @@ export class TypicalApp extends LitElement {
         <typical-production></typical-production>
       </main>
       <typical-footer></typical-footer>
-    `;
+    `
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    'typical-app': TypicalApp;
+    'typical-app': TypicalApp
   }
 }

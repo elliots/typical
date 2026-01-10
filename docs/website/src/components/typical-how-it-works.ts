@@ -1,7 +1,7 @@
-import { LitElement, html, css, unsafeCSS } from 'lit';
-import { customElement } from 'lit/decorators.js';
-import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { highlightTS, highlightStyles } from '../utils/highlight.js';
+import { LitElement, html, css, unsafeCSS } from 'lit'
+import { customElement } from 'lit/decorators.js'
+import { unsafeHTML } from 'lit/directives/unsafe-html.js'
+import { highlightTS, highlightStyles } from '../utils/highlight.js'
 
 const step1Code = `interface User {
   name: string;
@@ -12,7 +12,7 @@ function saveUser(
   user: User
 ) {
   db.save(user);
-}`;
+}`
 
 const step2Code = `interface User {
   name: string;
@@ -24,7 +24,7 @@ function saveUser(
 ) {
   __validate(user, "User");
   db.save(user);
-}`;
+}`
 
 const step3Code = `// API returns bad data:
 const user = {
@@ -35,7 +35,7 @@ const user = {
 saveUser(user);
 // TypeError: property 'age'
 //   expected number,
-//   got string "unknown"`;
+//   got string "unknown"`
 
 @customElement('typical-how-it-works')
 export class TypicalHowItWorks extends LitElement {
@@ -138,7 +138,7 @@ export class TypicalHowItWorks extends LitElement {
         font-size: 1.75rem;
       }
     }
-  `;
+  `
 
   render() {
     return html`
@@ -188,12 +188,12 @@ export class TypicalHowItWorks extends LitElement {
           </div>
         </div>
       </div>
-    `;
+    `
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    'typical-how-it-works': TypicalHowItWorks;
+    'typical-how-it-works': TypicalHowItWorks
   }
 }

@@ -17,7 +17,6 @@ function debugLog(...args: unknown[]): void {
 }
 
 function getBinaryPath(): string {
-
   // use bin/typical in development
   const devPath = join(__dirname, '../bin/typical')
   if (existsSync(devPath)) {

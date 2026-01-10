@@ -1,5 +1,5 @@
-import { LitElement, html, css } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { LitElement, html, css } from 'lit'
+import { customElement } from 'lit/decorators.js'
 
 @customElement('typical-production')
 export class TypicalProduction extends LitElement {
@@ -39,20 +39,21 @@ export class TypicalProduction extends LitElement {
         font-size: 1rem;
       }
     }
-  `;
+  `
 
   render() {
     return html`
       <div class="container">
         <h2>Is this ready to use in production?</h2>
         <p>Probably not. But it will get there. Give it a try, and we'll work out the kinks together.</p>
+        <p><br/>Being based on typescript-go, the core compiler is in Go, which means I have to distribute binaries.<br/>Need to work out how you can trust them.</p>
       </div>
-    `;
+    `
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    'typical-production': TypicalProduction;
+    'typical-production': TypicalProduction
   }
 }

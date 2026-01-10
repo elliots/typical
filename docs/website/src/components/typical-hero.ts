@@ -1,16 +1,16 @@
-import { LitElement, html, css, unsafeCSS } from "lit";
-import { customElement, state } from "lit/decorators.js";
-import { unsafeHTML } from "lit/directives/unsafe-html.js";
-import { highlightTS, highlightStyles } from "../utils/highlight.js";
+import { LitElement, html, css, unsafeCSS } from 'lit'
+import { customElement, state } from 'lit/decorators.js'
+import { unsafeHTML } from 'lit/directives/unsafe-html.js'
+import { highlightTS, highlightStyles } from '../utils/highlight.js'
 
-type TabId = "typesafe" | "vscode" | "tools";
+type TabId = 'typesafe' | 'vscode' | 'tools'
 
 const beforeCode = `interface User {
   name: string
   email: \`\${string}@\${string}.\${string}\`
 }
 
-const u: User = JSON.parse(\`{"name":"Alice","email":"not-an-email"}\`);`;
+const u: User = JSON.parse(\`{"name":"Alice","email":"not-an-email"}\`);`
 
 const afterCode = `// Typical transforms it to add runtime validation
 type Email = \`\${string}@\${string}.\${string}\`; /* literal templates supported */
@@ -26,7 +26,7 @@ function greetUser(user: User): string { /* parameters validated! */
 }
 
 const data = JSON.parse(response) as User; /* parse filtered and validated! */
-greetUser(data);`;
+greetUser(data);`
 
 const errorCode = `// When invalid data arrives at runtime...
 const badData = {
@@ -34,11 +34,11 @@ const badData = {
   age: 25,
   email: "not-an-email"
 };
-greetUser(badData);`;
+greetUser(badData);`
 
-const errorOutput = `Expected u.email to be \`\${string}@\${string}.\${string}\` got string (not-an-email)`;
+const errorOutput = `Expected u.email to be \`\${string}@\${string}.\${string}\` got string (not-an-email)`
 
-@customElement("typical-hero")
+@customElement('typical-hero')
 export class TypicalHero extends LitElement {
   static styles = css`
     ${unsafeCSS(highlightStyles)}
@@ -241,20 +241,20 @@ export class TypicalHero extends LitElement {
         max-width: 100%;
       }
     }
-  `;
+  `
 
   @state()
-  private activeTab: TabId = "typesafe";
+  private activeTab: TabId = 'typesafe'
 
   private getCodeContent(tab: TabId) {
     switch (tab) {
-      case "typesafe":
+      case 'typesafe':
         return html`<code class="language-typescript"><pre>${unsafeHTML(highlightTS(beforeCode))}
         </pre></code>
 
-<div class="error-output">${errorOutput.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
-        `;
-      case "tools":
+<div class="error-output">${errorOutput.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        `
+      case 'tools':
         return html`
           <ul class="tools-list">
             <li><span class="tool-name">Node.js</span><span class="tool-method">@elliots/typical/esm</span></li>
@@ -266,25 +266,25 @@ export class TypicalHero extends LitElement {
             <li><span class="tool-name">tsc</span><span class="tool-method">@elliots/typical-tsc-plugin</span></li>
             <li><span class="tool-name">tsx</span><span class="tool-method">@elliots/typical/esm</span></li>
           </ul>
-        `;
-      case "vscode":
+        `
+      case 'vscode':
         return html`<img src="/vscode.png" alt="VSCode extension" style="width: 100%; margin: 0 1rem; vertical-align: middle;" />`
     }
   }
 
   private getTabFooter(tab: TabId): string {
     switch (tab) {
-      case "typesafe":
-        return "Invalid data is caught immediately with clear error messages.";
-      case "vscode":
-        return "See where validation is added, and hover to see details.";
-      case "tools":
-        return "Integrates with your existing TypeScript tools. Open an issue to request more.";
+      case 'typesafe':
+        return 'Invalid data is caught immediately with clear error messages.'
+      case 'vscode':
+        return 'See where validation is added, and hover to see details.'
+      case 'tools':
+        return 'Integrates with your existing TypeScript tools. Open an issue to request more.'
     }
   }
 
   private setActiveTab(tab: TabId) {
-    this.activeTab = tab;
+    this.activeTab = tab
   }
 
   render() {
@@ -311,16 +311,16 @@ export class TypicalHero extends LitElement {
         <div class="code-demo">
           <div class="tabs">
             <button
-              class="tab ${this.activeTab === "typesafe" ? "active" : ""}"
-              @click=${() => this.setActiveTab("typesafe")}
+              class="tab ${this.activeTab === 'typesafe' ? 'active' : ''}"
+              @click=${() => this.setActiveTab('typesafe')}
             >Runtime type safety</button>
             <button
-              class="tab ${this.activeTab === "tools" ? "active" : ""}"
-              @click=${() => this.setActiveTab("tools")}
+              class="tab ${this.activeTab === 'tools' ? 'active' : ''}"
+              @click=${() => this.setActiveTab('tools')}
             >Tool Integration</button>
             <button
-              class="tab ${this.activeTab === "vscode" ? "active" : ""}"
-              @click=${() => this.setActiveTab("vscode")}
+              class="tab ${this.activeTab === 'vscode' ? 'active' : ''}"
+              @click=${() => this.setActiveTab('vscode')}
             >VSCode Addon</button>
            
           </div>
@@ -335,12 +335,12 @@ export class TypicalHero extends LitElement {
       <div class="version-bar">
         <span class="version-date">2026-01-11</span> <a href="https://www.npmjs.com/package/@elliots/typical" target="_blank">Typical 0.2.4</a> is now available
       </div>
-    `;
+    `
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    "typical-hero": TypicalHero;
+    'typical-hero': TypicalHero
   }
 }

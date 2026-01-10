@@ -32,13 +32,16 @@ async function main() {
     console.log('Compiler started successfully!')
 
     console.log('Transforming TypeScript...')
-    const result = await compiler.transformSource('test.ts', `
+    const result = await compiler.transformSource(
+      'test.ts',
+      `
       function greet(name: string): string {
         return 'Hello, ' + name
       }
 
       export { greet }
-    `)
+    `,
+    )
 
     console.log('Transform result:')
     console.log(result.code)

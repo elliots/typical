@@ -1,5 +1,5 @@
-import { LitElement, html, css } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { LitElement, html, css } from 'lit'
+import { customElement } from 'lit/decorators.js'
 
 @customElement('typical-header')
 export class TypicalHeader extends LitElement {
@@ -96,7 +96,7 @@ export class TypicalHeader extends LitElement {
         font-size: 0.9rem;
       }
     }
-  `;
+  `
 
   render() {
     return html`
@@ -117,12 +117,12 @@ export class TypicalHeader extends LitElement {
           <a href="https://www.npmjs.com/package/@elliots/typical" target="_blank">npm</a>
         </nav>
       </header>
-    `;
+    `
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    'typical-header': TypicalHeader;
+    'typical-header': TypicalHeader
   }
 }

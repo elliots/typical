@@ -1,11 +1,11 @@
-import Prism from 'prismjs';
-import 'prismjs/components/prism-typescript';
+import Prism from 'prismjs'
+import 'prismjs/components/prism-typescript'
 
 /**
  * Highlights TypeScript code using Prism.js
  */
 export function highlightTS(code: string): string {
-  return Prism.highlight(code, Prism.languages.typescript, 'typescript');
+  return Prism.highlight(code, Prism.languages.typescript, 'typescript')
 }
 
 /**
@@ -136,4 +136,4 @@ export const highlightStyles = `
     display: block;
     margin-top: 0.5rem;
   }
-`;
+`

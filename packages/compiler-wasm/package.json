@@ -13,8 +13,8 @@
   "license": "MIT",
   "author": "elliots",
   "files": [
-    "dist",
-    "bin"
+    "bin",
+    "dist"
   ],
   "type": "module",
   "main": "dist/index.js",

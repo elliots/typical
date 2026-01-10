@@ -41,22 +41,8 @@ export interface SyncFS {
   symlink: (target: string, path: string, callback: Callback) => void
   link: (existingPath: string, newPath: string, callback: Callback) => void
   readdir: (path: string, callback: Callback<string[]>) => void
-  read: (
-    fd: number,
-    buffer: Uint8Array,
-    offset: number,
-    length: number,
-    position: number | null,
-    callback: Callback<number>
-  ) => void
-  write: (
-    fd: number,
-    buffer: Uint8Array,
-    offset: number,
-    length: number,
-    position: number | null,
-    callback: Callback<number>
-  ) => void
+  read: (fd: number, buffer: Uint8Array, offset: number, length: number, position: number | null, callback: Callback<number>) => void
+  write: (fd: number, buffer: Uint8Array, offset: number, length: number, position: number | null, callback: Callback<number>) => void
   writeSync: typeof fsSync.writeSync
   fsync: (fd: number, callback: Callback) => void
 }

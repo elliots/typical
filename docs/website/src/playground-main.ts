@@ -1,2 +1,2 @@
-import 'monaco-editor/min/vs/editor/editor.main.css';
-import './components/typical-playground.js';
+import 'monaco-editor/min/vs/editor/editor.main.css'
+import './components/typical-playground.js'

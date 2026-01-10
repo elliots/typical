@@ -1,5 +1,5 @@
-import { LitElement, html, css } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { LitElement, html, css } from 'lit'
+import { customElement } from 'lit/decorators.js'
 
 @customElement('typical-features')
 export class TypicalFeatures extends LitElement {
@@ -116,7 +116,7 @@ export class TypicalFeatures extends LitElement {
         font-size: 1.75rem;
       }
     }
-  `;
+  `
 
   render() {
     return html`
@@ -174,12 +174,12 @@ export class TypicalFeatures extends LitElement {
           </div>
         </div>
       </div>
-    `;
+    `
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    'typical-features': TypicalFeatures;
+    'typical-features': TypicalFeatures
   }
 }

@@ -1,1 +1,1 @@
-import './components/typical-app.js';
+import './components/typical-app.js'

@@ -381,7 +381,11 @@ export class WasmTypicalCompiler {
         if (!(globalThis as any).path) {
           ;(globalThis as any).path = {
             join: (...parts: string[]) => parts.join('/').replace(/\/+/g, '/').replace(/\/$/, '') || '/',
-            dirname: (p: string) => { const parts = p.split('/'); parts.pop(); return parts.join('/') || '/' },
+            dirname: (p: string) => {
+              const parts = p.split('/')
+              parts.pop()
+              return parts.join('/') || '/'
+            },
             basename: (p: string) => p.split('/').pop() || '',
             resolve: (...parts: string[]) => parts.join('/').replace(/\/+/g, '/'),
           }
@@ -406,10 +410,7 @@ export class WasmTypicalCompiler {
         installSyncFS()
       } else {
         // Browser without provided fs: require ZenFS
-        throw new Error(
-          'Browser environment requires a filesystem. ' +
-          'Use wrapSyncFSForGo() with @zenfs/core and pass it via the fs option.'
-        )
+        throw new Error('Browser environment requires a filesystem. ' + 'Use wrapSyncFSForGo() with @zenfs/core and pass it via the fs option.')
       }
       fsInstalled = true
     }
@@ -472,12 +473,12 @@ export class WasmTypicalCompiler {
     const runPromise = this.go.run(this.instance)
 
     // Give Go time to initialise and register global functions
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await new Promise(resolve => setTimeout(resolve, 100))
 
     // Check if the transform function was registered
     if (typeof (globalThis as any).typicalTransformSource !== 'function') {
       // If not ready yet, wait a bit more
-      await new Promise((resolve) => setTimeout(resolve, 500))
+      await new Promise(resolve => setTimeout(resolve, 500))
     }
 
     if (typeof (globalThis as any).typicalTransformSource !== 'function') {
@@ -487,7 +488,7 @@ export class WasmTypicalCompiler {
     this.ready = true
 
     // Handle exit (though the program should stay alive)
-    runPromise.catch((err) => {
+    runPromise.catch(err => {
       console.error('Go runtime exited:', err)
       this.ready = false
     })

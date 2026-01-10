@@ -1,27 +1,27 @@
-import { LitElement, html, css } from 'lit';
-import { customElement, state, query } from 'lit/decorators.js';
-import * as monaco from 'monaco-editor';
-import { ModuleDetectionKind } from 'typescript';
-import * as prettier from 'prettier/standalone';
-import prettierPluginTypescript from 'prettier/plugins/typescript';
-import prettierPluginEstree from 'prettier/plugins/estree';
+import { LitElement, html, css } from 'lit'
+import { customElement, state, query } from 'lit/decorators.js'
+import * as monaco from 'monaco-editor'
+import { ModuleDetectionKind } from 'typescript'
+import * as prettier from 'prettier/standalone'
+import prettierPluginTypescript from 'prettier/plugins/typescript'
+import prettierPluginEstree from 'prettier/plugins/estree'
 
 // Compiler types
 interface TransformResult {
-  code: string;
-  sourceMap?: object;
+  code: string
+  sourceMap?: object
 }
 
 interface WasmCompiler {
-  start(): Promise<void>;
-  close(): Promise<void>;
-  transformSource(fileName: string, source: string): Promise<TransformResult>;
+  start(): Promise<void>
+  close(): Promise<void>
+  transformSource(fileName: string, source: string): Promise<TransformResult>
 }
 
 interface Example {
-  name: string;
-  description: string;
-  code: string;
+  name: string
+  description: string
+  code: string
 }
 
 const EXAMPLES: Example[] = [
@@ -150,7 +150,7 @@ console.log("User:", JSON.stringify(u));
 console.log("Full user:", JSON.stringify(u as DBUser));
 `,
   },
-];
+]
 
 @customElement('typical-playground')
 export class TypicalPlayground extends LitElement {
@@ -615,91 +615,85 @@ export class TypicalPlayground extends LitElement {
         min-height: 200px;
       }
     }
-  `;
+  `
 
-  @state() private inputCode = EXAMPLES[0].code;
-  @state() private outputCode = '';
-  @state() private outputTab: 'transformed' | 'sourcemap' = 'transformed';
-  @state() private selectedExample = 0;
-  @state() private examplesOpen = false;
-  @state() private compilerStatus: 'loading' | 'ready' | 'error' = 'loading';
-  @state() private editorStatus: 'loading' | 'ready' | 'error' = 'loading';
-  @state() private compilerError = '';
-  @state() private transformError = '';
-  @state() private transformTime = 0;
-  @state() private sourceMap: object | null = null;
-  @state() private consoleOutput: Array<{ type: 'log' | 'error' | 'warn'; message: string }> = [];
-  @state() private isRunning = false;
-  @state() private formatOutput = false;
+  @state() private inputCode = EXAMPLES[0].code
+  @state() private outputCode = ''
+  @state() private outputTab: 'transformed' | 'sourcemap' = 'transformed'
+  @state() private selectedExample = 0
+  @state() private examplesOpen = false
+  @state() private compilerStatus: 'loading' | 'ready' | 'error' = 'loading'
+  @state() private editorStatus: 'loading' | 'ready' | 'error' = 'loading'
+  @state() private compilerError = ''
+  @state() private transformError = ''
+  @state() private transformTime = 0
+  @state() private sourceMap: object | null = null
+  @state() private consoleOutput: Array<{ type: 'log' | 'error' | 'warn'; message: string }> = []
+  @state() private isRunning = false
+  @state() private formatOutput = false
 
-  @query('#input-editor') private inputEditorContainer!: HTMLDivElement;
-  @query('#output-editor') private outputEditorContainer!: HTMLDivElement;
+  @query('#input-editor') private inputEditorContainer!: HTMLDivElement
+  @query('#output-editor') private outputEditorContainer!: HTMLDivElement
 
-  private inputEditor: monaco.editor.IStandaloneCodeEditor | null = null;
-  private outputEditor: monaco.editor.IStandaloneCodeEditor | null = null;
-  private compiler: WasmCompiler | null = null;
+  private inputEditor: monaco.editor.IStandaloneCodeEditor | null = null
+  private outputEditor: monaco.editor.IStandaloneCodeEditor | null = null
+  private compiler: WasmCompiler | null = null
 
   async connectedCallback() {
-    super.connectedCallback();
-    this.initMonaco();
-    await this.initCompiler();
+    super.connectedCallback()
+    this.initMonaco()
+    await this.initCompiler()
   }
 
   async firstUpdated() {
-    await this.updateComplete;
+    await this.updateComplete
 
     // Close dropdown when clicking outside (use capture to get the event before it's retargeted)
-    document.addEventListener('click', (e) => {
+    document.addEventListener('click', e => {
       if (this.examplesOpen) {
         // Check if click is inside the dropdown using composedPath for shadow DOM
-        const path = e.composedPath();
-        const dropdown = this.shadowRoot?.querySelector('.examples-dropdown');
+        const path = e.composedPath()
+        const dropdown = this.shadowRoot?.querySelector('.examples-dropdown')
         if (dropdown && !path.includes(dropdown)) {
-          this.examplesOpen = false;
+          this.examplesOpen = false
         }
       }
-    });
+    })
 
     // Initialise editor after DOM is ready
     if (monaco && this.editorStatus === 'ready') {
-      this.initEditor();
+      this.initEditor()
     }
   }
 
   updated(changedProperties: Map<string, unknown>) {
-    super.updated(changedProperties);
+    super.updated(changedProperties)
     // Create output editor when it becomes available (after loading completes)
     if (monaco && !this.outputEditor && this.outputEditorContainer) {
-      this.initOutputEditor();
+      this.initOutputEditor()
     }
   }
 
   disconnectedCallback() {
-    super.disconnectedCallback();
-    this.inputEditor?.dispose();
-    this.outputEditor?.dispose();
-    this.compiler?.close();
+    super.disconnectedCallback()
+    this.inputEditor?.dispose()
+    this.outputEditor?.dispose()
+    this.compiler?.close()
   }
 
   private initMonaco() {
     // Configure Monaco workers
-    (self as unknown as Record<string, unknown>).MonacoEnvironment = {
+    ;(self as unknown as Record<string, unknown>).MonacoEnvironment = {
       getWorker(_workerId: string, label: string) {
         if (label === 'typescript' || label === 'javascript') {
-          return new Worker(
-            new URL('monaco-editor/esm/vs/language/typescript/ts.worker.js', import.meta.url),
-            { type: 'module' }
-          );
+          return new Worker(new URL('monaco-editor/esm/vs/language/typescript/ts.worker.js', import.meta.url), { type: 'module' })
         }
-        return new Worker(
-          new URL('monaco-editor/esm/vs/editor/editor.worker.js', import.meta.url),
-          { type: 'module' }
-        );
+        return new Worker(new URL('monaco-editor/esm/vs/editor/editor.worker.js', import.meta.url), { type: 'module' })
       },
-    };
+    }
 
     // Copy Monaco styles into shadow DOM
-    this.adoptMonacoStyles();
+    this.adoptMonacoStyles()
 
     // Configure TypeScript compiler options for the playground
     // Don't spread existing options - Monaco includes lib.d.ts by default
@@ -711,43 +705,41 @@ export class TypicalPlayground extends LitElement {
       allowNonTsExtensions: true,
       // Treat all files as modules to enable top-level await
       moduleDetection: ModuleDetectionKind.Force,
-    });
+    })
 
-    this.editorStatus = 'ready';
+    this.editorStatus = 'ready'
 
     // If DOM is ready, init editor
     if (this.inputEditorContainer) {
-      this.initEditor();
+      this.initEditor()
     }
   }
 
   private adoptMonacoStyles() {
     // Find all Monaco-related stylesheets in the document and copy them to shadow DOM
-    const shadowRoot = this.shadowRoot;
-    if (!shadowRoot) return;
+    const shadowRoot = this.shadowRoot
+    if (!shadowRoot) return
 
     // Get all stylesheets from the document
-    const styleSheets = Array.from(document.styleSheets);
+    const styleSheets = Array.from(document.styleSheets)
     for (const sheet of styleSheets) {
       try {
         // Check if this is a Monaco stylesheet by looking at the href or rules
-        const href = sheet.href || '';
+        const href = sheet.href || ''
         if (href.includes('monaco') || href.includes('editor.main')) {
           // Clone the stylesheet into shadow DOM
-          const link = document.createElement('link');
-          link.rel = 'stylesheet';
-          link.href = href;
-          shadowRoot.appendChild(link);
+          const link = document.createElement('link')
+          link.rel = 'stylesheet'
+          link.href = href
+          shadowRoot.appendChild(link)
         } else if (!sheet.href && sheet.cssRules) {
           // For inline styles, check if they contain Monaco-specific rules
-          const rules = Array.from(sheet.cssRules);
-          const hasMonacoRules = rules.some(rule =>
-            rule.cssText?.includes('.monaco-') || rule.cssText?.includes('.vs-dark')
-          );
+          const rules = Array.from(sheet.cssRules)
+          const hasMonacoRules = rules.some(rule => rule.cssText?.includes('.monaco-') || rule.cssText?.includes('.vs-dark'))
           if (hasMonacoRules) {
-            const style = document.createElement('style');
-            style.textContent = rules.map(r => r.cssText).join('\n');
-            shadowRoot.appendChild(style);
+            const style = document.createElement('style')
+            style.textContent = rules.map(r => r.cssText).join('\n')
+            shadowRoot.appendChild(style)
           }
         }
       } catch {
@@ -759,45 +751,45 @@ export class TypicalPlayground extends LitElement {
   private async initCompiler() {
     try {
       // Import ZenFS for browser filesystem
-      const { fs } = await import('@zenfs/core');
+      const { fs } = await import('@zenfs/core')
 
       // Create /tmp directory for the compiler
       try {
-        fs.mkdirSync('/tmp', { recursive: true });
+        fs.mkdirSync('/tmp', { recursive: true })
       } catch {
         // Directory may already exist
       }
 
       // Dynamically import the WASM compiler using Vite alias
       // @ts-ignore - resolved by Vite alias
-      const module = await import('@typical/compiler-wasm');
+      const module = await import('@typical/compiler-wasm')
 
       const { WasmTypicalCompiler, wasmPath, wrapSyncFSForGo } = module as {
-        WasmTypicalCompiler: new (options: { wasmPath: URL; fs?: object }) => WasmCompiler;
-        wasmPath: URL;
-        wrapSyncFSForGo: (syncFs: typeof fs) => object;
-      };
+        WasmTypicalCompiler: new (options: { wasmPath: URL; fs?: object }) => WasmCompiler
+        wasmPath: URL
+        wrapSyncFSForGo: (syncFs: typeof fs) => object
+      }
 
       // Wrap ZenFS for Go WASM compatibility
-      const wrappedFs = wrapSyncFSForGo(fs);
+      const wrappedFs = wrapSyncFSForGo(fs)
 
       // Create compiler with ZenFS
-      this.compiler = new WasmTypicalCompiler({ wasmPath, fs: wrappedFs });
+      this.compiler = new WasmTypicalCompiler({ wasmPath, fs: wrappedFs })
 
-      await this.compiler.start();
-      this.compilerStatus = 'ready';
+      await this.compiler.start()
+      this.compilerStatus = 'ready'
 
       // Run initial transform
-      await this.transform();
+      await this.transform()
     } catch (err) {
-      console.error('Failed to initialise compiler:', err);
-      this.compilerStatus = 'error';
-      this.compilerError = err instanceof Error ? err.message : String(err);
+      console.error('Failed to initialise compiler:', err)
+      this.compilerStatus = 'error'
+      this.compilerError = err instanceof Error ? err.message : String(err)
     }
   }
 
   private initEditor() {
-    if (!this.inputEditorContainer || !monaco) return;
+    if (!this.inputEditorContainer || !monaco) return
 
     this.inputEditor = monaco.editor.create(this.inputEditorContainer, {
       value: this.inputCode,
@@ -812,22 +804,22 @@ export class TypicalPlayground extends LitElement {
       wordWrap: 'on',
       padding: { top: 16, bottom: 16 },
       fixedOverflowWidgets: true,
-    });
+    })
 
     // Auto-transform on change with debounce
-    let debounceTimer: number;
+    let debounceTimer: number
     this.inputEditor.onDidChangeModelContent(() => {
-      this.inputCode = this.inputEditor?.getValue() || '';
-      clearTimeout(debounceTimer);
-      debounceTimer = window.setTimeout(() => this.transform(), 500);
-    });
+      this.inputCode = this.inputEditor?.getValue() || ''
+      clearTimeout(debounceTimer)
+      debounceTimer = window.setTimeout(() => this.transform(), 500)
+    })
 
     // Create output editor if container is available
-    this.initOutputEditor();
+    this.initOutputEditor()
   }
 
   private initOutputEditor() {
-    if (!this.outputEditorContainer || !monaco || this.outputEditor) return;
+    if (!this.outputEditorContainer || !monaco || this.outputEditor) return
 
     this.outputEditor = monaco.editor.create(this.outputEditorContainer, {
       value: this.outputCode,
@@ -842,23 +834,23 @@ export class TypicalPlayground extends LitElement {
       wordWrap: 'on',
       padding: { top: 16, bottom: 16 },
       fixedOverflowWidgets: true,
-    });
+    })
   }
 
   private async transform() {
-    if (this.compilerStatus !== 'ready' || !this.compiler) return;
+    if (this.compilerStatus !== 'ready' || !this.compiler) return
 
-    this.transformError = '';
-    const startTime = performance.now();
+    this.transformError = ''
+    const startTime = performance.now()
 
     try {
-      const result = await this.compiler.transformSource('playground.ts', this.inputCode);
-      let code = result.code;
+      const result = await this.compiler.transformSource('playground.ts', this.inputCode)
+      let code = result.code
 
-      this.outputCode = code;
-      this.sourceMap = result.sourceMap || null;
-      this.transformTime = Math.round(performance.now() - startTime);
-      this.outputEditor?.setValue(this.outputCode);
+      this.outputCode = code
+      this.sourceMap = result.sourceMap || null
+      this.transformTime = Math.round(performance.now() - startTime)
+      this.outputEditor?.setValue(this.outputCode)
 
       // Format output if checkbox is enabled
       if (this.formatOutput && this.outputEditor) {
@@ -868,70 +860,70 @@ export class TypicalPlayground extends LitElement {
           printWidth: 80,
           tabWidth: 2,
           singleQuote: true,
-        });
-        this.outputEditor.setValue(formatted);
+        })
+        this.outputEditor.setValue(formatted)
       }
     } catch (err) {
-      this.transformError = err instanceof Error ? err.message : String(err);
-      this.outputCode = '';
-      this.transformTime = 0;
-      this.outputEditor?.setValue('');
+      this.transformError = err instanceof Error ? err.message : String(err)
+      this.outputCode = ''
+      this.transformTime = 0
+      this.outputEditor?.setValue('')
     }
   }
 
   private toggleFormatOutput() {
-    this.formatOutput = !this.formatOutput;
-    this.transform();
+    this.formatOutput = !this.formatOutput
+    this.transform()
   }
 
   private selectExample(index: number) {
-    this.selectedExample = index;
-    this.inputCode = EXAMPLES[index].code;
-    this.inputEditor?.setValue(this.inputCode);
-    this.examplesOpen = false;
-    this.transform();
+    this.selectedExample = index
+    this.inputCode = EXAMPLES[index].code
+    this.inputEditor?.setValue(this.inputCode)
+    this.examplesOpen = false
+    this.transform()
   }
 
   private toggleExamples() {
-    this.examplesOpen = !this.examplesOpen;
+    this.examplesOpen = !this.examplesOpen
   }
 
   private async runCode() {
-    if (!monaco || !this.outputEditor || this.isRunning) return;
+    if (!monaco || !this.outputEditor || this.isRunning) return
 
-    this.isRunning = true;
-    this.consoleOutput = [];
+    this.isRunning = true
+    this.consoleOutput = []
 
     try {
       // Use Monaco's TypeScript worker to transpile to JavaScript
-      const model = this.outputEditor.getModel();
+      const model = this.outputEditor.getModel()
       if (!model) {
-        throw new Error('No model found');
+        throw new Error('No model found')
       }
 
-      const getWorker = await monaco.languages.typescript.getTypeScriptWorker();
-      const worker = await getWorker(model.uri);
-      const output = await worker.getEmitOutput(String(model.uri));
+      const getWorker = await monaco.languages.typescript.getTypeScriptWorker()
+      const worker = await getWorker(model.uri)
+      const output = await worker.getEmitOutput(String(model.uri))
 
       if (output.outputFiles.length === 0) {
-        throw new Error('No output generated');
+        throw new Error('No output generated')
       }
 
-      const jsCode = output.outputFiles[0].text;
+      const jsCode = output.outputFiles[0].text
 
       // Create a custom console to capture output
-      const capturedLogs: Array<{ type: 'log' | 'error' | 'warn'; message: string }> = [];
+      const capturedLogs: Array<{ type: 'log' | 'error' | 'warn'; message: string }> = []
       const customConsole = {
         log: (...args: unknown[]) => {
-          capturedLogs.push({ type: 'log', message: args.map(a => this.formatValue(a)).join(' ') });
+          capturedLogs.push({ type: 'log', message: args.map(a => this.formatValue(a)).join(' ') })
         },
         error: (...args: unknown[]) => {
-          capturedLogs.push({ type: 'error', message: args.map(a => this.formatValue(a)).join(' ') });
+          capturedLogs.push({ type: 'error', message: args.map(a => this.formatValue(a)).join(' ') })
         },
         warn: (...args: unknown[]) => {
-          capturedLogs.push({ type: 'warn', message: args.map(a => this.formatValue(a)).join(' ') });
+          capturedLogs.push({ type: 'warn', message: args.map(a => this.formatValue(a)).join(' ') })
         },
-      };
+      }
 
       // Create a custom fetch that serves fake API responses
       const customFetch = async (url: string) => {
@@ -949,66 +941,66 @@ export class TypicalPlayground extends LitElement {
                 total: 3,
               },
             }),
-          };
+          }
         }
-        throw new Error(`Fetch not supported in playground: ${url}`);
-      };
+        throw new Error(`Fetch not supported in playground: ${url}`)
+      }
 
       // Store globals for the module to access
-      (window as any).__playground_console__ = customConsole;
-      (window as any).__playground_fetch__ = customFetch;
+      ;(window as any).__playground_console__ = customConsole
+      ;(window as any).__playground_fetch__ = customFetch
 
       // Wrap code to use our custom console and fetch
       const moduleCode = `
 const console = window.__playground_console__;
 const fetch = window.__playground_fetch__;
 ${jsCode}
-`;
+`
 
       // Create a Blob URL and dynamically import it as an ES module
-      const blob = new Blob([moduleCode], { type: 'application/javascript' });
-      const url = URL.createObjectURL(blob);
+      const blob = new Blob([moduleCode], { type: 'application/javascript' })
+      const url = URL.createObjectURL(blob)
       try {
-        await import(/* @vite-ignore */ url);
+        await import(/* @vite-ignore */ url)
       } finally {
-        URL.revokeObjectURL(url);
-        delete (window as Record<string, unknown>).__playground_console__;
-        delete (window as Record<string, unknown>).__playground_fetch__;
+        URL.revokeObjectURL(url)
+        delete (window as Record<string, unknown>).__playground_console__
+        delete (window as Record<string, unknown>).__playground_fetch__
       }
 
-      this.consoleOutput = capturedLogs;
+      this.consoleOutput = capturedLogs
 
       if (capturedLogs.length === 0) {
-        this.consoleOutput = [{ type: 'log', message: '(no output)' }];
+        this.consoleOutput = [{ type: 'log', message: '(no output)' }]
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.consoleOutput = [{ type: 'error', message }];
+      const message = err instanceof Error ? err.message : String(err)
+      this.consoleOutput = [{ type: 'error', message }]
     } finally {
-      this.isRunning = false;
+      this.isRunning = false
     }
   }
 
   private formatValue(value: unknown): string {
-    if (value === null) return 'null';
-    if (value === undefined) return 'undefined';
-    if (typeof value === 'string') return value;
+    if (value === null) return 'null'
+    if (value === undefined) return 'undefined'
+    if (typeof value === 'string') return value
     if (typeof value === 'object') {
       try {
-        return JSON.stringify(value, null, 2);
+        return JSON.stringify(value, null, 2)
       } catch {
-        return String(value);
+        return String(value)
       }
     }
-    return String(value);
+    return String(value)
   }
 
   private clearConsole() {
-    this.consoleOutput = [];
+    this.consoleOutput = []
   }
 
   render() {
-    const isLoading = this.compilerStatus === 'loading' || this.editorStatus === 'loading';
+    const isLoading = this.compilerStatus === 'loading' || this.editorStatus === 'loading'
 
     return html`
       <div class="playground-container">
@@ -1030,7 +1022,8 @@ ${jsCode}
                 </svg>
               </button>
               <div class="examples-menu ${this.examplesOpen ? 'open' : ''}">
-                ${EXAMPLES.map((example, i) => html`
+                ${EXAMPLES.map(
+                  (example, i) => html`
                   <button
                     class="example-item ${this.selectedExample === i ? 'active' : ''}"
                     @click=${() => this.selectExample(i)}
@@ -1038,7 +1031,8 @@ ${jsCode}
                     <div class="example-name">${example.name}</div>
                     <div class="example-desc">${example.description}</div>
                   </button>
-                `)}
+                `,
+                )}
               </div>
             </div>
 
@@ -1085,19 +1079,27 @@ ${jsCode}
               </label>
             </div>
             <div class="output-container">
-              ${isLoading ? html`
+              ${
+                isLoading
+                  ? html`
                 <div class="loading-overlay">
                   <div class="loading-spinner"></div>
                   <div>Loading ${this.compilerStatus === 'loading' ? 'compiler' : 'editor'}...</div>
                 </div>
-              ` : this.compilerStatus === 'error' ? html`
+              `
+                  : this.compilerStatus === 'error'
+                    ? html`
                 <pre class="error-message">Failed to load compiler:\n${this.compilerError}</pre>
-              ` : this.transformError ? html`
+              `
+                    : this.transformError
+                      ? html`
                 <pre class="error-message">${this.transformError}</pre>
-              ` : html`
+              `
+                      : html`
                 <div class="editor-container" id="output-editor" style="${this.outputTab === 'transformed' ? '' : 'display: none'}"></div>
                 <pre class="output-code" style="${this.outputTab === 'sourcemap' ? '' : 'display: none'}">${this.sourceMap ? JSON.stringify(this.sourceMap, null, 2) : 'No source map generated'}</pre>
-              `}
+              `
+              }
             </div>
           </div>
         </main>
@@ -1121,11 +1123,17 @@ ${jsCode}
             <button class="clear-btn" @click=${() => this.clearConsole()}>Clear</button>
           </div>
           <div class="console-output">
-            ${this.consoleOutput.length === 0 ? html`
+            ${
+              this.consoleOutput.length === 0
+                ? html`
               <div class="console-empty">Click "Run" to execute the code</div>
-            ` : this.consoleOutput.map(entry => html`
+            `
+                : this.consoleOutput.map(
+                    entry => html`
               <div class="console-line ${entry.type}">${entry.message}</div>
-            `)}
+            `,
+                  )
+            }
           </div>
         </div>
 
@@ -1135,15 +1143,18 @@ ${jsCode}
             <div class="status-item">
               <span class="status-dot ${isLoading ? 'loading' : this.compilerStatus === 'error' ? 'error' : ''}"></span>
               <span>
-                ${isLoading ? 'Loading...' :
-                  this.compilerStatus === 'error' ? 'Error' : 'Compiler Ready'}
+                ${isLoading ? 'Loading...' : this.compilerStatus === 'error' ? 'Error' : 'Compiler Ready'}
               </span>
             </div>
-            ${this.transformTime > 0 ? html`
+            ${
+              this.transformTime > 0
+                ? html`
               <div class="status-item">
                 Transform: ${this.transformTime}ms
               </div>
-            ` : ''}
+            `
+                : ''
+            }
           </div>
           <div>
             <a href="https://github.com/elliots/typical" target="_blank" style="color: white;">
@@ -1152,12 +1163,12 @@ ${jsCode}
           </div>
         </footer>
       </div>
-    `;
+    `
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    'typical-playground': TypicalPlayground;
+    'typical-playground': TypicalPlayground
   }
 }

@@ -36,7 +36,7 @@ export function mergeCompanies(company1: Company, company2: Company): Company {
   console.log('Company 2:', JSON.stringify(company2))
 
   const merged: Company = {
-    name: company1.name + " & " + company2.name,
+    name: company1.name + ' & ' + company2.name,
     address: company1.address,
     website: company1.website,
   }
