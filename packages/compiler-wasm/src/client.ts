@@ -449,7 +449,10 @@ export class WasmTypicalCompiler {
     // Pass minimal environment variables to Go
     // Full process.env can exceed WASM limits
     const env: Record<string, string> = {}
-    if (typeof process !== 'undefined' && process.env) {
+    // Check for actual Node.js runtime - must check for string type, not just existence
+    // Vite/bundlers may provide process shims but won't have versions.node as a string
+    const isNodeJS = typeof process !== 'undefined' && typeof process.versions?.node === 'string'
+    if (isNodeJS && process.env) {
       // Only pass essential vars
       if (process.env.TMPDIR) env.TMPDIR = process.env.TMPDIR
       if (process.env.HOME) env.HOME = process.env.HOME
@@ -460,6 +463,7 @@ export class WasmTypicalCompiler {
         env.TMPDIR = os.tmpdir()
       }
     } else {
+      // Browser or non-Node environment
       env.TMPDIR = '/tmp'
     }
     this.go.env = env

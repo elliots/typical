@@ -679,6 +679,7 @@ export class TypicalPlayground extends LitElement {
     this.inputEditor?.dispose()
     this.outputEditor?.dispose()
     this.compiler?.close()
+    this.styleObserver?.disconnect()
   }
 
   private initMonaco() {
@@ -715,32 +716,64 @@ export class TypicalPlayground extends LitElement {
     }
   }
 
+  private adoptedStyleSheets = new Set<CSSStyleSheet>()
+  private styleObserver: MutationObserver | null = null
+
   private adoptMonacoStyles() {
     // Find all Monaco-related stylesheets in the document and copy them to shadow DOM
+    const shadowRoot = this.shadowRoot
+    if (!shadowRoot) return
+
+    this.copyMonacoStyles()
+
+    // Watch for new style elements being added (Monaco adds styles dynamically)
+    if (!this.styleObserver) {
+      this.styleObserver = new MutationObserver(() => {
+        this.copyMonacoStyles()
+      })
+      this.styleObserver.observe(document.head, { childList: true, subtree: true })
+    }
+  }
+
+  private copyMonacoStyles() {
     const shadowRoot = this.shadowRoot
     if (!shadowRoot) return
 
     // Get all stylesheets from the document
     const styleSheets = Array.from(document.styleSheets)
     for (const sheet of styleSheets) {
+      // Skip if already adopted
+      if (this.adoptedStyleSheets.has(sheet)) continue
+
       try {
-        // Check if this is a Monaco stylesheet by looking at the href or rules
+        // Check if this stylesheet contains Monaco rules
         const href = sheet.href || ''
+        let hasMonacoRules = false
+
+        // Check href for obvious Monaco files
         if (href.includes('monaco') || href.includes('editor.main')) {
-          // Clone the stylesheet into shadow DOM
-          const link = document.createElement('link')
-          link.rel = 'stylesheet'
-          link.href = href
-          shadowRoot.appendChild(link)
-        } else if (!sheet.href && sheet.cssRules) {
-          // For inline styles, check if they contain Monaco-specific rules
+          hasMonacoRules = true
+        } else if (sheet.cssRules) {
+          // Check actual CSS rules for Monaco selectors
           const rules = Array.from(sheet.cssRules)
-          const hasMonacoRules = rules.some(rule => rule.cssText?.includes('.monaco-') || rule.cssText?.includes('.vs-dark'))
-          if (hasMonacoRules) {
+          hasMonacoRules = rules.some(rule => rule.cssText?.includes('.monaco-') || rule.cssText?.includes('.vs-dark'))
+        }
+
+        if (hasMonacoRules) {
+          if (sheet.href) {
+            // External stylesheet - link to it
+            const link = document.createElement('link')
+            link.rel = 'stylesheet'
+            link.href = sheet.href
+            shadowRoot.appendChild(link)
+          } else if (sheet.cssRules) {
+            // Inline stylesheet - copy rules
+            const rules = Array.from(sheet.cssRules)
             const style = document.createElement('style')
             style.textContent = rules.map(r => r.cssText).join('\n')
             shadowRoot.appendChild(style)
           }
+          this.adoptedStyleSheets.add(sheet)
         }
       } catch {
         // CORS may prevent accessing cssRules, ignore
@@ -765,7 +798,11 @@ export class TypicalPlayground extends LitElement {
       const module = await import('@typical/compiler-wasm')
 
       const { WasmTypicalCompiler, wasmPath, wrapSyncFSForGo } = module as {
-        WasmTypicalCompiler: new (options: { wasmPath: URL; fs?: object }) => WasmCompiler
+        WasmTypicalCompiler: new (options: {
+          wasmPath: URL
+          fs?: object
+          fetchWasm?: (url: string | URL) => Promise<ArrayBuffer>
+        }) => WasmCompiler
         wasmPath: URL
         wrapSyncFSForGo: (syncFs: typeof fs) => object
       }
@@ -773,8 +810,56 @@ export class TypicalPlayground extends LitElement {
       // Wrap ZenFS for Go WASM compatibility
       const wrappedFs = wrapSyncFSForGo(fs)
 
-      // Create compiler with ZenFS
-      this.compiler = new WasmTypicalCompiler({ wasmPath, fs: wrappedFs })
+      // Custom fetch function that tries gzipped WASM first (production), then falls back to uncompressed (dev)
+      const fetchWasm = async (url: string | URL): Promise<ArrayBuffer> => {
+        const urlStr = url.toString()
+
+        // Try gzipped version first (exists in production builds)
+        const gzUrl = urlStr + '.gz'
+        try {
+          const gzResponse = await fetch(gzUrl)
+          // Check content-type to ensure it's actually a gzip file, not an error page
+          const contentType = gzResponse.headers.get('content-type') || ''
+          if (gzResponse.ok && !contentType.includes('text/html')) {
+            console.log('Loading compressed WASM from', gzUrl)
+            const data = await gzResponse.arrayBuffer()
+
+            // Check if browser already decompressed it (Content-Encoding: gzip header was present)
+            // If the server sends Content-Encoding: gzip, browser auto-decompresses
+            // We can detect this by checking if the data looks like valid WASM (starts with \0asm)
+            const header = new Uint8Array(data.slice(0, 4))
+            const isWasm = header[0] === 0x00 && header[1] === 0x61 && header[2] === 0x73 && header[3] === 0x6d
+
+            if (isWasm) {
+              // Browser already decompressed it
+              console.log('WASM already decompressed by browser:', (data.byteLength / 1024 / 1024).toFixed(1), 'MB')
+              return data
+            }
+
+            // Manually decompress using DecompressionStream (native browser API)
+            const ds = new DecompressionStream('gzip')
+            const decompressedData = await new Response(
+              new Blob([data]).stream().pipeThrough(ds)
+            ).arrayBuffer()
+            console.log('Decompressed WASM:', (decompressedData.byteLength / 1024 / 1024).toFixed(1), 'MB')
+            return decompressedData
+          }
+        } catch (e) {
+          // Gzipped version not available (dev mode), fall through to uncompressed
+          console.log('Gzipped WASM not available, falling back to uncompressed:', e)
+        }
+
+        // Fall back to uncompressed WASM (dev mode)
+        console.log('Loading uncompressed WASM from', urlStr)
+        const response = await fetch(urlStr)
+        if (!response.ok) {
+          throw new Error(`Failed to fetch WASM: ${response.status} ${response.statusText}`)
+        }
+        return response.arrayBuffer()
+      }
+
+      // Create compiler with ZenFS and custom fetch
+      this.compiler = new WasmTypicalCompiler({ wasmPath, fs: wrappedFs, fetchWasm })
 
       await this.compiler.start()
       this.compilerStatus = 'ready'
