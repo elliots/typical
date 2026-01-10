@@ -55,36 +55,10 @@ interface ApiResponse {
 
 async function callBackend(): Promise<ApiResponse> {
   const response = await fetch('/fake-api-response.json');
-  const data = await response.json();
-  return data as ApiResponse;
+  return await response.json(); // Validated as ApiResponse
 }
 
 console.log('Data from backend:', await callBackend());
-// The cast triggers runtime validation!
-`,
-  },
-  {
-    name: 'Complex Types',
-    description: 'Unions, intersections, and generics',
-    code: `// Typical handles complex TypeScript types
-type Status = 'pending' | 'active' | 'completed';
-
-interface Task {
-  id: number;
-  title: string;
-  status: Status;
-  assignee?: string;
-  tags: string[];
-}
-
-function updateTask(task: Task, updates: Partial<Task>): Task {
-  return { ...task, ...updates };
-}
-
-function processTask<T extends Task>(task: T): T {
-  console.log(\`Processing: \${task.title}\`);
-  return task;
-}
 `,
   },
   {
@@ -145,38 +119,35 @@ function isPointInShape(shape: Shape, p: Point): boolean {
   // <some complicated code>
   return true
 }
+
+console.log(calculateDistance([1,2], [2,'3'] as any))
 `,
   },
   {
-    name: 'Error Handling',
-    description: 'See what happens with invalid data',
-    code: `// When validation fails, you get clear error messages
-interface Config {
-  apiUrl: string;
-  timeout: number;
-  retries: number;
-  features: {
-    caching: boolean;
-    logging: boolean;
+    name: 'Data leak prevention',
+    description: 'Only stringify the data in the types',
+    code: `interface DBUser {
+  username: string
+  password: string
+}
+
+type APIUser = Omit<DBUser, 'password'>
+
+function getDBUser(): DBUser {
+  return {
+    username: "alice",
+    password: "supersecret"
   };
 }
 
-function initApp(config: Config): void {
-  console.log(\`Connecting to \${config.apiUrl}\`);
-}
+// No problem compile-time. But the password is still there!
+const u: APIUser = getDBUser(); 
 
-// Try this with invalid data:
-const badConfig = {
-  apiUrl: "https://api.example.com",
-  timeout: "30",  // Should be number!
-  retries: 3,
-  features: {
-    caching: true,
-    // logging is missing!
-  }
-};
+// Object is filtered before stringify
+console.log("User:", JSON.stringify(u)); 
 
-initApp(badConfig as any);
+// Or, if you really need it, cast back to full type
+console.log("Full user:", JSON.stringify(u as DBUser));
 `,
   },
 ];
@@ -263,7 +234,7 @@ export class TypicalPlayground extends LitElement {
     .examples-menu {
       position: absolute;
       top: 100%;
-      left: 0;
+      right: 0;
       margin-top: 4px;
       background: white;
       border-radius: 6px;
@@ -973,7 +944,7 @@ export class TypicalPlayground extends LitElement {
                 items: [
                   { id: 1, title: 'Learn TypeScript', completed: true },
                   { id: 2, title: 'Try Typical', completed: false },
-                  { id: 3, title: 'Build something awesome', completed: false },
+                  { id: 3, title: 'Build something awesome', completed: 'nothing' },
                 ],
                 total: 3,
               },
@@ -984,8 +955,8 @@ export class TypicalPlayground extends LitElement {
       };
 
       // Store globals for the module to access
-      (window as Record<string, unknown>).__playground_console__ = customConsole;
-      (window as Record<string, unknown>).__playground_fetch__ = customFetch;
+      (window as any).__playground_console__ = customConsole;
+      (window as any).__playground_fetch__ = customFetch;
 
       // Wrap code to use our custom console and fetch
       const moduleCode = `

@@ -58,6 +58,18 @@ export class TypicalFooter extends LitElement {
       margin-top: 1rem;
     }
 
+    .made-in {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.85rem;
+      margin-top: 0.5rem;
+    }
+
+    .made-in .flag {
+      font-size: 1.2rem;
+    }
+
     .links-section h3 {
       font-size: 0.9rem;
       font-weight: 600;
@@ -130,7 +142,10 @@ export class TypicalFooter extends LitElement {
             </div>
             <div class="tagline">TypeScript with validation at runtime.</div>
             <div class="copyright">
-              MIT License &copy; ${year} Elliot Shepherd
+              MIT License &copy; ${year} Elliot Shepherd - e@elliots.dev
+            </div>
+            <div class="made-in">
+              <span class="flag">🇦🇺</span> Made in Australia
             </div>
           </div>
           <div class="links-section">
@@ -146,8 +161,8 @@ export class TypicalFooter extends LitElement {
             <h3>Community</h3>
             <ul>
               <li><a href="https://github.com/elliots/typical/issues" target="_blank">Issues</a></li>
-              <li><a href="https://github.com/elliots/typical/discussions" target="_blank">Discussions</a></li>
-              <li><a href="https://github.com/elliots/typical/releases" target="_blank">Releases</a></li>
+              <!-- <li><a href="https://github.com/elliots/typical/discussions" target="_blank">Discussions</a></li> -->
+              <!-- <li><a href="https://github.com/elliots/typical/releases" target="_blank">Releases</a></li> -->
             </ul>
           </div>
         </div>

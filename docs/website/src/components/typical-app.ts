@@ -7,6 +7,7 @@ import './typical-features.js';
 import './typical-how-it-works.js';
 import './typical-comparison.js';
 import './typical-testimonial.js';
+import './typical-production.js';
 import './typical-footer.js';
 
 @customElement('typical-app')
@@ -24,9 +25,10 @@ export class TypicalApp extends LitElement {
       <main>
         <typical-hero></typical-hero>
         <typical-features></typical-features>
-        <typical-how-it-works></typical-how-it-works>
+        <!-- <typical-how-it-works></typical-how-it-works> -->
         <typical-comparison></typical-comparison>
-        <typical-testimonial></typical-testimonial>
+        <!-- <typical-testimonial></typical-testimonial> -->
+        <typical-production></typical-production>
       </main>
       <typical-footer></typical-footer>
     `;

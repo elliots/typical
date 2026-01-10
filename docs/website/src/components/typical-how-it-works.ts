@@ -1,9 +1,47 @@
-import { LitElement, html, css } from 'lit';
+import { LitElement, html, css, unsafeCSS } from 'lit';
 import { customElement } from 'lit/decorators.js';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
+import { highlightTS, highlightStyles } from '../utils/highlight.js';
+
+const step1Code = `interface User {
+  name: string;
+  age: number;
+}
+
+function saveUser(
+  user: User
+) {
+  db.save(user);
+}`;
+
+const step2Code = `interface User {
+  name: string;
+  age: number;
+}
+
+function saveUser(
+  user: User
+) {
+  __validate(user, "User");
+  db.save(user);
+}`;
+
+const step3Code = `// API returns bad data:
+const user = {
+  name: "Alice",
+  age: "unknown"
+};
+
+saveUser(user);
+// TypeError: property 'age'
+//   expected number,
+//   got string "unknown"`;
 
 @customElement('typical-how-it-works')
 export class TypicalHowItWorks extends LitElement {
   static styles = css`
+    ${unsafeCSS(highlightStyles)}
+
     :host {
       display: block;
       padding: 5rem 2rem;
@@ -91,16 +129,6 @@ export class TypicalHowItWorks extends LitElement {
       border-top: 1px solid #e5e5e5;
     }
 
-    /* Syntax highlighting */
-    .keyword { color: #569cd6; }
-    .function { color: #dcdcaa; }
-    .type { color: #4ec9b0; }
-    .string { color: #ce9178; }
-    .number { color: #b5cea8; }
-    .comment { color: #6a9955; }
-    .property { color: #9cdcfe; }
-    .added { color: #4ec9b0; background: rgba(78, 201, 176, 0.1); }
-
     @media (max-width: 900px) {
       .steps {
         grid-template-columns: 1fr;
@@ -126,16 +154,7 @@ export class TypicalHowItWorks extends LitElement {
               <span>Write TypeScript</span>
             </div>
             <div class="step-code">
-              <pre><span class="keyword">interface</span> <span class="type">User</span> {
-  <span class="property">name</span>: <span class="type">string</span>;
-  <span class="property">age</span>: <span class="type">number</span>;
-}
-
-<span class="keyword">function</span> <span class="function">saveUser</span>(
-  <span class="property">user</span>: <span class="type">User</span>
-) {
-  <span class="property">db</span>.<span class="function">save</span>(<span class="property">user</span>);
-}</pre>
+              <pre><code class="language-typescript">${unsafeHTML(highlightTS(step1Code))}</code></pre>
             </div>
             <div class="step-description">
               Write normal TypeScript. No decorators, no schema definitions.
@@ -148,17 +167,7 @@ export class TypicalHowItWorks extends LitElement {
               <span>Typical transforms</span>
             </div>
             <div class="step-code">
-              <pre><span class="keyword">interface</span> <span class="type">User</span> {
-  <span class="property">name</span>: <span class="type">string</span>;
-  <span class="property">age</span>: <span class="type">number</span>;
-}
-
-<span class="keyword">function</span> <span class="function">saveUser</span>(
-  <span class="property">user</span>: <span class="type">User</span>
-) {
-  <span class="added">__validate(user, "User");</span>
-  <span class="property">db</span>.<span class="function">save</span>(<span class="property">user</span>);
-}</pre>
+              <pre><code class="language-typescript">${unsafeHTML(highlightTS(step2Code))}</code></pre>
             </div>
             <div class="step-description">
               Typical injects validators based on your types.
@@ -171,16 +180,7 @@ export class TypicalHowItWorks extends LitElement {
               <span>Errors at runtime</span>
             </div>
             <div class="step-code">
-              <pre><span class="comment">// API returns bad data:</span>
-<span class="keyword">const</span> <span class="property">user</span> = {
-  <span class="property">name</span>: <span class="string">"Alice"</span>,
-  <span class="property">age</span>: <span class="string">"unknown"</span>
-};
-
-<span class="function">saveUser</span>(<span class="property">user</span>);
-<span class="comment">// TypeError: property 'age'</span>
-<span class="comment">//   expected number,</span>
-<span class="comment">//   got string "unknown"</span></pre>
+              <pre><code class="language-typescript">${unsafeHTML(highlightTS(step3Code))}</code></pre>
             </div>
             <div class="step-description">
               Invalid data is caught before it causes problems.

@@ -1,13 +1,52 @@
-import { LitElement, html, css } from 'lit';
+import { LitElement, html, css, unsafeCSS } from 'lit';
 import { customElement } from 'lit/decorators.js';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
+import { highlightTS, highlightStyles } from '../utils/highlight.js';
+
+const zodCode = `import { z } from 'zod';
+
+// Define the schema...
+const UserSchema = z.object({
+  name: z.string(),
+  age: z.number(),
+  email: z.string().email(),
+});
+
+// ...then derive the type
+type User = z.infer<typeof UserSchema>;
+
+// Use both everywhere
+function saveUser(input: unknown) {
+  const user = UserSchema.parse(input);
+  // ...
+}`;
+
+const typicalCode = `// Just write the type
+interface User {
+  name: string;
+  age: number;
+  email: \`\${string}@\${string}.\${string}\`;
+}
+
+// Use it normally
+function saveUser(user: User) {
+  // Validation happens automatically!
+  // ...
+}
+
+// That's it. No schema.
+// No .parse() calls.
+// Just TypeScript.`;
 
 @customElement('typical-comparison')
 export class TypicalComparison extends LitElement {
   static styles = css`
+    ${unsafeCSS(highlightStyles)}
+
     :host {
       display: block;
       padding: 5rem 2rem;
-      background: white;
+      background: #f7f7f7;
     }
 
     .container {
@@ -86,16 +125,6 @@ export class TypicalComparison extends LitElement {
       font-weight: 500;
     }
 
-    /* Syntax highlighting */
-    .keyword { color: #569cd6; }
-    .function { color: #dcdcaa; }
-    .type { color: #4ec9b0; }
-    .string { color: #ce9178; }
-    .number { color: #b5cea8; }
-    .comment { color: #6a9955; }
-    .property { color: #9cdcfe; }
-    .dim { opacity: 0.5; }
-
     @media (max-width: 768px) {
       .comparison {
         grid-template-columns: 1fr;
@@ -118,23 +147,7 @@ export class TypicalComparison extends LitElement {
           <div class="side zod">
             <div class="side-header">With Zod</div>
             <div class="side-code">
-              <pre><span class="keyword">import</span> { z } <span class="keyword">from</span> <span class="string">'zod'</span>;
-
-<span class="comment">// Define the schema...</span>
-<span class="keyword">const</span> <span class="property">UserSchema</span> = <span class="property">z</span>.<span class="function">object</span>({
-  <span class="property">name</span>: <span class="property">z</span>.<span class="function">string</span>(),
-  <span class="property">age</span>: <span class="property">z</span>.<span class="function">number</span>().<span class="function">min</span>(<span class="number">0</span>),
-  <span class="property">email</span>: <span class="property">z</span>.<span class="function">string</span>().<span class="function">email</span>(),
-});
-
-<span class="comment">// ...then derive the type</span>
-<span class="keyword">type</span> <span class="type">User</span> = <span class="property">z</span>.<span class="function">infer</span>&lt;<span class="keyword">typeof</span> <span class="property">UserSchema</span>&gt;;
-
-<span class="comment">// Use both everywhere</span>
-<span class="keyword">function</span> <span class="function">saveUser</span>(<span class="property">input</span>: <span class="type">unknown</span>) {
-  <span class="keyword">const</span> <span class="property">user</span> = <span class="property">UserSchema</span>.<span class="function">parse</span>(<span class="property">input</span>);
-  <span class="comment">// ...</span>
-}</pre>
+              <pre><code class="language-typescript">${unsafeHTML(highlightTS(zodCode))}</code></pre>
             </div>
             <div class="side-footer">
               Schema + type + manual parse calls
@@ -144,23 +157,7 @@ export class TypicalComparison extends LitElement {
           <div class="side typical">
             <div class="side-header">With Typical</div>
             <div class="side-code">
-              <pre><span class="comment">// Just write the type</span>
-<span class="keyword">interface</span> <span class="type">User</span> {
-  <span class="property">name</span>: <span class="type">string</span>;
-  <span class="property">age</span>: <span class="type">number</span>;
-  <span class="property">email</span>: <span class="type">string</span>;
-}
-
-<span class="comment">// Use it normally</span>
-<span class="keyword">function</span> <span class="function">saveUser</span>(<span class="property">user</span>: <span class="type">User</span>) {
-  <span class="comment">// Validation happens automatically!</span>
-  <span class="comment">// ...</span>
-}
-
-<span class="dim">
-<span class="comment">// That's it. No schema.</span>
-<span class="comment">// No .parse() calls.</span>
-<span class="comment">// Just TypeScript.</span></span></pre>
+              <pre><code class="language-typescript">${unsafeHTML(highlightTS(typicalCode))}</code></pre>
             </div>
             <div class="side-footer">
               Just types. Validation is automatic.

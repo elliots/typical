@@ -31,14 +31,16 @@ export function validateNestedUser(user: NestedUser): NestedUser {
   return user
 }
 
-export function validateCompany(company1: Company, company2: Company): Company {
+export function mergeCompanies(company1: Company, company2: Company): Company {
   console.log('Company 1:', JSON.stringify(company1))
   console.log('Company 2:', JSON.stringify(company2))
 
-  const x: Company = JSON.parse(
-    `{name: "${company1.name}", address: {street: "${company1.address.street}", city: "${company1.address.city}", country: "${company1.address.country}", zip: "${company1.address.zip}"}, website: "${company1.website}"}`,
-  )
-  return company1
+  const merged: Company = {
+    name: company1.name + " & " + company2.name,
+    address: company1.address,
+    website: company1.website,
+  }
+  return merged
 }
 
 // Test data

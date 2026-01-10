@@ -1,11 +1,48 @@
-import { LitElement, html, css, TemplateResult } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
+import { LitElement, html, css, unsafeCSS } from "lit";
+import { customElement, state } from "lit/decorators.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { highlightTS, highlightStyles } from "../utils/highlight.js";
 
-type TabId = 'before' | 'after' | 'error';
+type TabId = "typesafe" | "vscode" | "tools";
 
-@customElement('typical-hero')
+const beforeCode = `interface User {
+  name: string
+  email: \`\${string}@\${string}.\${string}\`
+}
+
+const u: User = JSON.parse(\`{"name":"Alice","email":"not-an-email"}\`);`;
+
+const afterCode = `// Typical transforms it to add runtime validation
+type Email = \`\${string}@\${string}.\${string}\`; /* literal templates supported */
+
+interface User {
+  name: string;
+  age: number;
+  email: Email;
+}
+
+function greetUser(user: User): string { /* parameters validated! */
+  return \`Hello, \${user.name}!\`; /* return value validated! */
+}
+
+const data = JSON.parse(response) as User; /* parse filtered and validated! */
+greetUser(data);`;
+
+const errorCode = `// When invalid data arrives at runtime...
+const badData = {
+  name: "Alice",
+  age: 25,
+  email: "not-an-email"
+};
+greetUser(badData);`;
+
+const errorOutput = `Expected u.email to be \`\${string}@\${string}.\${string}\` got string (not-an-email)`;
+
+@customElement("typical-hero")
 export class TypicalHero extends LitElement {
   static styles = css`
+    ${unsafeCSS(highlightStyles)}
+
     :host {
       display: block;
       background: var(--color-primary, #3178c6);
@@ -36,7 +73,6 @@ export class TypicalHero extends LitElement {
     .subtitle {
       font-size: 1.25rem;
       opacity: 0.95;
-      margin-bottom: 2rem;
       line-height: 1.6;
     }
 
@@ -44,6 +80,7 @@ export class TypicalHero extends LitElement {
       display: flex;
       gap: 1rem;
       flex-wrap: wrap;
+      margin-top: 2rem;
     }
 
     .btn {
@@ -110,10 +147,12 @@ export class TypicalHero extends LitElement {
 
     .code-content {
       padding: 1.5rem;
-      font-family: Menlo, Monaco, Consolas, "Andale Mono", "Ubuntu Mono", "Courier New", monospace;
-      font-size: 0.9rem;
+      font-family:
+        Menlo, Monaco, Consolas, "Andale Mono", "Ubuntu Mono", "Courier New",
+        monospace;
+      font-size: 0.8rem;
       line-height: 1.6;
-      min-height: 280px;
+      min-height: 320px;
       overflow-x: auto;
     }
 
@@ -123,16 +162,13 @@ export class TypicalHero extends LitElement {
       padding: 0;
     }
 
-    /* Syntax highlighting */
-    .keyword { color: #569cd6; }
-    .function { color: #dcdcaa; }
-    .type { color: #4ec9b0; }
-    .string { color: #ce9178; }
-    .number { color: #b5cea8; }
-    .comment { color: #6a9955; }
-    .property { color: #9cdcfe; }
-    .punctuation { color: #d4d4d4; }
-    .error { color: #f48771; background: rgba(244, 135, 113, 0.1); padding: 0.5rem; border-radius: 4px; display: block; margin-top: 0.5rem; }
+    .tab-footer {
+      padding: 1rem 1.5rem;
+      background: #f7f7f7;
+      font-size: 0.9rem;
+      color: var(--color-text-light, #6b6b6b);
+      border-top: 1px solid #e5e5e5;
+    }
 
     /* Version bar */
     .version-bar {
@@ -155,6 +191,42 @@ export class TypicalHero extends LitElement {
       text-decoration: underline;
     }
 
+    .version-date {
+      opacity: 0.7;
+      font-size: 0.85rem;
+    }
+
+    /* Tools list */
+    .tools-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      color: #d4d4d4;
+    }
+
+    .tools-list li {
+      display: flex;
+      align-items: center;
+      padding: 0.4rem 0;
+      border-bottom: 1px solid #333;
+    }
+
+    .tools-list li:last-child {
+      border-bottom: none;
+    }
+
+    .tool-name {
+      font-weight: 600;
+      color: #fff;
+      min-width: 100px;
+    }
+
+    .tool-method {
+      color: #9cdcfe;
+      font-family: Menlo, Monaco, Consolas, monospace;
+      font-size: 0.85rem;
+    }
+
     @media (max-width: 900px) {
       .container {
         grid-template-columns: 1fr;
@@ -172,57 +244,44 @@ export class TypicalHero extends LitElement {
   `;
 
   @state()
-  private activeTab: TabId = 'before';
+  private activeTab: TabId = "typesafe";
 
-  private codeExamples: Record<TabId, TemplateResult<1>> = {
-    before: html`<span class="comment">// Your TypeScript code - no changes needed</span>
-<span class="keyword">type</span> <span class="type">Email</span> = <span class="string">\`\${string}@\${string}.\${string}\`</span>;
+  private getCodeContent(tab: TabId) {
+    switch (tab) {
+      case "typesafe":
+        return html`<code class="language-typescript"><pre>${unsafeHTML(highlightTS(beforeCode))}
+        </pre></code>
 
-<span class="keyword">interface</span> <span class="type">User</span> {
-  <span class="property">name</span>: <span class="type">string</span>;
-  <span class="property">age</span>: <span class="type">number</span>;
-  <span class="property">email</span>: <span class="type">Email</span>;
-}
+<div class="error-output">${errorOutput.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
+        `;
+      case "tools":
+        return html`
+          <ul class="tools-list">
+            <li><span class="tool-name">Node.js</span><span class="tool-method">@elliots/typical/esm</span></li>
+            <li><span class="tool-name">Bun</span><span class="tool-method">@elliots/bun-plugin-typical</span></li>
+            <li><span class="tool-name">Vite</span><span class="tool-method">@elliots/unplugin-typical</span></li>
+            <li><span class="tool-name">Webpack</span><span class="tool-method">@elliots/unplugin-typical</span></li>
+            <li><span class="tool-name">Rollup</span><span class="tool-method">@elliots/unplugin-typical</span></li>
+            <li><span class="tool-name">esbuild</span><span class="tool-method">@elliots/unplugin-typical</span></li>
+            <li><span class="tool-name">tsc</span><span class="tool-method">@elliots/typical-tsc-plugin</span></li>
+            <li><span class="tool-name">tsx</span><span class="tool-method">@elliots/typical/esm</span></li>
+          </ul>
+        `;
+      case "vscode":
+        return html`<img src="/vscode.png" alt="VSCode extension" style="width: 100%; margin: 0 1rem; vertical-align: middle;" />`
+    }
+  }
 
-<span class="keyword">function</span> <span class="function">greetUser</span>(<span class="property">user</span>: <span class="type">User</span>): <span class="type">string</span> {
-  <span class="keyword">return</span> <span class="string">\`Hello, \${<span class="property">user</span>.<span class="property">name</span>}!\`</span>;
-}
-
-<span class="keyword">const</span> <span class="property">data</span> = <span class="function">JSON</span>.<span class="function">parse</span>(<span class="property">response</span>);
-<span class="function">greetUser</span>(<span class="property">data</span>);<br/>&nbsp;`,
-
-    after: html`<span class="comment">// Typical transforms it to add runtime validation</span>
-<span class="keyword">type</span> <span class="type">Email</span> = <span class="string">\`\${string}@\${string}.\${string}\`</span>;
-
-<span class="keyword">interface</span> <span class="type">User</span> {
-  <span class="property">name</span>: <span class="type">string</span>;
-  <span class="property">age</span>: <span class="type">number</span>;
-  <span class="property">email</span>: <span class="type">Email</span>;
-}
-
-<span class="keyword">function</span> <span class="function">greetUser</span>(<span class="property">user</span>: <span class="type">User</span>): <span class="type">string</span> {
-  <span class="comment">/* validator injected */</span> <span class="function">__validateUser</span>(<span class="property">user</span>);
-  <span class="keyword">return</span> <span class="string">\`Hello, \${<span class="property">user</span>.<span class="property">name</span>}!\`</span>;
-}
-
-<span class="keyword">const</span> <span class="property">data</span> = <span class="function">JSON</span>.<span class="function">parse</span>(<span class="property">response</span>) <span class="keyword">as</span> <span class="type">User</span>; <span class="comment">/* validated! */</span>
-<span class="function">greetUser</span>(<span class="property">data</span>);`,
-
-    error: html`<span class="comment">// When invalid data arrives at runtime...</span>
-<span class="keyword">const</span> <span class="property">badData</span> = {
-  <span class="property">name</span>: <span class="string">"Alice"</span>,
-  <span class="property">age</span>: <span class="number">25</span>,
-  <span class="property">email</span>: <span class="string">"not-an-email"</span>
-};
-<span class="function">greetUser</span>(<span class="property">badData</span>);
-
-<span class="error">TypeError: Expected user.email to be
-\`\${string}@\${string}.\${string}\`
-got string (not-an-email)</span>
-
-
-<span class="comment">// Typical validates template literal types at runtime!</span>`
-  };
+  private getTabFooter(tab: TabId): string {
+    switch (tab) {
+      case "typesafe":
+        return "Invalid data is caught immediately with clear error messages.";
+      case "vscode":
+        return "See where validation is added, and hover to see details.";
+      case "tools":
+        return "Integrates with your existing TypeScript tools. Open an issue to request more.";
+    }
+  }
 
   private setActiveTab(tab: TabId) {
     this.activeTab = tab;
@@ -232,11 +291,15 @@ got string (not-an-email)</span>
     return html`
       <div class="container">
         <div class="content">
-          <h1>Typical is <strong>TypeScript<br>with validation at runtime.</strong></h1>
+          <h1>Typical is <strong>TypeScript<br>with type-safety at <i>runtime.</i></strong></h1>
           <p class="subtitle">
-            Typical is a transformer that makes Typescript type-safe at runtime.
-            <br/> <br/>
-            Built on Typescript 7. No runtime dependency. Pure Typescript. Works with all your existing tooling (Vite, Node.js, Bun, tsc, tsx etc)
+            Typical is a transformer that add validation to your code automatically.
+            <ul>
+              <li>Built on Typescript 7.</li>
+              <li>No runtime dependency. No changes to code.</li>
+              <li>Works with all your existing tools.</li>
+              <!-- <li>Pretty speedy (TBC, need more benchmarks)</li> -->
+            </ul>
           </p>
           <div class="cta-buttons">
             <a href="https://github.com/elliots/typical#readme" class="btn btn-primary" target="_blank">
@@ -248,25 +311,29 @@ got string (not-an-email)</span>
         <div class="code-demo">
           <div class="tabs">
             <button
-              class="tab ${this.activeTab === 'before' ? 'active' : ''}"
-              @click=${() => this.setActiveTab('before')}
-            >Your Code</button>
+              class="tab ${this.activeTab === "typesafe" ? "active" : ""}"
+              @click=${() => this.setActiveTab("typesafe")}
+            >Runtime type safety</button>
             <button
-              class="tab ${this.activeTab === 'after' ? 'active' : ''}"
-              @click=${() => this.setActiveTab('after')}
-            >Transformed</button>
+              class="tab ${this.activeTab === "tools" ? "active" : ""}"
+              @click=${() => this.setActiveTab("tools")}
+            >Tool Integration</button>
             <button
-              class="tab ${this.activeTab === 'error' ? 'active' : ''}"
-              @click=${() => this.setActiveTab('error')}
-            >Runtime Error</button>
+              class="tab ${this.activeTab === "vscode" ? "active" : ""}"
+              @click=${() => this.setActiveTab("vscode")}
+            >VSCode Addon</button>
+           
           </div>
           <div class="code-content">
-            <pre>${this.codeExamples[this.activeTab]}</pre>
+            ${this.getCodeContent(this.activeTab)}
+          </div>
+          <div class="tab-footer">
+            ${this.getTabFooter(this.activeTab)}
           </div>
         </div>
       </div>
       <div class="version-bar">
-        <a href="https://github.com/elliots/typical/releases" target="_blank">Typical 0.2.3</a> is now available
+        <span class="version-date">2026-01-11</span> <a href="https://www.npmjs.com/package/@elliots/typical" target="_blank">Typical 0.2.4</a> is now available
       </div>
     `;
   }
@@ -274,6 +341,6 @@ got string (not-an-email)</span>
 
 declare global {
   interface HTMLElementTagNameMap {
-    'typical-hero': TypicalHero;
+    "typical-hero": TypicalHero;
   }
 }
