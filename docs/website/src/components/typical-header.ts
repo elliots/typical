@@ -12,6 +12,8 @@ export class TypicalHeader extends LitElement {
       top: 0;
       z-index: 100;
       background: var(--color-primary-dark, #235a97);
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
     }
 
     header {
@@ -22,6 +24,7 @@ export class TypicalHeader extends LitElement {
       margin: 0 auto;
       padding: 0 2rem;
       height: 60px;
+      min-width: max-content;
     }
 
     .logo {
