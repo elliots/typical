@@ -1,6 +1,6 @@
 {
   "name": "@elliots/typical-compiler-linux-arm64",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Typical compiler binary for Linux ARM64",
   "license": "MIT",
   "author": "elliots",

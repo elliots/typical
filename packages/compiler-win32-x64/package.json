@@ -1,6 +1,6 @@
 {
   "name": "@elliots/typical-compiler-win32-x64",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Typical compiler binary for Windows x64",
   "license": "MIT",
   "author": "elliots",

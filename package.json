@@ -1,6 +1,6 @@
 {
   "name": "@elliots/typical",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Runtime safe TypeScript transformer using typia",
   "keywords": [
     "runtime",
@@ -47,6 +47,7 @@
     "build:go": "cd packages/compiler && npm run build:go",
     "build:go:all": "./scripts/build-binaries.sh",
     "build:ts": "pnpm --filter './packages/*' run build && tsc",
+    "build:website": "cd docs/website && pnpm install && pnpm run build",
     "dev": "tsc --watch",
     "test": "rm -f test/test.temp.ts && tsc && node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
     "test:coverage": "rm -f test/test.temp.ts && tsc && node --import ./dist/src/esm-loader-register.js --test --experimental-test-coverage dist/test/*.test.js",

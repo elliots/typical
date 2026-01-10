@@ -36,16 +36,20 @@ build_platform() {
   echo "    Created: $output_file"
 }
 
-# Build dev binary
-go build -o "$GO_DIR/bin/typical" ./cmd/typical
+# only run these if WASM_ONLY is not set
+if [ -z "$WASM_ONLY" ]; then
 
-# Build all platforms
-build_platform darwin arm64 darwin-arm64
-build_platform darwin amd64 darwin-x64
-build_platform linux arm64 linux-arm64
-build_platform linux amd64 linux-x64
-build_platform windows arm64 win32-arm64
-build_platform windows amd64 win32-x64
+  # Build dev binary
+  go build -o "$GO_DIR/bin/typical" ./cmd/typical
+
+  # Build all platforms
+  build_platform darwin arm64 darwin-arm64
+  build_platform darwin amd64 darwin-x64
+  build_platform linux arm64 linux-arm64
+  build_platform linux amd64 linux-x64
+  build_platform windows arm64 win32-arm64
+  build_platform windows amd64 win32-x64
+fi
 
 # Build WASM (js/wasm for browser compatibility)
 echo "==> Building for js/wasm -> compiler-wasm..."

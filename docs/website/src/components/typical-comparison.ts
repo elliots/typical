@@ -141,7 +141,7 @@ export class TypicalComparison extends LitElement {
       <div class="container">
         <h2>Typical vs Zod</h2>
         <p class="subtitle">
-          Why write your types twice? With Typical, you don't have to.
+          Can you define your validation needs with just types? If so, you can make things a lot simpler and faster.
         </p>
         <div class="comparison">
           <div class="side zod">
