@@ -306,6 +306,10 @@ export class TypicalHero extends LitElement {
               <span>Get Started</span>
               <span class="btn-secondary">View on GitHub</span>
             </a>
+            <a href="/playground.html" class="btn btn-primary">
+              <span>Have a Play</span>
+              <span class="btn-secondary">Open Playground</span>
+            </a>
           </div>
         </div>
         <div class="code-demo">
