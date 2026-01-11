@@ -147,6 +147,37 @@ export class TypicalFeatures extends LitElement {
         </div>
 
         <div class="get-started">
+        <h2>Use Cases</h2>
+        <div class="features-grid">
+          <div class="feature">
+            <h3>Libraries</h3>
+            <p>
+              Ship input validation and safe serialization in your libraries, without bringing in extra dependencies. <strong>JS consumers get type safety too</strong>.
+            </p>
+          </div>
+          <div class="feature">
+            <h3>Development</h3>
+            <p>
+              Catch bugs early by validating data structures during development. <strong>Compile-time doesn't catch everything.</strong>
+            </p>
+          </div>
+          <div class="feature">
+            <h3>APIs</h3>
+            <p>
+              Validate incoming request data and <strong>sanitize outgoing responses in your API servers</strong>. With or without another validation library.
+            </p>
+          </div>
+          <div class="feature">
+            <h3>Frontend</h3>
+            <p>
+              Never send invalid data to your backend again. Doesn't replace form validation, but adds an <strong>extra layer of safety</strong>.
+            </p>
+          </div>
+         
+
+        </div>
+
+        <div class="get-started">
           <h2>Get Started</h2>
           <div class="cards">
             <a href="https://github.com/elliots/typical#readme" target="_blank" class="card">

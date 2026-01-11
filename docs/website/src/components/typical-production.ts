@@ -54,7 +54,7 @@ export class TypicalProduction extends LitElement {
         <h2>How do I integrate this into my build?</h2>
         <p>Either use it as a transformer in your TypeScript build step, or use the integrations for node and bun.</p>
 
-        <h2>Slow?</h2>
+        <h2>Is it slow?</h2>
         <p>Slower than not validating, faster than runtime validation libraries*.</p> 
         <p><br/>Many optimisations still to come. It does try to skip validation when redundant, but much more to do.</p>
         <p><br/>There are some benchmark results in the readme (and you can run them yourself) but... lies, damn lies, and benchmarks. If you have any input on the benchmarks I'd like to hear them. <br/>This is made to be fast, if its not, thats a bug. </p>
