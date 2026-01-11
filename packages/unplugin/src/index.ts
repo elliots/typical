@@ -47,3 +47,6 @@ export const Typical: UnpluginInstance<Options | undefined, false> = createUnplu
 })
 
 export type { Options }
+
+// Export bundler-specific plugins
+export default Typical

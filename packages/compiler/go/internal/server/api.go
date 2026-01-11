@@ -70,6 +70,11 @@ func NewAPI(opts *APIOptions) *API {
 func (a *API) LoadProject(configFileName string) (*ProjectResponse, error) {
 	configFileName = a.toAbsolutePath(configFileName)
 
+	// Check if the tsconfig file exists before trying to load
+	if _, err := os.Stat(configFileName); os.IsNotExist(err) {
+		return nil, fmt.Errorf("tsconfig.json not found: %s", configFileName)
+	}
+
 	ctx := context.Background()
 	proj, err := a.session.OpenProject(ctx, configFileName)
 	if err != nil {

@@ -8,12 +8,9 @@ export default defineConfig({
   },
   plugins: [
     Typical({
+      enforce: 'pre',
       typical: {
         validateCasts: true,
-        // ignoreTypes: ['React.FormEvent'],
-        debug: {
-          writeIntermediateFiles: false,
-        },
       },
     }),
     react(),
