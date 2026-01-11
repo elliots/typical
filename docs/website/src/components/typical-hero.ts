@@ -293,7 +293,7 @@ export class TypicalHero extends LitElement {
         <div class="content">
           <h1>Typical is <strong>TypeScript<br>with type-safety at <i>runtime.</i></strong></h1>
           <p class="subtitle">
-            Typical is a transformer that add validation to your code automatically.
+            Transforms your TypeScript to add runtime validation automatically.
             <ul>
               <li>Built on Typescript 7.</li>
               <li>No runtime dependency. No changes to code.</li>

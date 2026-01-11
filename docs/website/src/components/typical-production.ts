@@ -56,14 +56,14 @@ export class TypicalProduction extends LitElement {
 
         <h2>Slow?</h2>
         <p>Slower than not validating, faster than runtime validation libraries*.</p> 
-        <p><br/>Many optimisations still to come. It does try to validation where it can, but much more to do.</p>
+        <p><br/>Many optimisations still to come. It does try to skip validation when redundant, but much more to do.</p>
         <p><br/>There are some benchmark results in the readme (and you can run them yourself) but... lies, damn lies, and benchmarks. If you have any input on the benchmarks I'd like to hear them. <br/>This is made to be fast, if its not, thats a bug. </p>
 
         <h2>Does this replace TypeScript?</h2>
         <p>No. It is a companion to TypeScript that makes types enforceable at runtime. <br/>You write TypeScript. It outputs TypeScript.</p>
       
         <br/><br/>
-        <small>* Individual validation checks are quicker, but typical might run them a <strong>lot</strong> more often. But they are quick. So, don't know.</small>
+        <small>* Everything is precompiled, so individual validation checks are quicker, but typical might run them a <strong>lot</strong> more often. But they are quick. So, don't know.</small>
       </div>
     `
   }
