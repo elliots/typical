@@ -6,6 +6,79 @@ import * as prettier from 'prettier/standalone'
 import prettierPluginTypescript from 'prettier/plugins/typescript'
 import prettierPluginEstree from 'prettier/plugins/estree'
 
+// URL hash utilities for sharing with compression
+// Uses DeflateRaw for smaller output than gzip (no header/footer)
+
+async function compressSource(source: string): Promise<string> {
+  const bytes = new TextEncoder().encode(source)
+  const cs = new CompressionStream('deflate-raw')
+  const writer = cs.writable.getWriter()
+  writer.write(bytes)
+  writer.close()
+  const compressed = await new Response(cs.readable).arrayBuffer()
+  const binary = Array.from(new Uint8Array(compressed), byte => String.fromCharCode(byte)).join('')
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+async function decompressSource(encoded: string): Promise<string | null> {
+  try {
+    // Restore standard base64 characters
+    let base64 = encoded.replace(/-/g, '+').replace(/_/g, '/')
+    while (base64.length % 4) {
+      base64 += '='
+    }
+    const binary = atob(base64)
+    const bytes = Uint8Array.from(binary, char => char.charCodeAt(0))
+    const ds = new DecompressionStream('deflate-raw')
+    const writer = ds.writable.getWriter()
+    writer.write(bytes)
+    writer.close()
+    const decompressed = await new Response(ds.readable).arrayBuffer()
+    return new TextDecoder().decode(decompressed)
+  } catch {
+    return null
+  }
+}
+
+// Memoized promise for loading source from URL hash
+let hashSourcePromise: Promise<string | null> | null = null
+
+function initSourceFromHash(): Promise<string | null> {
+  if (hashSourcePromise) return hashSourcePromise
+
+  const hash = window.location.hash.slice(1)
+  if (!hash) {
+    hashSourcePromise = Promise.resolve(null)
+    return hashSourcePromise
+  }
+
+  const params = new URLSearchParams(hash)
+  const encoded = params.get('code')
+  if (!encoded) {
+    hashSourcePromise = Promise.resolve(null)
+    return hashSourcePromise
+  }
+
+  hashSourcePromise = decompressSource(encoded)
+  return hashSourcePromise
+}
+
+let pendingHashUpdate: ReturnType<typeof setTimeout> | null = null
+
+function setSourceInHash(source: string): void {
+  // Debounce hash updates to avoid blocking the main thread
+  if (pendingHashUpdate) {
+    clearTimeout(pendingHashUpdate)
+  }
+  pendingHashUpdate = setTimeout(async () => {
+    const encoded = await compressSource(source)
+    const params = new URLSearchParams()
+    params.set('code', encoded)
+    window.history.replaceState(null, '', '#' + params.toString())
+    pendingHashUpdate = null
+  }, 100)
+}
+
 // Compiler types
 interface TransformResult {
   code: string
@@ -533,6 +606,61 @@ export class TypicalPlayground extends LitElement {
       color: #ccc;
     }
 
+    .share-btn {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.35rem 0.75rem;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 4px;
+      color: white;
+      font-family: inherit;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+    }
+
+    .share-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.5);
+    }
+
+    .share-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    .share-tooltip {
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 0.4rem 0.75rem;
+      background: #333;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .share-tooltip.visible {
+      opacity: 1;
+    }
+
+    .share-tooltip::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 5px solid transparent;
+      border-top-color: #333;
+    }
+
     .console-output {
       flex: 1;
       overflow-y: auto;
@@ -585,6 +713,7 @@ export class TypicalPlayground extends LitElement {
   `
 
   @state() private inputCode = EXAMPLES[0].code
+  @state() private shareTooltip = ''
   @state() private outputCode = ''
   @state() private outputTab: 'transformed' | 'sourcemap' = 'transformed'
   @state() private selectedExample = 0
@@ -608,6 +737,13 @@ export class TypicalPlayground extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback()
+
+    // Load code from URL hash if present (async decompression)
+    const hashSource = await initSourceFromHash()
+    if (hashSource) {
+      this.inputCode = hashSource
+    }
+
     this.initMonaco()
     await this.initCompiler()
   }
@@ -863,7 +999,11 @@ export class TypicalPlayground extends LitElement {
     this.inputEditor.onDidChangeModelContent(() => {
       this.inputCode = this.inputEditor?.getValue() || ''
       clearTimeout(debounceTimer)
-      debounceTimer = window.setTimeout(() => this.transform(), 500)
+      debounceTimer = window.setTimeout(() => {
+        this.transform()
+        // Update URL hash for sharing
+        setSourceInHash(this.inputCode)
+      }, 500)
     })
 
     // Create output editor if container is available
@@ -931,9 +1071,12 @@ export class TypicalPlayground extends LitElement {
   private selectExample(index: number) {
     this.selectedExample = index
     this.inputCode = EXAMPLES[index].code
-    this.inputEditor?.setValue(this.inputCode)
+    if (this.inputEditor) {
+      this.inputEditor.setValue(this.inputCode)
+    }
     this.examplesOpen = false
     this.transform()
+    setSourceInHash(this.inputCode)
   }
 
   private toggleExamples() {
@@ -1049,6 +1192,27 @@ ${jsCode}
 
   private clearConsole() {
     this.consoleOutput = []
+  }
+
+  private async shareCode() {
+    try {
+      // Compress and update URL
+      const encoded = await compressSource(this.inputCode)
+      const params = new URLSearchParams()
+      params.set('code', encoded)
+      window.history.replaceState(null, '', '#' + params.toString())
+
+      // Copy the updated URL
+      await navigator.clipboard.writeText(window.location.href)
+      this.shareTooltip = 'Copied!'
+    } catch {
+      this.shareTooltip = 'Failed to copy'
+    }
+
+    // Hide tooltip after 2 seconds
+    setTimeout(() => {
+      this.shareTooltip = ''
+    }, 2000)
   }
 
   render() {
@@ -1195,10 +1359,16 @@ ${jsCode}
                 : ''
             }
           </div>
-          <div>
-            <a href="https://github.com/elliots/typical" target="_blank" style="color: white;">
-              GitHub
-            </a>
+          <div style="display: flex; align-items: center; gap: 1rem;">
+            <button class="share-btn" @click=${() => this.shareCode()}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/>
+                <polyline points="16 6 12 2 8 6"/>
+                <line x1="12" y1="2" x2="12" y2="15"/>
+              </svg>
+              Share
+              <span class="share-tooltip ${this.shareTooltip ? 'visible' : ''}">${this.shareTooltip}</span>
+            </button>
           </div>
         </footer>
       </div>

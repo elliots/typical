@@ -142,4 +142,3 @@ DEBUG=1 node --import @elliots/typical/esm script.ts
 - Generic type parameters (`T`) can't be validated at runtime
 - DOM types (Window, Document, Element, etc.) are skipped
 - Class types validate instanceof only, not properties
-- Source maps not yet implemented in v2
