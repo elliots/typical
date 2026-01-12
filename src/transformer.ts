@@ -6,27 +6,27 @@
  * and communication with the Go process.
  */
 
-import { resolve } from 'path'
-import { TypicalCompiler, type ProjectHandle, type RawSourceMap } from '@elliots/typical-compiler'
-import type { TypicalConfig } from './config.js'
-import { loadConfig } from './config.js'
+import { resolve } from "path";
+import { TypicalCompiler, type ProjectHandle, type RawSourceMap } from "@elliots/typical-compiler";
+import type { TypicalConfig } from "./config.js";
+import { loadConfig } from "./config.js";
 
 export interface TransformResult {
-  code: string
-  map: RawSourceMap | null
+  code: string;
+  map: RawSourceMap | null;
 }
 
 export class TypicalTransformer {
-  public config: TypicalConfig
-  private compiler: TypicalCompiler
-  private projectHandle: ProjectHandle | null = null
-  private initPromise: Promise<void> | null = null
-  private configFile: string
+  public config: TypicalConfig;
+  private compiler: TypicalCompiler;
+  private projectHandle: ProjectHandle | null = null;
+  private initPromise: Promise<void> | null = null;
+  private configFile: string;
 
-  constructor(config?: TypicalConfig, configFile: string = 'tsconfig.json') {
-    this.config = config ?? loadConfig()
-    this.configFile = configFile
-    this.compiler = new TypicalCompiler({ cwd: process.cwd() })
+  constructor(config?: TypicalConfig, configFile: string = "tsconfig.json") {
+    this.config = config ?? loadConfig();
+    this.configFile = configFile;
+    this.compiler = new TypicalCompiler({ cwd: process.cwd() });
   }
 
   /**
@@ -36,11 +36,11 @@ export class TypicalTransformer {
   private async ensureInitialized(x?: string): Promise<void> {
     if (!this.initPromise) {
       this.initPromise = (async () => {
-        await this.compiler.start()
-        this.projectHandle = await this.compiler.loadProject(this.configFile)
-      })()
+        await this.compiler.start();
+        this.projectHandle = await this.compiler.loadProject(this.configFile);
+      })();
     }
-    await this.initPromise
+    await this.initPromise;
   }
 
   /**
@@ -50,21 +50,26 @@ export class TypicalTransformer {
    * @param mode - Output mode: 'ts' returns TypeScript, 'js' would transpile (not yet supported)
    * @returns Transformed code with validation
    */
-  async transform(fileName: string, mode: 'ts' | 'js' = 'ts'): Promise<TransformResult> {
-    if (mode === 'js') {
-      throw new Error('Mode "js" not yet supported - use "ts" and transpile separately')
+  async transform(fileName: string, mode: "ts" | "js" = "ts"): Promise<TransformResult> {
+    if (mode === "js") {
+      throw new Error('Mode "js" not yet supported - use "ts" and transpile separately');
     }
 
-    await this.ensureInitialized()
+    await this.ensureInitialized();
 
-    const resolvedPath = resolve(fileName)
+    const resolvedPath = resolve(fileName);
     // Pass config options to the Go compiler
-    const result = await this.compiler.transformFile(this.projectHandle!, resolvedPath, this.config.ignoreTypes, this.config.maxGeneratedFunctions)
+    const result = await this.compiler.transformFile(
+      this.projectHandle!,
+      resolvedPath,
+      this.config.ignoreTypes,
+      this.config.maxGeneratedFunctions,
+    );
 
     return {
       code: result.code,
       map: result.sourceMap ?? null,
-    }
+    };
   }
 
   /**
@@ -72,8 +77,8 @@ export class TypicalTransformer {
    * This immediately kills the process without waiting for pending operations.
    */
   async close(): Promise<void> {
-    this.projectHandle = null
-    this.initPromise = null
-    await this.compiler.close()
+    this.projectHandle = null;
+    this.initPromise = null;
+    await this.compiler.close();
   }
 }

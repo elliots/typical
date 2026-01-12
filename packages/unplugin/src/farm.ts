@@ -1,4 +1,4 @@
-import { Typical } from './index'
+import { Typical } from "./index";
 
-export default Typical.farm
-export { Typical }
+export default Typical.farm;
+export { Typical };

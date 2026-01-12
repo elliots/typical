@@ -15,5 +15,16 @@
     "resolveJsonModule": true
   },
   "include": ["**/*.ts"],
-  "exclude": ["node_modules", "dist", "samples", "test/integration", "test/output", "test/fixtures", "packages", "bench", "tmp", "docs"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "samples",
+    "test/integration",
+    "test/output",
+    "test/fixtures",
+    "packages",
+    "bench",
+    "tmp",
+    "docs"
+  ]
 }

@@ -1,7 +1,7 @@
-import { LitElement, html, css, unsafeCSS } from 'lit'
-import { customElement } from 'lit/decorators.js'
-import { unsafeHTML } from 'lit/directives/unsafe-html.js'
-import { highlightTS, highlightStyles } from '../utils/highlight.js'
+import { LitElement, html, css, unsafeCSS } from "lit";
+import { customElement } from "lit/decorators.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { highlightTS, highlightStyles } from "../utils/highlight.js";
 
 const zodCode = `import { z } from 'zod';
 
@@ -19,7 +19,7 @@ type User = z.infer<typeof UserSchema>;
 function saveUser(input: unknown) {
   const user = UserSchema.parse(input);
   // ...
-}`
+}`;
 
 const typicalCode = `// Just write the type
 interface User {
@@ -36,9 +36,9 @@ function saveUser(user: User) {
 
 // That's it. No schema.
 // No .parse() calls.
-// Just TypeScript.`
+// Just TypeScript.`;
 
-@customElement('typical-comparison')
+@customElement("typical-comparison")
 export class TypicalComparison extends LitElement {
   static styles = css`
     ${unsafeCSS(highlightStyles)}
@@ -134,7 +134,7 @@ export class TypicalComparison extends LitElement {
         font-size: 1.75rem;
       }
     }
-  `
+  `;
 
   render() {
     return html`
@@ -165,12 +165,12 @@ export class TypicalComparison extends LitElement {
           </div>
         </div>
       </div>
-    `
+    `;
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    'typical-comparison': TypicalComparison
+    "typical-comparison": TypicalComparison;
   }
 }

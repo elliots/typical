@@ -1,10 +1,10 @@
-import type { BunPlugin } from 'bun'
-import { loadConfig, type TypicalConfig, buildTimer } from '@elliots/typical'
-import { resolveOptions, type Options } from './core/options'
-import { transformFile } from './core/transform'
+import type { BunPlugin } from "bun";
+import { loadConfig, type TypicalConfig, buildTimer } from "@elliots/typical";
+import { resolveOptions, type Options } from "./core/options";
+import { transformFile } from "./core/transform";
 
 // File extensions to transform
-const TS_FILTER = /\.(ts|tsx|mts|cts)$/
+const TS_FILTER = /\.(ts|tsx|mts|cts)$/;
 
 /**
  * Create a Bun plugin for Typical transformation.
@@ -30,55 +30,64 @@ const TS_FILTER = /\.(ts|tsx|mts|cts)$/
  * ```
  */
 export function typicalPlugin(rawOptions: Options = {}): BunPlugin {
-  const options = resolveOptions(rawOptions)
+  const options = resolveOptions(rawOptions);
 
   const typicalConfig: TypicalConfig = {
     ...loadConfig(),
     ...options.typical,
-  }
+  };
 
   return {
-    name: 'bun-plugin-typical',
+    name: "bun-plugin-typical",
     target: options.target,
 
     setup(build) {
       // Reset timing state for fresh builds
-      buildTimer.reset()
+      buildTimer.reset();
 
-      build.onLoad({ filter: TS_FILTER }, async args => {
+      build.onLoad({ filter: TS_FILTER }, async (args) => {
         // Skip excluded paths
-        if (options.exclude.some(pattern => (typeof pattern === 'string' ? args.path.includes(pattern) : pattern.test(args.path)))) {
-          return undefined
+        if (
+          options.exclude.some((pattern) =>
+            typeof pattern === "string" ? args.path.includes(pattern) : pattern.test(args.path),
+          )
+        ) {
+          return undefined;
         }
 
         // Check include patterns if specified
-        if (options.include.length > 0 && !options.include.some(pattern => (typeof pattern === 'string' ? args.path.includes(pattern) : pattern.test(args.path)))) {
-          return undefined
+        if (
+          options.include.length > 0 &&
+          !options.include.some((pattern) =>
+            typeof pattern === "string" ? args.path.includes(pattern) : pattern.test(args.path),
+          )
+        ) {
+          return undefined;
         }
 
-        const result = await transformFile(args.path, typicalConfig)
+        const result = await transformFile(args.path, typicalConfig);
 
         if (!result) {
-          return undefined
+          return undefined;
         }
 
         // Debug logging
         if (process.env.DEBUG) {
-          buildTimer.report('[bun-plugin-typical]')
+          buildTimer.report("[bun-plugin-typical]");
         }
 
         return {
           contents: result.code,
           loader: result.loader,
-        }
-      })
+        };
+      });
     },
-  }
+  };
 }
 
 // Default export for convenience
-export default typicalPlugin
+export default typicalPlugin;
 
 // Named exports
-export type { Options } from './core/options'
-export { closeTransformer } from './core/transform'
+export type { Options } from "./core/options";
+export { closeTransformer } from "./core/transform";

@@ -1,6 +1,6 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import Typical from '@elliots/unplugin-typical/vite'
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import Typical from "@elliots/unplugin-typical/vite";
 
 export default defineConfig({
   build: {
@@ -8,11 +8,11 @@ export default defineConfig({
   },
   plugins: [
     Typical({
-      enforce: 'pre',
+      enforce: "pre",
       typical: {
         validateCasts: true,
       },
     }),
     react(),
   ],
-})
+});

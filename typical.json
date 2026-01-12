@@ -3,7 +3,15 @@
   "exclude": ["node_modules/**", "**/*.d.ts", "dist/**"],
   "validateCasts": true,
   "validateFunctions": false,
-  "ignoreTypes": ["ts.*", "TransformerExtras", "PluginConfig", "DecodedSourceMap", "EncodedSourceMap", "SourceMapSegment", "TransformContext"],
+  "ignoreTypes": [
+    "ts.*",
+    "TransformerExtras",
+    "PluginConfig",
+    "DecodedSourceMap",
+    "EncodedSourceMap",
+    "SourceMapSegment",
+    "TransformContext"
+  ],
   "debug": {
     "writeIntermediateFiles": false
   }

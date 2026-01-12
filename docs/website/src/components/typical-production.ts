@@ -1,7 +1,7 @@
-import { LitElement, html, css } from 'lit'
-import { customElement } from 'lit/decorators.js'
+import { LitElement, html, css } from "lit";
+import { customElement } from "lit/decorators.js";
 
-@customElement('typical-production')
+@customElement("typical-production")
 export class TypicalProduction extends LitElement {
   static styles = css`
     :host {
@@ -39,7 +39,7 @@ export class TypicalProduction extends LitElement {
         font-size: 1rem;
       }
     }
-  `
+  `;
 
   render() {
     return html`
@@ -65,12 +65,12 @@ export class TypicalProduction extends LitElement {
         <br/><br/>
         <small>* Everything is precompiled, so individual validation checks are quicker, but typical might run them a <strong>lot</strong> more often. But they are quick. So, don't know.</small>
       </div>
-    `
+    `;
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    'typical-production': TypicalProduction
+    "typical-production": TypicalProduction;
   }
 }

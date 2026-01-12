@@ -1,5 +1,5 @@
 export interface TypicalDebugConfig {
-  writeIntermediateFiles?: boolean
+  writeIntermediateFiles?: boolean;
 }
 
 /**
@@ -9,52 +9,52 @@ export interface TypicalSourceMapConfig {
   /**
    * Generate source maps. Default: true
    */
-  enabled?: boolean
+  enabled?: boolean;
   /**
    * Include original source content in the map. Default: true
    */
-  includeContent?: boolean
+  includeContent?: boolean;
   /**
    * Use inline source maps (data URL) instead of external files. Default: false
    */
-  inline?: boolean
+  inline?: boolean;
 }
 
 export interface TypicalConfig {
-  include?: string[]
-  exclude?: string[]
-  validateCasts?: boolean
-  hoistRegex?: boolean
-  debug?: TypicalDebugConfig
+  include?: string[];
+  exclude?: string[];
+  validateCasts?: boolean;
+  hoistRegex?: boolean;
+  debug?: TypicalDebugConfig;
   /**
    * Type patterns to skip validation for (supports wildcards).
    * Use this for types that typia cannot process (e.g., React event types).
    * Example: ["React.*", "Express.Request", "*.Event"]
    */
-  ignoreTypes?: string[]
+  ignoreTypes?: string[];
   /**
    * Validate function parameters and return types at runtime.
    * When enabled, typed function parameters get runtime validation calls injected.
    * Default: true
    */
-  validateFunctions?: boolean
+  validateFunctions?: boolean;
   /**
    * Transform JSON.parse<T>() calls to validate and filter the parsed result
    * to only include properties defined in type T.
    * Default: true
    */
-  transformJSONParse?: boolean
+  transformJSONParse?: boolean;
   /**
    * Transform JSON.stringify<T>() calls to only stringify properties defined
    * in type T, preventing accidental data leaks.
    * Default: true
    */
-  transformJSONStringify?: boolean
+  transformJSONStringify?: boolean;
   /**
    * Source map generation settings.
    * Controls whether and how source maps are generated for transformed code.
    */
-  sourceMap?: TypicalSourceMapConfig
+  sourceMap?: TypicalSourceMapConfig;
   /**
    * Maximum number of helper functions (_io0, _io1, etc.) that can be generated
    * for a single type before erroring. Complex DOM types or library types can
@@ -62,12 +62,12 @@ export interface TypicalConfig {
    * Set to 0 to disable the limit.
    * Default: 50
    */
-  maxGeneratedFunctions?: number
+  maxGeneratedFunctions?: number;
 }
 
 export const defaultConfig: TypicalConfig = {
-  include: ['**/*.ts', '**/*.tsx'],
-  exclude: ['node_modules/**', '**/*.d.ts', 'dist/**', 'build/**'],
+  include: ["**/*.ts", "**/*.tsx"],
+  exclude: ["node_modules/**", "**/*.d.ts", "dist/**", "build/**"],
   validateCasts: false,
   validateFunctions: true,
   transformJSONParse: true,
@@ -81,30 +81,30 @@ export const defaultConfig: TypicalConfig = {
     includeContent: true,
     inline: false,
   },
-}
+};
 
-import fs from 'fs'
-import path from 'path'
+import fs from "fs";
+import path from "path";
 
 export function loadConfig(configPath?: string): TypicalConfig {
-  const configFile = configPath || path.join(process.cwd(), 'typical.json')
+  const configFile = configPath || path.join(process.cwd(), "typical.json");
 
   if (fs.existsSync(configFile)) {
     try {
-      const configContent = fs.readFileSync(configFile, 'utf8')
-      const userConfig: Partial<TypicalConfig> = JSON.parse(configContent)
+      const configContent = fs.readFileSync(configFile, "utf8");
+      const userConfig: Partial<TypicalConfig> = JSON.parse(configContent);
 
       return {
         ...defaultConfig,
         ...userConfig,
-      }
+      };
     } catch (error) {
-      console.warn(`Failed to parse config file ${configFile}:`, error)
-      return defaultConfig
+      console.warn(`Failed to parse config file ${configFile}:`, error);
+      return defaultConfig;
     }
   }
 
-  return defaultConfig
+  return defaultConfig;
 }
 
 /**
@@ -116,5 +116,5 @@ export function loadConfig(configPath?: string): TypicalConfig {
 export function validateConfig(config: TypicalConfig): TypicalConfig {
   // Reusable validators now throw at the call site, so they work correctly
   // with source maps. No need for special handling.
-  return config
+  return config;
 }

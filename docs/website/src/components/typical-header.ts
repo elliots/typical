@@ -1,9 +1,9 @@
-import { LitElement, html, css } from 'lit'
-import { customElement, property } from 'lit/decorators.js'
+import { LitElement, html, css } from "lit";
+import { customElement, property } from "lit/decorators.js";
 
-@customElement('typical-header')
+@customElement("typical-header")
 export class TypicalHeader extends LitElement {
-  @property({ type: String }) page = ''
+  @property({ type: String }) page = "";
 
   static styles = css`
     :host {
@@ -106,7 +106,7 @@ export class TypicalHeader extends LitElement {
         font-size: 0.9rem;
       }
     }
-  `
+  `;
 
   render() {
     return html`
@@ -114,7 +114,7 @@ export class TypicalHeader extends LitElement {
         <a href="/" class="logo">
           <span class="logo-icon">T</span>
           <span>Typical</span>
-          ${this.page ? html`<span class="page-name">${this.page}</span>` : ''}
+          ${this.page ? html`<span class="page-name">${this.page}</span>` : ""}
         </a>
         <nav>
           <a href="https://github.com/elliots/typical#readme" target="_blank">Docs</a>
@@ -128,12 +128,12 @@ export class TypicalHeader extends LitElement {
           <a href="https://www.npmjs.com/package/@elliots/typical" target="_blank">npm</a>
         </nav>
       </header>
-    `
+    `;
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    'typical-header': TypicalHeader
+    "typical-header": TypicalHeader;
   }
 }

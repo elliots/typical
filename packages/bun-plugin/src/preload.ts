@@ -25,7 +25,7 @@
  * }))
  * ```
  */
-import { typicalPlugin } from './index'
+import { typicalPlugin } from "./index";
 
 // Register with default options
-void Bun.plugin(typicalPlugin())
+void Bun.plugin(typicalPlugin());

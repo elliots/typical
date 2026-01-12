@@ -1,6 +1,6 @@
 {
   "name": "@elliots/typical-compiler",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "TypeScript compiler powered by tsgo for typical validation",
   "keywords": [
     "compiler",

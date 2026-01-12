@@ -1,2 +1,2 @@
-const path = require('path')
-module.exports.binaryPath = path.join(__dirname, 'bin', 'typical.exe')
+const path = require("path");
+module.exports.binaryPath = path.join(__dirname, "bin", "typical.exe");

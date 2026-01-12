@@ -1,35 +1,35 @@
-import type { TypicalConfig } from '@elliots/typical'
+import type { TypicalConfig } from "@elliots/typical";
 
 export interface Options {
   /**
    * Patterns to include for transformation.
    * Uses unplugin's filter format.
    */
-  include?: (string | RegExp)[]
+  include?: (string | RegExp)[];
 
   /**
    * Patterns to exclude from transformation.
    * Uses unplugin's filter format.
    */
-  exclude?: (string | RegExp)[]
+  exclude?: (string | RegExp)[];
 
   /**
    * Plugin enforcement order.
    * @default undefined
    */
-  enforce?: 'pre' | 'post'
+  enforce?: "pre" | "post";
 
   /**
    * Typical configuration overrides.
    */
-  typical?: Partial<TypicalConfig>
+  typical?: Partial<TypicalConfig>;
 }
 
 export interface ResolvedOptions {
-  include: (string | RegExp)[]
-  exclude: (string | RegExp)[]
-  enforce?: 'pre' | 'post'
-  typical: Partial<TypicalConfig>
+  include: (string | RegExp)[];
+  exclude: (string | RegExp)[];
+  enforce?: "pre" | "post";
+  typical: Partial<TypicalConfig>;
 }
 
 /**
@@ -41,5 +41,5 @@ export function resolveOptions(options: Options = {}): ResolvedOptions {
     exclude: options.exclude ?? [/node_modules/],
     enforce: options.enforce,
     typical: options.typical ?? {},
-  }
+  };
 }

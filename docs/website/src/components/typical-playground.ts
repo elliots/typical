@@ -1,106 +1,108 @@
-import { LitElement, html, css } from 'lit'
-import { customElement, state, query } from 'lit/decorators.js'
-import * as monaco from 'monaco-editor'
-import { ModuleDetectionKind } from 'typescript'
-import * as prettier from 'prettier/standalone'
-import prettierPluginTypescript from 'prettier/plugins/typescript'
-import prettierPluginEstree from 'prettier/plugins/estree'
+import { LitElement, html, css } from "lit";
+import { customElement, state, query } from "lit/decorators.js";
+import * as monaco from "monaco-editor";
+import { ModuleDetectionKind } from "typescript";
+import * as prettier from "prettier/standalone";
+import prettierPluginTypescript from "prettier/plugins/typescript";
+import prettierPluginEstree from "prettier/plugins/estree";
 
 // URL hash utilities for sharing with compression
 // Uses DeflateRaw for smaller output than gzip (no header/footer)
 
 async function compressSource(source: string): Promise<string> {
-  const bytes = new TextEncoder().encode(source)
-  const cs = new CompressionStream('deflate-raw')
-  const writer = cs.writable.getWriter()
-  writer.write(bytes)
-  writer.close()
-  const compressed = await new Response(cs.readable).arrayBuffer()
-  const binary = Array.from(new Uint8Array(compressed), byte => String.fromCharCode(byte)).join('')
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  const bytes = new TextEncoder().encode(source);
+  const cs = new CompressionStream("deflate-raw");
+  const writer = cs.writable.getWriter();
+  writer.write(bytes);
+  writer.close();
+  const compressed = await new Response(cs.readable).arrayBuffer();
+  const binary = Array.from(new Uint8Array(compressed), (byte) => String.fromCharCode(byte)).join(
+    "",
+  );
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 async function decompressSource(encoded: string): Promise<string | null> {
   try {
     // Restore standard base64 characters
-    let base64 = encoded.replace(/-/g, '+').replace(/_/g, '/')
+    let base64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
     while (base64.length % 4) {
-      base64 += '='
+      base64 += "=";
     }
-    const binary = atob(base64)
-    const bytes = Uint8Array.from(binary, char => char.charCodeAt(0))
-    const ds = new DecompressionStream('deflate-raw')
-    const writer = ds.writable.getWriter()
-    writer.write(bytes)
-    writer.close()
-    const decompressed = await new Response(ds.readable).arrayBuffer()
-    return new TextDecoder().decode(decompressed)
+    const binary = atob(base64);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    const ds = new DecompressionStream("deflate-raw");
+    const writer = ds.writable.getWriter();
+    writer.write(bytes);
+    writer.close();
+    const decompressed = await new Response(ds.readable).arrayBuffer();
+    return new TextDecoder().decode(decompressed);
   } catch {
-    return null
+    return null;
   }
 }
 
 // Memoized promise for loading source from URL hash
-let hashSourcePromise: Promise<string | null> | null = null
+let hashSourcePromise: Promise<string | null> | null = null;
 
 function initSourceFromHash(): Promise<string | null> {
-  if (hashSourcePromise) return hashSourcePromise
+  if (hashSourcePromise) return hashSourcePromise;
 
-  const hash = window.location.hash.slice(1)
+  const hash = window.location.hash.slice(1);
   if (!hash) {
-    hashSourcePromise = Promise.resolve(null)
-    return hashSourcePromise
+    hashSourcePromise = Promise.resolve(null);
+    return hashSourcePromise;
   }
 
-  const params = new URLSearchParams(hash)
-  const encoded = params.get('code')
+  const params = new URLSearchParams(hash);
+  const encoded = params.get("code");
   if (!encoded) {
-    hashSourcePromise = Promise.resolve(null)
-    return hashSourcePromise
+    hashSourcePromise = Promise.resolve(null);
+    return hashSourcePromise;
   }
 
-  hashSourcePromise = decompressSource(encoded)
-  return hashSourcePromise
+  hashSourcePromise = decompressSource(encoded);
+  return hashSourcePromise;
 }
 
-let pendingHashUpdate: ReturnType<typeof setTimeout> | null = null
+let pendingHashUpdate: ReturnType<typeof setTimeout> | null = null;
 
 function setSourceInHash(source: string): void {
   // Debounce hash updates to avoid blocking the main thread
   if (pendingHashUpdate) {
-    clearTimeout(pendingHashUpdate)
+    clearTimeout(pendingHashUpdate);
   }
   pendingHashUpdate = setTimeout(async () => {
-    const encoded = await compressSource(source)
-    const params = new URLSearchParams()
-    params.set('code', encoded)
-    window.history.replaceState(null, '', '#' + params.toString())
-    pendingHashUpdate = null
-  }, 100)
+    const encoded = await compressSource(source);
+    const params = new URLSearchParams();
+    params.set("code", encoded);
+    window.history.replaceState(null, "", "#" + params.toString());
+    pendingHashUpdate = null;
+  }, 100);
 }
 
 // Compiler types
 interface TransformResult {
-  code: string
-  sourceMap?: object
+  code: string;
+  sourceMap?: object;
 }
 
 interface WasmCompiler {
-  start(): Promise<void>
-  close(): Promise<void>
-  transformSource(fileName: string, source: string): Promise<TransformResult>
+  start(): Promise<void>;
+  close(): Promise<void>;
+  transformSource(fileName: string, source: string): Promise<TransformResult>;
 }
 
 interface Example {
-  name: string
-  description: string
-  code: string
+  name: string;
+  description: string;
+  code: string;
 }
 
 const EXAMPLES: Example[] = [
   {
-    name: 'JSON.parse validation',
-    description: 'Validates data parsed from JSON',
+    name: "JSON.parse validation",
+    description: "Validates data parsed from JSON",
     code: `interface User {
   name: string;
   email: \`\${string}@\${string}.\${string}\`;
@@ -111,8 +113,8 @@ console.log('User name:', user.name); // Won't reach here
 `,
   },
   {
-    name: 'API Response',
-    description: 'Validating external API data',
+    name: "API Response",
+    description: "Validating external API data",
     code: `// Typical validates data from external sources
 interface ApiResponse {
   status: 'success' | 'error';
@@ -135,8 +137,9 @@ console.log('Data from backend:', await callBackend());
 `,
   },
   {
-    name: 'Nested Objects',
-    description: 'Deep validation of nested structures, and hoisting of reusable validation functions',
+    name: "Nested Objects",
+    description:
+      "Deep validation of nested structures, and hoisting of reusable validation functions",
     code: `// Deep validation of nested objects
 interface Address {
   street: string;
@@ -166,8 +169,8 @@ function invitePerson(person: Person, invitedBy: Person): void {
 `,
   },
   {
-    name: 'Arrays & Tuples',
-    description: 'Array and tuple validation',
+    name: "Arrays & Tuples",
+    description: "Array and tuple validation",
     code: `// Array and tuple validation
 type Point = [number, number];
 type RGB = [number, number, number];
@@ -197,8 +200,8 @@ console.log(calculateDistance([1,2], [2,'3'] as any))
 `,
   },
   {
-    name: 'Data leak prevention',
-    description: 'Only stringify the data in the types',
+    name: "Data leak prevention",
+    description: "Only stringify the data in the types",
     code: `interface DBUser {
   username: string
   password: string
@@ -223,9 +226,9 @@ console.log("User:", JSON.stringify(u));
 console.log("Full user:", JSON.stringify(u as DBUser));
 `,
   },
-]
+];
 
-@customElement('typical-playground')
+@customElement("typical-playground")
 export class TypicalPlayground extends LitElement {
   static styles = css`
     :host {
@@ -710,94 +713,100 @@ export class TypicalPlayground extends LitElement {
         min-height: 200px;
       }
     }
-  `
+  `;
 
-  @state() private inputCode = EXAMPLES[0].code
-  @state() private shareTooltip = ''
-  @state() private outputCode = ''
-  @state() private outputTab: 'transformed' | 'sourcemap' = 'transformed'
-  @state() private selectedExample = 0
-  @state() private examplesOpen = false
-  @state() private compilerStatus: 'loading' | 'ready' | 'error' = 'loading'
-  @state() private editorStatus: 'loading' | 'ready' | 'error' = 'loading'
-  @state() private compilerError = ''
-  @state() private transformError = ''
-  @state() private transformTime = 0
-  @state() private sourceMap: object | null = null
-  @state() private consoleOutput: Array<{ type: 'log' | 'error' | 'warn'; message: string }> = []
-  @state() private isRunning = false
-  @state() private formatOutput = false
+  @state() private inputCode = EXAMPLES[0].code;
+  @state() private shareTooltip = "";
+  @state() private outputCode = "";
+  @state() private outputTab: "transformed" | "sourcemap" = "transformed";
+  @state() private selectedExample = 0;
+  @state() private examplesOpen = false;
+  @state() private compilerStatus: "loading" | "ready" | "error" = "loading";
+  @state() private editorStatus: "loading" | "ready" | "error" = "loading";
+  @state() private compilerError = "";
+  @state() private transformError = "";
+  @state() private transformTime = 0;
+  @state() private sourceMap: object | null = null;
+  @state() private consoleOutput: Array<{ type: "log" | "error" | "warn"; message: string }> = [];
+  @state() private isRunning = false;
+  @state() private formatOutput = false;
 
-  @query('#input-editor') private inputEditorContainer!: HTMLDivElement
-  @query('#output-editor') private outputEditorContainer!: HTMLDivElement
+  @query("#input-editor") private inputEditorContainer!: HTMLDivElement;
+  @query("#output-editor") private outputEditorContainer!: HTMLDivElement;
 
-  private inputEditor: monaco.editor.IStandaloneCodeEditor | null = null
-  private outputEditor: monaco.editor.IStandaloneCodeEditor | null = null
-  private compiler: WasmCompiler | null = null
+  private inputEditor: monaco.editor.IStandaloneCodeEditor | null = null;
+  private outputEditor: monaco.editor.IStandaloneCodeEditor | null = null;
+  private compiler: WasmCompiler | null = null;
 
   async connectedCallback() {
-    super.connectedCallback()
+    super.connectedCallback();
 
     // Load code from URL hash if present (async decompression)
-    const hashSource = await initSourceFromHash()
+    const hashSource = await initSourceFromHash();
     if (hashSource) {
-      this.inputCode = hashSource
+      this.inputCode = hashSource;
     }
 
-    this.initMonaco()
-    await this.initCompiler()
+    this.initMonaco();
+    await this.initCompiler();
   }
 
   async firstUpdated() {
-    await this.updateComplete
+    await this.updateComplete;
 
     // Close dropdown when clicking outside (use capture to get the event before it's retargeted)
-    document.addEventListener('click', e => {
+    document.addEventListener("click", (e) => {
       if (this.examplesOpen) {
         // Check if click is inside the dropdown using composedPath for shadow DOM
-        const path = e.composedPath()
-        const dropdown = this.shadowRoot?.querySelector('.examples-dropdown')
+        const path = e.composedPath();
+        const dropdown = this.shadowRoot?.querySelector(".examples-dropdown");
         if (dropdown && !path.includes(dropdown)) {
-          this.examplesOpen = false
+          this.examplesOpen = false;
         }
       }
-    })
+    });
 
     // Initialise editor after DOM is ready
-    if (monaco && this.editorStatus === 'ready') {
-      this.initEditor()
+    if (monaco && this.editorStatus === "ready") {
+      this.initEditor();
     }
   }
 
   updated(changedProperties: Map<string, unknown>) {
-    super.updated(changedProperties)
+    super.updated(changedProperties);
     // Create output editor when it becomes available (after loading completes)
     if (monaco && !this.outputEditor && this.outputEditorContainer) {
-      this.initOutputEditor()
+      this.initOutputEditor();
     }
   }
 
   disconnectedCallback() {
-    super.disconnectedCallback()
-    this.inputEditor?.dispose()
-    this.outputEditor?.dispose()
-    this.compiler?.close()
-    this.styleObserver?.disconnect()
+    super.disconnectedCallback();
+    this.inputEditor?.dispose();
+    this.outputEditor?.dispose();
+    this.compiler?.close();
+    this.styleObserver?.disconnect();
   }
 
   private initMonaco() {
     // Configure Monaco workers
-    ;(self as unknown as Record<string, unknown>).MonacoEnvironment = {
+    (self as unknown as Record<string, unknown>).MonacoEnvironment = {
       getWorker(_workerId: string, label: string) {
-        if (label === 'typescript' || label === 'javascript') {
-          return new Worker(new URL('monaco-editor/esm/vs/language/typescript/ts.worker.js', import.meta.url), { type: 'module' })
+        if (label === "typescript" || label === "javascript") {
+          return new Worker(
+            new URL("monaco-editor/esm/vs/language/typescript/ts.worker.js", import.meta.url),
+            { type: "module" },
+          );
         }
-        return new Worker(new URL('monaco-editor/esm/vs/editor/editor.worker.js', import.meta.url), { type: 'module' })
+        return new Worker(
+          new URL("monaco-editor/esm/vs/editor/editor.worker.js", import.meta.url),
+          { type: "module" },
+        );
       },
-    }
+    };
 
     // Copy Monaco styles into shadow DOM
-    this.adoptMonacoStyles()
+    this.adoptMonacoStyles();
 
     // Configure TypeScript compiler options for the playground
     // Don't spread existing options - Monaco includes lib.d.ts by default
@@ -809,74 +818,76 @@ export class TypicalPlayground extends LitElement {
       allowNonTsExtensions: true,
       // Treat all files as modules to enable top-level await
       moduleDetection: ModuleDetectionKind.Force,
-    })
+    });
 
-    this.editorStatus = 'ready'
+    this.editorStatus = "ready";
 
     // If DOM is ready, init editor
     if (this.inputEditorContainer) {
-      this.initEditor()
+      this.initEditor();
     }
   }
 
-  private adoptedStyleSheets = new Set<CSSStyleSheet>()
-  private styleObserver: MutationObserver | null = null
+  private adoptedStyleSheets = new Set<CSSStyleSheet>();
+  private styleObserver: MutationObserver | null = null;
 
   private adoptMonacoStyles() {
     // Find all Monaco-related stylesheets in the document and copy them to shadow DOM
-    const shadowRoot = this.shadowRoot
-    if (!shadowRoot) return
+    const shadowRoot = this.shadowRoot;
+    if (!shadowRoot) return;
 
-    this.copyMonacoStyles()
+    this.copyMonacoStyles();
 
     // Watch for new style elements being added (Monaco adds styles dynamically)
     if (!this.styleObserver) {
       this.styleObserver = new MutationObserver(() => {
-        this.copyMonacoStyles()
-      })
-      this.styleObserver.observe(document.head, { childList: true, subtree: true })
+        this.copyMonacoStyles();
+      });
+      this.styleObserver.observe(document.head, { childList: true, subtree: true });
     }
   }
 
   private copyMonacoStyles() {
-    const shadowRoot = this.shadowRoot
-    if (!shadowRoot) return
+    const shadowRoot = this.shadowRoot;
+    if (!shadowRoot) return;
 
     // Get all stylesheets from the document
-    const styleSheets = Array.from(document.styleSheets)
+    const styleSheets = Array.from(document.styleSheets);
     for (const sheet of styleSheets) {
       // Skip if already adopted
-      if (this.adoptedStyleSheets.has(sheet)) continue
+      if (this.adoptedStyleSheets.has(sheet)) continue;
 
       try {
         // Check if this stylesheet contains Monaco rules
-        const href = sheet.href || ''
-        let hasMonacoRules = false
+        const href = sheet.href || "";
+        let hasMonacoRules = false;
 
         // Check href for obvious Monaco files
-        if (href.includes('monaco') || href.includes('editor.main')) {
-          hasMonacoRules = true
+        if (href.includes("monaco") || href.includes("editor.main")) {
+          hasMonacoRules = true;
         } else if (sheet.cssRules) {
           // Check actual CSS rules for Monaco selectors
-          const rules = Array.from(sheet.cssRules)
-          hasMonacoRules = rules.some(rule => rule.cssText?.includes('.monaco-') || rule.cssText?.includes('.vs-dark'))
+          const rules = Array.from(sheet.cssRules);
+          hasMonacoRules = rules.some(
+            (rule) => rule.cssText?.includes(".monaco-") || rule.cssText?.includes(".vs-dark"),
+          );
         }
 
         if (hasMonacoRules) {
           if (sheet.href) {
             // External stylesheet - link to it
-            const link = document.createElement('link')
-            link.rel = 'stylesheet'
-            link.href = sheet.href
-            shadowRoot.appendChild(link)
+            const link = document.createElement("link");
+            link.rel = "stylesheet";
+            link.href = sheet.href;
+            shadowRoot.appendChild(link);
           } else if (sheet.cssRules) {
             // Inline stylesheet - copy rules
-            const rules = Array.from(sheet.cssRules)
-            const style = document.createElement('style')
-            style.textContent = rules.map(r => r.cssText).join('\n')
-            shadowRoot.appendChild(style)
+            const rules = Array.from(sheet.cssRules);
+            const style = document.createElement("style");
+            style.textContent = rules.map((r) => r.cssText).join("\n");
+            shadowRoot.appendChild(style);
           }
-          this.adoptedStyleSheets.add(sheet)
+          this.adoptedStyleSheets.add(sheet);
         }
       } catch {
         // CORS may prevent accessing cssRules, ignore
@@ -887,336 +898,354 @@ export class TypicalPlayground extends LitElement {
   private async initCompiler() {
     try {
       // Import ZenFS for browser filesystem
-      const { fs } = await import('@zenfs/core')
+      const { fs } = await import("@zenfs/core");
 
       // Create /tmp directory for the compiler
       try {
-        fs.mkdirSync('/tmp', { recursive: true })
+        fs.mkdirSync("/tmp", { recursive: true });
       } catch {
         // Directory may already exist
       }
 
       // Dynamically import the WASM compiler using Vite alias
       // @ts-ignore - resolved by Vite alias
-      const module = await import('@typical/compiler-wasm')
+      const module = await import("@typical/compiler-wasm");
 
       const { WasmTypicalCompiler, wasmPath, wrapSyncFSForGo } = module as {
         WasmTypicalCompiler: new (options: {
-          wasmPath: URL
-          fs?: object
-          fetchWasm?: (url: string | URL) => Promise<ArrayBuffer>
-        }) => WasmCompiler
-        wasmPath: URL
-        wrapSyncFSForGo: (syncFs: typeof fs) => object
-      }
+          wasmPath: URL;
+          fs?: object;
+          fetchWasm?: (url: string | URL) => Promise<ArrayBuffer>;
+        }) => WasmCompiler;
+        wasmPath: URL;
+        wrapSyncFSForGo: (syncFs: typeof fs) => object;
+      };
 
       // Wrap ZenFS for Go WASM compatibility
-      const wrappedFs = wrapSyncFSForGo(fs)
+      const wrappedFs = wrapSyncFSForGo(fs);
 
       // Custom fetch function that tries gzipped WASM first (production), then falls back to uncompressed (dev)
       const fetchWasm = async (url: string | URL): Promise<ArrayBuffer> => {
-        const urlStr = url.toString()
+        const urlStr = url.toString();
 
         // Try gzipped version first (exists in production builds)
-        const gzUrl = urlStr + '.gz'
+        const gzUrl = urlStr + ".gz";
         try {
-          const gzResponse = await fetch(gzUrl)
+          const gzResponse = await fetch(gzUrl);
           // Check content-type to ensure it's actually a gzip file, not an error page
-          const contentType = gzResponse.headers.get('content-type') || ''
-          if (gzResponse.ok && !contentType.includes('text/html')) {
-            console.log('Loading compressed WASM from', gzUrl)
-            const data = await gzResponse.arrayBuffer()
+          const contentType = gzResponse.headers.get("content-type") || "";
+          if (gzResponse.ok && !contentType.includes("text/html")) {
+            console.log("Loading compressed WASM from", gzUrl);
+            const data = await gzResponse.arrayBuffer();
 
             // Check if browser already decompressed it (Content-Encoding: gzip header was present)
             // If the server sends Content-Encoding: gzip, browser auto-decompresses
             // We can detect this by checking if the data looks like valid WASM (starts with \0asm)
-            const header = new Uint8Array(data.slice(0, 4))
-            const isWasm = header[0] === 0x00 && header[1] === 0x61 && header[2] === 0x73 && header[3] === 0x6d
+            const header = new Uint8Array(data.slice(0, 4));
+            const isWasm =
+              header[0] === 0x00 && header[1] === 0x61 && header[2] === 0x73 && header[3] === 0x6d;
 
             if (isWasm) {
               // Browser already decompressed it
-              console.log('WASM already decompressed by browser:', (data.byteLength / 1024 / 1024).toFixed(1), 'MB')
-              return data
+              console.log(
+                "WASM already decompressed by browser:",
+                (data.byteLength / 1024 / 1024).toFixed(1),
+                "MB",
+              );
+              return data;
             }
 
             // Manually decompress using DecompressionStream (native browser API)
-            const ds = new DecompressionStream('gzip')
+            const ds = new DecompressionStream("gzip");
             const decompressedData = await new Response(
-              new Blob([data]).stream().pipeThrough(ds)
-            ).arrayBuffer()
-            console.log('Decompressed WASM:', (decompressedData.byteLength / 1024 / 1024).toFixed(1), 'MB')
-            return decompressedData
+              new Blob([data]).stream().pipeThrough(ds),
+            ).arrayBuffer();
+            console.log(
+              "Decompressed WASM:",
+              (decompressedData.byteLength / 1024 / 1024).toFixed(1),
+              "MB",
+            );
+            return decompressedData;
           }
         } catch (e) {
           // Gzipped version not available (dev mode), fall through to uncompressed
-          console.log('Gzipped WASM not available, falling back to uncompressed:', e)
+          console.log("Gzipped WASM not available, falling back to uncompressed:", e);
         }
 
         // Fall back to uncompressed WASM (dev mode)
-        console.log('Loading uncompressed WASM from', urlStr)
-        const response = await fetch(urlStr)
+        console.log("Loading uncompressed WASM from", urlStr);
+        const response = await fetch(urlStr);
         if (!response.ok) {
-          throw new Error(`Failed to fetch WASM: ${response.status} ${response.statusText}`)
+          throw new Error(`Failed to fetch WASM: ${response.status} ${response.statusText}`);
         }
-        return response.arrayBuffer()
-      }
+        return response.arrayBuffer();
+      };
 
       // Create compiler with ZenFS and custom fetch
-      this.compiler = new WasmTypicalCompiler({ wasmPath, fs: wrappedFs, fetchWasm })
+      this.compiler = new WasmTypicalCompiler({ wasmPath, fs: wrappedFs, fetchWasm });
 
-      await this.compiler.start()
-      this.compilerStatus = 'ready'
+      await this.compiler.start();
+      this.compilerStatus = "ready";
 
       // Run initial transform
-      await this.transform()
+      await this.transform();
     } catch (err) {
-      console.error('Failed to initialise compiler:', err)
-      this.compilerStatus = 'error'
-      this.compilerError = err instanceof Error ? err.message : String(err)
+      console.error("Failed to initialise compiler:", err);
+      this.compilerStatus = "error";
+      this.compilerError = err instanceof Error ? err.message : String(err);
     }
   }
 
   private initEditor() {
-    if (!this.inputEditorContainer || !monaco) return
+    if (!this.inputEditorContainer || !monaco) return;
 
     this.inputEditor = monaco.editor.create(this.inputEditorContainer, {
       value: this.inputCode,
-      language: 'typescript',
-      theme: 'vs-dark',
+      language: "typescript",
+      theme: "vs-dark",
       minimap: { enabled: false },
       fontSize: 14,
-      lineNumbers: 'on',
+      lineNumbers: "on",
       scrollBeyondLastLine: false,
       automaticLayout: true,
       tabSize: 2,
-      wordWrap: 'on',
+      wordWrap: "on",
       padding: { top: 16, bottom: 16 },
       fixedOverflowWidgets: true,
-    })
+    });
 
     // Auto-transform on change with debounce
-    let debounceTimer: number
+    let debounceTimer: number;
     this.inputEditor.onDidChangeModelContent(() => {
-      this.inputCode = this.inputEditor?.getValue() || ''
-      clearTimeout(debounceTimer)
+      this.inputCode = this.inputEditor?.getValue() || "";
+      clearTimeout(debounceTimer);
       debounceTimer = window.setTimeout(() => {
-        this.transform()
+        this.transform();
         // Update URL hash for sharing
-        setSourceInHash(this.inputCode)
-      }, 500)
-    })
+        setSourceInHash(this.inputCode);
+      }, 500);
+    });
 
     // Create output editor if container is available
-    this.initOutputEditor()
+    this.initOutputEditor();
   }
 
   private initOutputEditor() {
-    if (!this.outputEditorContainer || !monaco || this.outputEditor) return
+    if (!this.outputEditorContainer || !monaco || this.outputEditor) return;
 
     this.outputEditor = monaco.editor.create(this.outputEditorContainer, {
       value: this.outputCode,
-      language: 'typescript',
-      theme: 'vs-dark',
+      language: "typescript",
+      theme: "vs-dark",
       minimap: { enabled: false },
       fontSize: 14,
-      lineNumbers: 'on',
+      lineNumbers: "on",
       scrollBeyondLastLine: false,
       automaticLayout: true,
       tabSize: 2,
-      wordWrap: 'on',
+      wordWrap: "on",
       padding: { top: 16, bottom: 16 },
       fixedOverflowWidgets: true,
-    })
+    });
   }
 
   private async transform() {
-    if (this.compilerStatus !== 'ready' || !this.compiler) return
+    if (this.compilerStatus !== "ready" || !this.compiler) return;
 
-    this.transformError = ''
-    const startTime = performance.now()
+    this.transformError = "";
+    const startTime = performance.now();
 
     try {
-      const result = await this.compiler.transformSource('playground.ts', this.inputCode)
-      let code = result.code
+      const result = await this.compiler.transformSource("playground.ts", this.inputCode);
+      let code = result.code;
 
-      this.outputCode = code
-      this.sourceMap = result.sourceMap || null
-      this.transformTime = Math.round(performance.now() - startTime)
-      this.outputEditor?.setValue(this.outputCode)
+      this.outputCode = code;
+      this.sourceMap = result.sourceMap || null;
+      this.transformTime = Math.round(performance.now() - startTime);
+      this.outputEditor?.setValue(this.outputCode);
 
       // Format output if checkbox is enabled
       if (this.formatOutput && this.outputEditor) {
         const formatted = await prettier.format(code, {
-          parser: 'typescript',
+          parser: "typescript",
           plugins: [prettierPluginTypescript, prettierPluginEstree],
           printWidth: 80,
           tabWidth: 2,
           singleQuote: true,
-        })
-        this.outputEditor.setValue(formatted)
+        });
+        this.outputEditor.setValue(formatted);
       }
     } catch (err) {
-      this.transformError = err instanceof Error ? err.message : String(err)
-      this.outputCode = ''
-      this.transformTime = 0
-      this.outputEditor?.setValue('')
+      this.transformError = err instanceof Error ? err.message : String(err);
+      this.outputCode = "";
+      this.transformTime = 0;
+      this.outputEditor?.setValue("");
     }
   }
 
   private toggleFormatOutput() {
-    this.formatOutput = !this.formatOutput
-    this.transform()
+    this.formatOutput = !this.formatOutput;
+    this.transform();
   }
 
   private selectExample(index: number) {
-    this.selectedExample = index
-    this.inputCode = EXAMPLES[index].code
+    this.selectedExample = index;
+    this.inputCode = EXAMPLES[index].code;
     if (this.inputEditor) {
-      this.inputEditor.setValue(this.inputCode)
+      this.inputEditor.setValue(this.inputCode);
     }
-    this.examplesOpen = false
-    this.transform()
-    setSourceInHash(this.inputCode)
+    this.examplesOpen = false;
+    this.transform();
+    setSourceInHash(this.inputCode);
   }
 
   private toggleExamples() {
-    this.examplesOpen = !this.examplesOpen
+    this.examplesOpen = !this.examplesOpen;
   }
 
   private async runCode() {
-    if (!monaco || !this.outputEditor || this.isRunning) return
+    if (!monaco || !this.outputEditor || this.isRunning) return;
 
-    this.isRunning = true
-    this.consoleOutput = []
+    this.isRunning = true;
+    this.consoleOutput = [];
 
     try {
       // Use Monaco's TypeScript worker to transpile to JavaScript
-      const model = this.outputEditor.getModel()
+      const model = this.outputEditor.getModel();
       if (!model) {
-        throw new Error('No model found')
+        throw new Error("No model found");
       }
 
-      const getWorker = await monaco.languages.typescript.getTypeScriptWorker()
-      const worker = await getWorker(model.uri)
-      const output = await worker.getEmitOutput(String(model.uri))
+      const getWorker = await monaco.languages.typescript.getTypeScriptWorker();
+      const worker = await getWorker(model.uri);
+      const output = await worker.getEmitOutput(String(model.uri));
 
       if (output.outputFiles.length === 0) {
-        throw new Error('No output generated')
+        throw new Error("No output generated");
       }
 
-      const jsCode = output.outputFiles[0].text
+      const jsCode = output.outputFiles[0].text;
 
       // Create a custom console to capture output
-      const capturedLogs: Array<{ type: 'log' | 'error' | 'warn'; message: string }> = []
+      const capturedLogs: Array<{ type: "log" | "error" | "warn"; message: string }> = [];
       const customConsole = {
         log: (...args: unknown[]) => {
-          capturedLogs.push({ type: 'log', message: args.map(a => this.formatValue(a)).join(' ') })
+          capturedLogs.push({
+            type: "log",
+            message: args.map((a) => this.formatValue(a)).join(" "),
+          });
         },
         error: (...args: unknown[]) => {
-          capturedLogs.push({ type: 'error', message: args.map(a => this.formatValue(a)).join(' ') })
+          capturedLogs.push({
+            type: "error",
+            message: args.map((a) => this.formatValue(a)).join(" "),
+          });
         },
         warn: (...args: unknown[]) => {
-          capturedLogs.push({ type: 'warn', message: args.map(a => this.formatValue(a)).join(' ') })
+          capturedLogs.push({
+            type: "warn",
+            message: args.map((a) => this.formatValue(a)).join(" "),
+          });
         },
-      }
+      };
 
       // Create a custom fetch that serves fake API responses
       const customFetch = async (url: string) => {
         // Serve fake API response for demo
-        if (url === '/fake-api-response.json') {
+        if (url === "/fake-api-response.json") {
           return {
             json: async () => ({
-              status: 'success',
+              status: "success",
               data: {
                 items: [
-                  { id: 1, title: 'Learn TypeScript', completed: true },
-                  { id: 2, title: 'Try Typical', completed: false },
-                  { id: 3, title: 'Build something awesome', completed: 'nothing' },
+                  { id: 1, title: "Learn TypeScript", completed: true },
+                  { id: 2, title: "Try Typical", completed: false },
+                  { id: 3, title: "Build something awesome", completed: "nothing" },
                 ],
                 total: 3,
               },
             }),
-          }
+          };
         }
-        throw new Error(`Fetch not supported in playground: ${url}`)
-      }
+        throw new Error(`Fetch not supported in playground: ${url}`);
+      };
 
       // Store globals for the module to access
-      ;(window as any).__playground_console__ = customConsole
-      ;(window as any).__playground_fetch__ = customFetch
+      (window as any).__playground_console__ = customConsole;
+      (window as any).__playground_fetch__ = customFetch;
 
       // Wrap code to use our custom console and fetch
       const moduleCode = `
 const console = window.__playground_console__;
 const fetch = window.__playground_fetch__;
 ${jsCode}
-`
+`;
 
       // Create a Blob URL and dynamically import it as an ES module
-      const blob = new Blob([moduleCode], { type: 'application/javascript' })
-      const url = URL.createObjectURL(blob)
+      const blob = new Blob([moduleCode], { type: "application/javascript" });
+      const url = URL.createObjectURL(blob);
       try {
-        await import(/* @vite-ignore */ url)
+        await import(/* @vite-ignore */ url);
       } finally {
-        URL.revokeObjectURL(url)
-        delete (window as Record<string, unknown>).__playground_console__
-        delete (window as Record<string, unknown>).__playground_fetch__
+        URL.revokeObjectURL(url);
+        delete (window as Record<string, unknown>).__playground_console__;
+        delete (window as Record<string, unknown>).__playground_fetch__;
       }
 
-      this.consoleOutput = capturedLogs
+      this.consoleOutput = capturedLogs;
 
       if (capturedLogs.length === 0) {
-        this.consoleOutput = [{ type: 'log', message: '(no output)' }]
+        this.consoleOutput = [{ type: "log", message: "(no output)" }];
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      this.consoleOutput = [{ type: 'error', message }]
+      const message = err instanceof Error ? err.message : String(err);
+      this.consoleOutput = [{ type: "error", message }];
     } finally {
-      this.isRunning = false
+      this.isRunning = false;
     }
   }
 
   private formatValue(value: unknown): string {
-    if (value === null) return 'null'
-    if (value === undefined) return 'undefined'
-    if (typeof value === 'string') return value
-    if (typeof value === 'object') {
+    if (value === null) return "null";
+    if (value === undefined) return "undefined";
+    if (typeof value === "string") return value;
+    if (typeof value === "object") {
       try {
-        return JSON.stringify(value, null, 2)
+        return JSON.stringify(value, null, 2);
       } catch {
-        return String(value)
+        return String(value);
       }
     }
-    return String(value)
+    return String(value);
   }
 
   private clearConsole() {
-    this.consoleOutput = []
+    this.consoleOutput = [];
   }
 
   private async shareCode() {
     try {
       // Compress and update URL
-      const encoded = await compressSource(this.inputCode)
-      const params = new URLSearchParams()
-      params.set('code', encoded)
-      window.history.replaceState(null, '', '#' + params.toString())
+      const encoded = await compressSource(this.inputCode);
+      const params = new URLSearchParams();
+      params.set("code", encoded);
+      window.history.replaceState(null, "", "#" + params.toString());
 
       // Copy the updated URL
-      await navigator.clipboard.writeText(window.location.href)
-      this.shareTooltip = 'Copied!'
+      await navigator.clipboard.writeText(window.location.href);
+      this.shareTooltip = "Copied!";
     } catch {
-      this.shareTooltip = 'Failed to copy'
+      this.shareTooltip = "Failed to copy";
     }
 
     // Hide tooltip after 2 seconds
     setTimeout(() => {
-      this.shareTooltip = ''
-    }, 2000)
+      this.shareTooltip = "";
+    }, 2000);
   }
 
   render() {
-    const isLoading = this.compilerStatus === 'loading' || this.editorStatus === 'loading'
+    const isLoading = this.compilerStatus === "loading" || this.editorStatus === "loading";
 
     return html`
       <div class="playground-container">
@@ -1234,11 +1263,11 @@ ${jsCode}
                     <path d="M6 9l6 6 6-6"/>
                   </svg>
                 </button>
-                <div class="examples-menu ${this.examplesOpen ? 'open' : ''}">
+                <div class="examples-menu ${this.examplesOpen ? "open" : ""}">
                   ${EXAMPLES.map(
                     (example, i) => html`
                     <button
-                      class="example-item ${this.selectedExample === i ? 'active' : ''}"
+                      class="example-item ${this.selectedExample === i ? "active" : ""}"
                       @click=${() => this.selectExample(i)}
                     >
                       <div class="example-name">${example.name}</div>
@@ -1260,14 +1289,14 @@ ${jsCode}
             <div class="panel-header">
               <div class="panel-tabs">
                 <button
-                  class="panel-tab ${this.outputTab === 'transformed' ? 'active' : ''}"
-                  @click=${() => (this.outputTab = 'transformed')}
+                  class="panel-tab ${this.outputTab === "transformed" ? "active" : ""}"
+                  @click=${() => (this.outputTab = "transformed")}
                 >
                   Transformed
                 </button>
                 <button
-                  class="panel-tab ${this.outputTab === 'sourcemap' ? 'active' : ''}"
-                  @click=${() => (this.outputTab = 'sourcemap')}
+                  class="panel-tab ${this.outputTab === "sourcemap" ? "active" : ""}"
+                  @click=${() => (this.outputTab = "sourcemap")}
                 >
                   Source Map
                 </button>
@@ -1287,10 +1316,10 @@ ${jsCode}
                   ? html`
                 <div class="loading-overlay">
                   <div class="loading-spinner"></div>
-                  <div>Loading ${this.compilerStatus === 'loading' ? 'compiler' : 'editor'}...</div>
+                  <div>Loading ${this.compilerStatus === "loading" ? "compiler" : "editor"}...</div>
                 </div>
               `
-                  : this.compilerStatus === 'error'
+                  : this.compilerStatus === "error"
                     ? html`
                 <pre class="error-message">Failed to load compiler:\n${this.compilerError}</pre>
               `
@@ -1299,8 +1328,8 @@ ${jsCode}
                 <pre class="error-message">${this.transformError}</pre>
               `
                       : html`
-                <div class="editor-container" id="output-editor" style="${this.outputTab === 'transformed' ? '' : 'display: none'}"></div>
-                <pre class="output-code" style="${this.outputTab === 'sourcemap' ? '' : 'display: none'}">${this.sourceMap ? JSON.stringify(this.sourceMap, null, 2) : 'No source map generated'}</pre>
+                <div class="editor-container" id="output-editor" style="${this.outputTab === "transformed" ? "" : "display: none"}"></div>
+                <pre class="output-code" style="${this.outputTab === "sourcemap" ? "" : "display: none"}">${this.sourceMap ? JSON.stringify(this.sourceMap, null, 2) : "No source map generated"}</pre>
               `
               }
             </div>
@@ -1314,12 +1343,12 @@ ${jsCode}
               <button
                 class="run-btn"
                 @click=${() => this.runCode()}
-                ?disabled=${this.compilerStatus !== 'ready' || this.isRunning}
+                ?disabled=${this.compilerStatus !== "ready" || this.isRunning}
               >
                 <svg viewBox="0 0 24 24" fill="currentColor">
                   <path d="M8 5v14l11-7z"/>
                 </svg>
-                ${this.isRunning ? 'Running...' : 'Run'}
+                ${this.isRunning ? "Running..." : "Run"}
               </button>
               <span class="console-title">Console</span>
             </div>
@@ -1332,7 +1361,7 @@ ${jsCode}
               <div class="console-empty">Click "Run" to execute the code</div>
             `
                 : this.consoleOutput.map(
-                    entry => html`
+                    (entry) => html`
               <div class="console-line ${entry.type}">${entry.message}</div>
             `,
                   )
@@ -1344,9 +1373,9 @@ ${jsCode}
         <footer class="status-bar">
           <div class="status-left">
             <div class="status-item">
-              <span class="status-dot ${isLoading ? 'loading' : this.compilerStatus === 'error' ? 'error' : ''}"></span>
+              <span class="status-dot ${isLoading ? "loading" : this.compilerStatus === "error" ? "error" : ""}"></span>
               <span>
-                ${isLoading ? 'Loading...' : this.compilerStatus === 'error' ? 'Error' : 'Compiler Ready'}
+                ${isLoading ? "Loading..." : this.compilerStatus === "error" ? "Error" : "Compiler Ready"}
               </span>
             </div>
             ${
@@ -1356,7 +1385,7 @@ ${jsCode}
                 Transform: ${this.transformTime}ms
               </div>
             `
-                : ''
+                : ""
             }
           </div>
           <div style="display: flex; align-items: center; gap: 1rem;">
@@ -1367,17 +1396,17 @@ ${jsCode}
                 <line x1="12" y1="2" x2="12" y2="15"/>
               </svg>
               Share
-              <span class="share-tooltip ${this.shareTooltip ? 'visible' : ''}">${this.shareTooltip}</span>
+              <span class="share-tooltip ${this.shareTooltip ? "visible" : ""}">${this.shareTooltip}</span>
             </button>
           </div>
         </footer>
       </div>
-    `
+    `;
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    'typical-playground': TypicalPlayground
+    "typical-playground": TypicalPlayground;
   }
 }

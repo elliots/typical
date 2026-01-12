@@ -1,34 +1,34 @@
-import type { TypicalConfig } from '@elliots/typical'
+import type { TypicalConfig } from "@elliots/typical";
 
 export interface Options {
   /**
    * Bun plugin target.
    * @default 'bun'
    */
-  target?: 'bun' | 'browser' | 'node'
+  target?: "bun" | "browser" | "node";
 
   /**
    * Patterns to include for transformation.
    * If empty, all TypeScript files are included.
    */
-  include?: (string | RegExp)[]
+  include?: (string | RegExp)[];
 
   /**
    * Patterns to exclude from transformation.
    */
-  exclude?: (string | RegExp)[]
+  exclude?: (string | RegExp)[];
 
   /**
    * Typical configuration overrides.
    */
-  typical?: Partial<TypicalConfig>
+  typical?: Partial<TypicalConfig>;
 }
 
 export interface ResolvedOptions {
-  target: 'bun' | 'browser' | 'node'
-  include: (string | RegExp)[]
-  exclude: (string | RegExp)[]
-  typical: Partial<TypicalConfig>
+  target: "bun" | "browser" | "node";
+  include: (string | RegExp)[];
+  exclude: (string | RegExp)[];
+  typical: Partial<TypicalConfig>;
 }
 
 /**
@@ -36,9 +36,9 @@ export interface ResolvedOptions {
  */
 export function resolveOptions(options: Options = {}): ResolvedOptions {
   return {
-    target: options.target ?? 'bun',
+    target: options.target ?? "bun",
     include: options.include ?? [],
     exclude: options.exclude ?? [/node_modules/],
     typical: options.typical ?? {},
-  }
+  };
 }

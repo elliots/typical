@@ -1,32 +1,37 @@
-import type ts from 'typescript'
-import type { PluginConfig, ProgramTransformerExtras } from 'ts-patch'
-import { TypicalCompiler } from '@elliots/typical-compiler'
-import { loadConfig, validateConfig, type TypicalConfig } from '@elliots/typical'
-import deasync from 'deasync'
+import type ts from "typescript";
+import type { PluginConfig, ProgramTransformerExtras } from "ts-patch";
+import { TypicalCompiler } from "@elliots/typical-compiler";
+import { loadConfig, validateConfig, type TypicalConfig } from "@elliots/typical";
+import deasync from "deasync";
 
 /**
  * Synchronous wrapper around the async compiler transformFile.
  */
-function transformFileSync(compiler: TypicalCompiler, project: string, fileName: string, config: TypicalConfig): string {
-  let result: string | undefined
-  let error: Error | undefined
-  let done = false
+function transformFileSync(
+  compiler: TypicalCompiler,
+  project: string,
+  fileName: string,
+  config: TypicalConfig,
+): string {
+  let result: string | undefined;
+  let error: Error | undefined;
+  let done = false;
 
   compiler.transformFile(project, fileName, config.ignoreTypes, config.maxGeneratedFunctions).then(
-    res => {
-      result = res.code
-      done = true
+    (res) => {
+      result = res.code;
+      done = true;
     },
-    err => {
-      error = err
-      done = true
+    (err) => {
+      error = err;
+      done = true;
     },
-  )
+  );
 
-  deasync.loopWhile(() => !done)
+  deasync.loopWhile(() => !done);
 
-  if (error) throw error
-  return result!
+  if (error) throw error;
+  return result!;
 }
 
 /**
@@ -45,49 +50,54 @@ function transformFileSync(compiler: TypicalCompiler, project: string, fileName:
  *   }
  * }
  */
-export default function (program: ts.Program, host: ts.CompilerHost | undefined, _pluginConfig: PluginConfig, { ts: tsInstance }: ProgramTransformerExtras): ts.Program {
-  const config = validateConfig(loadConfig())
-  void config // unused for now, but available for future config options
+export default function (
+  program: ts.Program,
+  host: ts.CompilerHost | undefined,
+  _pluginConfig: PluginConfig,
+  { ts: tsInstance }: ProgramTransformerExtras,
+): ts.Program {
+  const config = validateConfig(loadConfig());
+  void config; // unused for now, but available for future config options
 
   // Initialize compiler synchronously
-  const compiler = new TypicalCompiler({ cwd: process.cwd() })
-  let projectHandle: string | undefined
-  let initError: Error | undefined
-  let initDone = false
+  const compiler = new TypicalCompiler({ cwd: process.cwd() });
+  let projectHandle: string | undefined;
+  let initError: Error | undefined;
+  let initDone = false;
 
   compiler
     .start()
-    .then(() => compiler.loadProject('tsconfig.json'))
-    .then(handle => {
-      projectHandle = handle.id
-      initDone = true
+    .then(() => compiler.loadProject("tsconfig.json"))
+    .then((handle) => {
+      projectHandle = handle.id;
+      initDone = true;
     })
-    .catch(err => {
-      initError = err
-      initDone = true
-    })
+    .catch((err) => {
+      initError = err;
+      initDone = true;
+    });
 
-  deasync.loopWhile(() => !initDone)
-  if (initError) throw initError
+  deasync.loopWhile(() => !initDone);
+  if (initError) throw initError;
 
-  const compilerOptions = program.getCompilerOptions()
-  const originalHost = host ?? tsInstance.createCompilerHost(compilerOptions)
+  const compilerOptions = program.getCompilerOptions();
+  const originalHost = host ?? tsInstance.createCompilerHost(compilerOptions);
 
   // Create a custom host that returns transformed source files
-  const transformedFiles = new Map<string, string>()
+  const transformedFiles = new Map<string, string>();
 
   // Transform all source files
   for (const sourceFile of program.getSourceFiles()) {
     // Skip declaration files and node_modules
-    if (sourceFile.isDeclarationFile || sourceFile.fileName.includes('node_modules')) {
-      continue
+    if (sourceFile.isDeclarationFile || sourceFile.fileName.includes("node_modules")) {
+      continue;
     }
 
     try {
-      const transformed = transformFileSync(compiler, projectHandle!, sourceFile.fileName, config)
-      transformedFiles.set(sourceFile.fileName, transformed)
+      const transformed = transformFileSync(compiler, projectHandle!, sourceFile.fileName, config);
+      transformedFiles.set(sourceFile.fileName, transformed);
     } catch (err) {
-      console.error(`[typical] Failed to transform ${sourceFile.fileName}:`, err)
+      console.error(`[typical] Failed to transform ${sourceFile.fileName}:`, err);
     }
   }
 
@@ -95,15 +105,26 @@ export default function (program: ts.Program, host: ts.CompilerHost | undefined,
   const newHost: ts.CompilerHost = {
     ...originalHost,
     getSourceFile: (fileName, languageVersionOrOptions, onError, shouldCreateNewSourceFile) => {
-      const transformed = transformedFiles.get(fileName)
+      const transformed = transformedFiles.get(fileName);
       if (transformed) {
-        return tsInstance.createSourceFile(fileName, transformed, typeof languageVersionOrOptions === 'object' ? languageVersionOrOptions : { languageVersion: languageVersionOrOptions })
+        return tsInstance.createSourceFile(
+          fileName,
+          transformed,
+          typeof languageVersionOrOptions === "object"
+            ? languageVersionOrOptions
+            : { languageVersion: languageVersionOrOptions },
+        );
       }
-      return originalHost.getSourceFile(fileName, languageVersionOrOptions, onError, shouldCreateNewSourceFile)
+      return originalHost.getSourceFile(
+        fileName,
+        languageVersionOrOptions,
+        onError,
+        shouldCreateNewSourceFile,
+      );
     },
-  }
+  };
 
   // Create a new program with the transformed source files
-  const rootNames = program.getRootFileNames()
-  return tsInstance.createProgram(rootNames, compilerOptions, newHost, program)
+  const rootNames = program.getRootFileNames();
+  return tsInstance.createProgram(rootNames, compilerOptions, newHost, program);
 }

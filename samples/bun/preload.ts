@@ -1,4 +1,4 @@
-import { typicalPlugin } from '@elliots/bun-plugin-typical'
+import { typicalPlugin } from "@elliots/bun-plugin-typical";
 
 void Bun.plugin(
   typicalPlugin({
@@ -11,4 +11,4 @@ void Bun.plugin(
       },
     },
   }),
-)
+);

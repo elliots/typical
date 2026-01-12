@@ -38,8 +38,10 @@
   --spacing-xl: 4rem;
 
   /* Typography - matches TypeScript website exactly */
-  --font-sans: 'Segoe UI Web (West European)', 'Segoe UI', -apple-system, system-ui, Roboto, 'Helvetica Neue', sans-serif;
-  --font-mono: Menlo, Monaco, Consolas, 'Andale Mono', 'Ubuntu Mono', 'Courier New', monospace;
+  --font-sans:
+    "Segoe UI Web (West European)", "Segoe UI", -apple-system, system-ui, Roboto, "Helvetica Neue",
+    sans-serif;
+  --font-mono: Menlo, Monaco, Consolas, "Andale Mono", "Ubuntu Mono", "Courier New", monospace;
 
   /* Layout */
   --max-width: 1200px;

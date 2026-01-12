@@ -1,0 +1,16 @@
+{
+  "name": "xxx",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@elliots/typical-compiler": "^0.2.5",
+    "@esbuild/darwin-arm64": "^0.27.2"
+  }
+}
