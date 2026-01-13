@@ -232,6 +232,17 @@ func (g *Generator) objectFilteringValidation(t *checker.Type, expr string, name
 		propType := checker.Checker_getTypeOfSymbol(g.checker, prop)
 		propName := prop.Name
 
+		propFlags := checker.Type_flags(propType)
+
+		// Handle 'never' type properties - they must NOT be defined
+		if propFlags&checker.TypeFlagsNever != 0 {
+			propKey := escapeJSStringQuoted(propName)
+			propNameExpr := filteringNameExpr(nameExpr, propName)
+			sb.WriteString(fmt.Sprintf(`if (%s in %s) %s; `,
+				propKey, expr, g.filteringThrow(propNameExpr, "never (property must not exist)", `"present"`)))
+			continue
+		}
+
 		accessor := fmt.Sprintf("%s.%s", expr, propName)
 		if needsQuoting(propName) {
 			accessor = fmt.Sprintf(`%s[%q]`, expr, propName)
@@ -244,7 +255,6 @@ func (g *Generator) objectFilteringValidation(t *checker.Type, expr string, name
 
 		propNameExpr := filteringNameExpr(nameExpr, propName)
 
-		propFlags := checker.Type_flags(propType)
 		needsRecursiveFilter := propFlags&checker.TypeFlagsObject != 0 && !g.isFunctionType(propType)
 
 		if isOptionalProperty(prop) {
@@ -601,6 +611,17 @@ func (g *Generator) reusableObjectFilteringValidation(t *checker.Type, expr stri
 		propType := checker.Checker_getTypeOfSymbol(g.checker, prop)
 		propName := prop.Name
 
+		propFlags := checker.Type_flags(propType)
+
+		// Handle 'never' type properties - they must NOT be defined
+		if propFlags&checker.TypeFlagsNever != 0 {
+			propKey := escapeJSStringQuoted(propName)
+			propNameExpr := filteringNameExpr(nameExpr, propName)
+			sb.WriteString(fmt.Sprintf(`if (%s in %s) %s; `,
+				propKey, expr, filteringReturn(propNameExpr, "never (property must not exist)", `"present"`)))
+			continue
+		}
+
 		accessor := fmt.Sprintf("%s.%s", expr, propName)
 		if needsQuoting(propName) {
 			accessor = fmt.Sprintf(`%s[%q]`, expr, propName)
@@ -613,7 +634,6 @@ func (g *Generator) reusableObjectFilteringValidation(t *checker.Type, expr stri
 
 		propNameExpr := filteringNameExpr(nameExpr, propName)
 
-		propFlags := checker.Type_flags(propType)
 		needsRecursiveFilter := propFlags&checker.TypeFlagsObject != 0 && !g.isFunctionType(propType)
 
 		if isOptionalProperty(prop) {

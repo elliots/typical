@@ -912,6 +912,42 @@ void describe("JSON Operations", () => {
       { input: JSON.stringify({ name: "Bob", age: "25" }), error: "to be number" },
     ],
   });
+
+  registerTestCase({
+    name: "JSON.stringify validates and filters union with never properties",
+    source: `
+      type UserOrCompany =
+        | { name: string; companyId: never }
+        | { name: never; companyId: number };
+      export function run(input: any): string { return JSON.stringify(input as UserOrCompany) }
+    `,
+    cases: [
+      // First branch: { name: string; companyId: never } - name present, companyId must not exist
+      { input: { name: "Alice" }, result: '{"name":"Alice"}' },
+      { input: { name: "Alice", extra: "ignored" }, result: '{"name":"Alice"}' },
+      // Second branch: { name: never; companyId: number } - companyId present, name must not exist
+      { input: { companyId: 42 }, result: '{"companyId":42}' },
+      { input: { companyId: 42, extra: "ignored" }, result: '{"companyId":42}' },
+      // Fails: has both name AND companyId (matches neither branch)
+      { input: { name: "Bob", companyId: 123 }, error: "object | object" },
+      // Fails: companyId exists (even as undefined), name also exists
+      { input: { name: "Charlie", companyId: undefined }, error: "object | object" },
+    ],
+  });
+
+  registerTestCase({
+    name: "JSON.stringify validates nested objects",
+    source: `
+      interface User { name: string; age: number }
+      export function run(input: any): string { return JSON.stringify(input as User) }
+    `,
+    cases: [
+      { input: { name: "Alice", age: 30 }, result: '{"name":"Alice","age":30}' },
+      { input: { name: "Alice", age: 30, extra: "stripped" }, result: '{"name":"Alice","age":30}' },
+      { input: { name: "Alice", age: "thirty" }, error: "age" },
+      { input: { name: 123, age: 30 }, error: "name" },
+    ],
+  });
 });
 
 // =============================================================================
