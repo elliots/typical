@@ -14,6 +14,7 @@ export interface Company {
   name: string;
   address: Address;
   website: `https://${string}`;
+  parentCompany?: Company;
 }
 
 export interface NestedUser {
@@ -27,9 +28,6 @@ export interface NestedUser {
 
 // Typical validation
 export function validateNestedUser(user: NestedUser): NestedUser {
-  user.address1 = JSON.parse(
-    `{street: "${user.address1.street}", city: "${user.address1.city}", country: "${user.address1.country}", zip: "${user.address1.zip}"}`,
-  );
   return user;
 }
 
@@ -71,6 +69,16 @@ export const testNestedUser: NestedUser = {
       country: "US-CA",
       zip: "94102",
     },
+    parentCompany: {
+      name: "Global Corp",
+      website: "https://globalcorp.com",
+      address: {
+        street: "1 Corporate Way",
+        city: "Chicago",
+        country: "US-IL",
+        zip: "60601",
+      },
+    }
   },
 };
 
