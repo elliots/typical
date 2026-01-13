@@ -228,6 +228,15 @@ func (g *Generator) objectCheck(t *checker.Type, expr string) string {
 		propType := checker.Checker_getTypeOfSymbol(g.checker, prop)
 		propName := prop.Name
 
+		// Handle 'never' type properties - they must NOT be defined
+		propFlags := checker.Type_flags(propType)
+		if propFlags&checker.TypeFlagsNever != 0 {
+			// Check that property is not in the object
+			propKey := escapeJSStringQuoted(propName)
+			checks = append(checks, fmt.Sprintf(`!(%s in input)`, propKey))
+			continue
+		}
+
 		// Generate accessor - handle property names that need quoting
 		accessor := fmt.Sprintf("input.%s", propName)
 		if needsQuoting(propName) {

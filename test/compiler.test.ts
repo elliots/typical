@@ -854,6 +854,31 @@ void describe("Special Types", () => {
     notExpectStrings: ["throw new TypeError"],
     cases: [{ input: null, result: { host: "localhost" } }],
   });
+
+  registerTestCase({
+    name: "never property means property must not be defined",
+    source: `
+      type UserOrCompany =
+        | { name: string; companyId: never }
+        | { name: never; companyId: number };
+      export function run(input: UserOrCompany): string | number { return 'name' in input ? input.name : input.companyId }
+    `,
+    expectStrings: ['!("companyId" in input)', '!("name" in input)'],
+    cases: [
+      // First branch: { name: string; companyId: never } - name must be string, companyId must not exist
+      { input: { name: "Alice" }, result: "Alice" },
+      // Second branch: { name: never; companyId: number } - name must not exist, companyId must be number
+      { input: { companyId: 42 }, result: 42 },
+      // Fails both branches: has both name AND companyId
+      { input: { name: "Bob", companyId: 123 }, error: "object | object" },
+      // Fails: companyId exists (even if undefined), so first branch fails; name exists, so second branch fails
+      {
+        name: "companyId undefined still counts as existing",
+        input: { name: "Charlie", companyId: undefined },
+        error: "object | object",
+      },
+    ],
+  });
 });
 
 // =============================================================================

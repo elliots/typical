@@ -451,7 +451,7 @@ const teHelperCode = `const _te=(n: string,e: string,v: unknown,s?: 1)=>{const g
 // Used for cases like 'never' type or depth limit exceeded.
 func (g *Generator) unconditionalError(nameExpr, message string) string {
 	errorNameExpr := g.errorName(nameExpr)
-	errorMsg := concatStrings(errorNameExpr, escapeJSString(message))
+	errorMsg := concatStrings(errorNameExpr, escapeJSStringQuoted(message))
 	if g.returnErrors {
 		return fmt.Sprintf(`return %s`, errorMsg)
 	}
@@ -1462,6 +1462,17 @@ func (g *Generator) objectValidation(t *checker.Type, expr string, nameExpr stri
 	for _, prop := range props {
 		propType := checker.Checker_getTypeOfSymbol(g.checker, prop)
 		propName := prop.Name
+
+		// Handle 'never' type properties - they must NOT be defined
+		propFlags := checker.Type_flags(propType)
+		if propFlags&checker.TypeFlagsNever != 0 {
+			// Generate check that property is not in the object
+			propKey := escapeJSStringQuoted(propName)
+			check := fmt.Sprintf(`!(%s in %s)`, propKey, expr)
+			propNameExpr := g.appendToName(nameExpr, "."+propName)
+			sb.WriteString(g.validationError(check, propNameExpr, "never (property must not exist)", expr))
+			continue
+		}
 
 		// Generate accessor
 		accessor := fmt.Sprintf("%s.%s", expr, propName)
