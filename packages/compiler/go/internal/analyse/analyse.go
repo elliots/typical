@@ -6,6 +6,7 @@ package analyse
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/elliots/typical/packages/compiler/internal/utils"
@@ -51,6 +52,30 @@ type Result struct {
 
 	// FilterTypeObjects maps type keys to type info for code generation
 	FilterTypeObjects map[string]TypeInfo
+
+	// DirtyExternalArgs contains info about dirty values passed to external functions
+	DirtyExternalArgs []DirtyExternalArg
+}
+
+// DirtyExternalArg describes a dirty value being passed to an external function call.
+type DirtyExternalArg struct {
+	// CallPos is the position of the call expression
+	CallPos int
+
+	// ArgIndex is the 0-based index of the argument in the call
+	ArgIndex int
+
+	// ArgPos is the start position of the argument expression
+	ArgPos int
+
+	// ArgEnd is the end position of the argument expression
+	ArgEnd int
+
+	// Type is the type of the argument that needs validation
+	Type *checker.Type
+
+	// VarName is the root variable name being passed
+	VarName string
 }
 
 // Config specifies which validations to analyse.
@@ -67,7 +92,14 @@ type Config struct {
 
 // AnalyseFile performs a single AST pass over the source file.
 // It collects validation items (for VSCode) and type usage counts (for transform).
+// An optional ProjectAnalysis can be provided for cross-file optimisation information.
 func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compiler.Program, config Config) *Result {
+	return AnalyseFileWithProjectAnalysis(sourceFile, c, program, config, nil)
+}
+
+// AnalyseFileWithProjectAnalysis performs analysis with optional cross-file project analysis.
+// When projectAnalysis is provided, it can use cross-file information to determine skip reasons.
+func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Checker, program *compiler.Program, config Config, projectAnalysis *ProjectAnalysis) *Result {
 	text := sourceFile.Text()
 	lineStarts := computeLineStarts(text)
 
@@ -514,6 +546,36 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 		return nil
 	}
 
+	// getFunctionName extracts the function name from a functionLike
+	getFunctionName := func(fn *functionLike) string {
+		switch fn.node.Kind {
+		case ast.KindFunctionDeclaration:
+			fd := fn.node.AsFunctionDeclaration()
+			if fd != nil && fd.Name() != nil {
+				return fd.Name().Text()
+			}
+		case ast.KindMethodDeclaration:
+			md := fn.node.AsMethodDeclaration()
+			if md != nil && md.Name() != nil {
+				if md.Name().Kind == ast.KindIdentifier {
+					return md.Name().AsIdentifier().Text
+				}
+			}
+		}
+		return ""
+	}
+
+	// getFunctionKey generates a unique key for a function (fileName:position)
+	getFunctionKey := func(fn *functionLike) string {
+		fileName := sourceFile.FileName()
+		pos := fn.node.Pos()
+		name := getFunctionName(fn)
+		if name != "" {
+			return fileName + ":" + name + ":" + strconv.Itoa(pos)
+		}
+		return fileName + ":" + strconv.Itoa(pos)
+	}
+
 	getFunctionType := func(f *functionLike) *ast.Node {
 		switch f.node.Kind {
 		case ast.KindFunctionDeclaration:
@@ -623,11 +685,13 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 
 	// Track function context for return type analysis and validated variables
 	type funcContext struct {
-		returnType *ast.Node
-		isAsync    bool
-		validated  map[string][]*checker.Type // variables validated in this function
-		bodyStart  int                        // position where function body starts
-		bodyNode   *ast.Node                  // function body for dirty checking
+		returnType         *ast.Node
+		isAsync            bool
+		validated          map[string][]*checker.Type // variables validated in this function
+		bodyStart          int                        // position where function body starts
+		bodyNode           *ast.Node                  // function body for dirty checking
+		funcKey            string                     // unique key for cross-file analysis
+		escapedToExternal  map[string]bool            // variables that have escaped to external code
 	}
 	var funcStack []*funcContext
 
@@ -776,21 +840,52 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 		return nil, false
 	}
 
+	// Helper to check if path is in node_modules
+	isNodeModulesPath := func(path string) bool {
+		return strings.Contains(path, "/node_modules/") || strings.Contains(path, "\\node_modules\\")
+	}
+
+	// Helper to check if path is a declaration file
+	isDeclarationFilePath := func(path string) bool {
+		return len(path) > 5 && path[len(path)-5:] == ".d.ts"
+	}
+
+	// Helper to get argument index in a call
+	getArgIndex := func(call *ast.CallExpression, arg *ast.Node) int {
+		if call.Arguments == nil {
+			return -1
+		}
+		for i, a := range call.Arguments.Nodes {
+			if a == arg {
+				return i
+			}
+		}
+		return -1
+	}
+
 	// isDirty checks if a variable has been modified between two positions
-	isDirty := func(validated map[string][]*checker.Type, varName string, fromPos int, toPos int, bodyNode *ast.Node) bool {
-		if bodyNode == nil {
+	// It uses funcCtx to track permanent escapes in async functions
+	isDirty := func(funcCtx *funcContext, varName string, fromPos int, toPos int) bool {
+		if funcCtx == nil || funcCtx.bodyNode == nil {
 			return false
+		}
+
+		// If variable has already escaped to external code in an async function,
+		// it's permanently dirty for all subsequent uses
+		if funcCtx.isAsync && funcCtx.escapedToExternal[varName] {
+			return true
 		}
 
 		// Get the validated type to determine if it's a primitive
 		var validatedType *checker.Type
-		if types, ok := validated[varName]; ok && len(types) > 0 {
+		if types, ok := funcCtx.validated[varName]; ok && len(types) > 0 {
 			validatedType = types[0]
 		}
 		varIsPrimitive := isPrimitiveType(validatedType)
 
 		dirty := false
 		leaked := false
+		hasAwait := false
 
 		var checkDirty func(n *ast.Node) bool
 		checkDirty = func(n *ast.Node) bool {
@@ -856,14 +951,12 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 				call := n.AsCallExpression()
 				if call != nil && call.Arguments != nil {
 					isPure := false
-					if len(config.PureFunctions) > 0 {
-						funcName := getEntityName(call.Expression)
-						if funcName != "" {
-							for _, re := range config.PureFunctions {
-								if re.MatchString(funcName) {
-									isPure = true
-									break
-								}
+					funcName := getEntityName(call.Expression)
+					if funcName != "" && len(config.PureFunctions) > 0 {
+						for _, re := range config.PureFunctions {
+							if re.MatchString(funcName) {
+								isPure = true
+								break
 							}
 						}
 					}
@@ -874,9 +967,55 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 							if root == varName {
 								argType := checker.Checker_GetTypeAtLocation(c, arg)
 								if !isPrimitiveType(argType) {
-									leaked = true
-									dirty = true
-									return false
+									// Check if this is an internal call that we can analyse
+									isExternal := true
+									calleeMutates := true
+
+									if projectAnalysis != nil {
+										// Try to find the callee in our project analysis
+										calleeType := checker.Checker_GetTypeAtLocation(c, call.Expression)
+										if calleeType != nil {
+											calleeSym := checker.Type_symbol(calleeType)
+											if calleeSym != nil && len(calleeSym.Declarations) > 0 {
+												for _, decl := range calleeSym.Declarations {
+													sf := ast.GetSourceFileOfNode(decl)
+													if sf != nil {
+														declFileName := sf.FileName()
+														// Check if it's internal
+														if !isNodeModulesPath(declFileName) && !isDeclarationFilePath(declFileName) {
+															isExternal = false
+															// Try to find the function info
+															calleeKey := declFileName + ":" + calleeSym.Name
+															if calleeInfo, ok := projectAnalysis.CallGraph[calleeKey]; ok {
+																// Find which param index this arg corresponds to
+																argIdx := getArgIndex(call, arg)
+																if argIdx >= 0 && argIdx < len(calleeInfo.MutatesParams) {
+																	calleeMutates = calleeInfo.MutatesParams[argIdx]
+																	// Also check if callee escapes the param
+																	if calleeInfo.EscapesParams[argIdx] {
+																		// Propagate escape
+																		funcCtx.escapedToExternal[varName] = true
+																	}
+																}
+															}
+															break
+														}
+													}
+												}
+											}
+										}
+									}
+
+									if isExternal {
+										// External call - mark as escaped for async functions
+										funcCtx.escapedToExternal[varName] = true
+										leaked = true
+									}
+
+									if calleeMutates {
+										dirty = true
+										return false
+									}
 								}
 							}
 						}
@@ -884,7 +1023,9 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 				}
 
 			case ast.KindAwaitExpression:
-				if !varIsPrimitive && leaked {
+				hasAwait = true
+				// In async function, if variable has escaped and there's an await, it's dirty
+				if !varIsPrimitive && (leaked || funcCtx.escapedToExternal[varName]) {
 					dirty = true
 					return false
 				}
@@ -916,7 +1057,13 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 			return false
 		}
 
-		bodyNode.ForEachChild(checkDirty)
+		funcCtx.bodyNode.ForEachChild(checkDirty)
+
+		// If async function and escaped + has await, mark permanent escape for future
+		if funcCtx.isAsync && hasAwait && leaked {
+			funcCtx.escapedToExternal[varName] = true
+		}
+
 		return dirty
 	}
 
@@ -966,11 +1113,13 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 
 			// Push function context
 			ctx := &funcContext{
-				returnType: getFunctionType(fn),
-				isAsync:    isFunctionAsync(fn),
-				validated:  make(map[string][]*checker.Type),
-				bodyStart:  bodyStart,
-				bodyNode:   bodyNode,
+				returnType:        getFunctionType(fn),
+				isAsync:           isFunctionAsync(fn),
+				validated:         make(map[string][]*checker.Type),
+				bodyStart:         bodyStart,
+				bodyNode:          bodyNode,
+				funcKey:           getFunctionKey(fn),
+				escapedToExternal: make(map[string]bool),
 			}
 			funcStack = append(funcStack, ctx)
 			defer func() { funcStack = funcStack[:len(funcStack)-1] }()
@@ -1059,7 +1208,7 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 				if _, ok := getValidatedType(returnStmt.Expression, ctx.validated, actualType); ok {
 					rootVar := getRootIdentifier(returnStmt.Expression)
 					if rootVar != "" {
-						if !isDirty(ctx.validated, rootVar, ctx.bodyStart, node.Pos(), ctx.bodyNode) {
+						if !isDirty(ctx, rootVar, ctx.bodyStart, node.Pos()) {
 							skipValidation = true
 						}
 					}
@@ -1170,6 +1319,88 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 			}
 
 			methodName, isJSON := getJSONMethodName(callExpr)
+
+			// Check for dirty values passed to external functions (non-JSON calls)
+			if !isJSON && config.ValidateParameters && len(funcStack) > 0 {
+				ctx := funcStack[len(funcStack)-1]
+
+				// Check if this is an external function call
+				isExternal := false
+				calleeType := checker.Checker_GetTypeAtLocation(c, callExpr.Expression)
+				if calleeType != nil {
+					calleeSym := checker.Type_symbol(calleeType)
+					if calleeSym != nil && len(calleeSym.Declarations) > 0 {
+						for _, decl := range calleeSym.Declarations {
+							sf := ast.GetSourceFileOfNode(decl)
+							if sf != nil {
+								declFileName := sf.FileName()
+								// External if in node_modules or is a .d.ts file
+								if isNodeModulesPath(declFileName) || isDeclarationFilePath(declFileName) {
+									isExternal = true
+									break
+								}
+							}
+							// Also check if it's an ambient declaration (declare function ...)
+							// These are external functions declared in the current file
+							if decl.Kind == ast.KindFunctionDeclaration {
+								fd := decl.AsFunctionDeclaration()
+								if fd != nil && fd.Body == nil {
+									// No body means it's an ambient/external declaration
+									isExternal = true
+									break
+								}
+							}
+						}
+					}
+				}
+
+				// For external calls, check each argument for unvalidated or dirty values
+				if isExternal && callExpr.Arguments != nil {
+					for argIdx, arg := range callExpr.Arguments.Nodes {
+						rootVar := getRootIdentifier(arg)
+						if rootVar == "" {
+							continue
+						}
+
+						// Get the argument's type
+						argType := checker.Checker_GetTypeAtLocation(c, arg)
+						if argType == nil || shouldSkipType(argType) || isPrimitiveType(argType) {
+							continue
+						}
+
+						// Check if this variable was validated
+						_, wasValidated := ctx.validated[rootVar]
+
+						// Needs validation if:
+						// 1. Never validated, OR
+						// 2. Was validated but became dirty since
+						needsValidation := !wasValidated || isDirty(ctx, rootVar, ctx.bodyStart, node.Pos())
+						if !needsValidation {
+							continue
+						}
+
+						// This value needs validation before passing to external function
+						argName := text[arg.Pos():arg.End()]
+						if len(argName) > 30 {
+							argName = argName[:27] + "..."
+						}
+
+						// Add validation item for this argument
+						countCheck(argType, arg, arg, "external-call-argument", argName)
+
+						// Store info for transform to use
+						result.DirtyExternalArgs = append(result.DirtyExternalArgs, DirtyExternalArg{
+							CallPos:   node.Pos(),
+							ArgIndex:  argIdx,
+							ArgPos:    arg.Pos(),
+							ArgEnd:    arg.End(),
+							Type:      argType,
+							VarName:   rootVar,
+						})
+					}
+				}
+			}
+
 			if !isJSON {
 				break
 			}
@@ -1245,7 +1476,7 @@ func AnalyseFile(sourceFile *ast.SourceFile, c *checker.Checker, program *compil
 				if validatedType, ok := getValidatedType(varDecl.Initializer, ctx.validated, nil); ok {
 					// Check if the root variable has been dirtied
 					rootVar := getRootIdentifier(varDecl.Initializer)
-					if rootVar != "" && !isDirty(ctx.validated, rootVar, ctx.bodyStart, node.Pos(), ctx.bodyNode) {
+					if rootVar != "" && !isDirty(ctx, rootVar, ctx.bodyStart, node.Pos()) {
 						// The variable inherits the validated type
 						ctx.validated[varName] = append(ctx.validated[varName], validatedType)
 					}

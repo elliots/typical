@@ -14,6 +14,9 @@
     "validation"
   ],
   "license": "MIT",
+  "repository": {
+    "url": "https://github.com/elliots/typical"
+  },
   "publisher": "elliots",
   "main": "./dist/extension.js",
   "scripts": {

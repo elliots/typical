@@ -226,6 +226,39 @@ console.log("User:", JSON.stringify(u));
 console.log("Full user:", JSON.stringify(u as DBUser));
 `,
   },
+  {
+    name: "Call analysis",
+    description: "Skip validation if data is known to be valid",
+    code: `// A call graph is built for the entire project, so we can keep track of what has been 
+// already validated. We can then skip unnecessary duplicate validation. This is all compile-time.
+
+interface User {
+  name: string;
+}
+
+// An internal function. 
+// Params: Only validated if called with unvalidated data
+// Returns: Validated
+function internalFunction(u: User): User {
+  return u; // Skipped, because already valid
+}
+
+// An exported function. All params must be validated, but its returns can be trusted.
+export function exportedFunction(u: User): User {
+  return u; // Skipped, because already valid
+}
+
+// An external, unvalidated function. It's returns can't be trusted.
+declare function externalFunction(u: User): User;
+
+export function process(user: User): User {
+  const user2 = exportedFunction(internalFunction(user));
+  const user3 = externalFunction(user2); // user2 is already validated, but its result needs to be checked
+  const user4 = externalFunction(user3); // user3 is dirty (escaped in step3), needs validation
+  // user4 remains unvalidated, as it is never looked at again
+  return user3;
+}`,
+  },
 ];
 
 @customElement("typical-playground")
@@ -998,6 +1031,9 @@ export class TypicalPlayground extends LitElement {
 
   private initEditor() {
     if (!this.inputEditorContainer || !monaco) return;
+
+    // Guard against double-creation
+    if (this.inputEditor) return;
 
     this.inputEditor = monaco.editor.create(this.inputEditorContainer, {
       value: this.inputCode,

@@ -159,7 +159,8 @@ export const testMediumPayload: MediumPayload = {
 export const testLargePayload: LargePayload = {
   id: 1001,
   title: "Getting Started with TypeScript",
-  description: "A comprehensive guide to TypeScript for beginners and experienced developers alike.",
+  description:
+    "A comprehensive guide to TypeScript for beginners and experienced developers alike.",
   status: "published",
   author: {
     id: 42,

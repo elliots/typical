@@ -352,6 +352,10 @@ The generated validation code is optimised for runtime performance:
 
 - **Reusable validators** - When the same type is validated multiple times, Typical hoists the validation logic to a reusable function at module scope. Nested types that appear in multiple places (e.g., `Address` used in both `User` and `Company`) are also extracted and reused.
 - **Smart redundancy elimination** - Skips validation when returning values that are already known to be valid: validated parameters, properties of validated objects, variables assigned from casts or `JSON.parse`, and aliased variables
+- **Cross-file call graph analysis** - Analyses the entire project to eliminate redundant validation across files:
+  - **Trusted return values** - If a function validates its return type, callers don't re-validate the result
+  - **Internal function parameters** - Non-exported functions only called with pre-validated arguments skip parameter validation
+  - **Chained function calls** - When `step2(step1(user))` is called, validation flows through the chain
 - **Type-aware dirty tracking** - Tracks when validated values might become invalid. Primitives stay valid after being passed to functions (they're copied), but objects are re-validated if passed to unknown functions. Pure functions (listed in the config) like `console.log` don't invalidate objects.
 - **Union early bail-out** - Union type checks use if-else chains so the first matching type succeeds immediately
 - **Skip comments** - Add `// @typical-ignore` before a function to skip all validation for it

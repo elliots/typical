@@ -151,6 +151,15 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 		}
 	}
 
+	// Build lookup for dirty external args (dirty values passed to external functions)
+	// Key is "callPos:argIndex" - maps to the DirtyExternalArg info
+	dirtyExternalArgs := make(map[string]*analyse.DirtyExternalArg)
+	for i := range analyseResult.DirtyExternalArgs {
+		arg := &analyseResult.DirtyExternalArgs[i]
+		key := fmt.Sprintf("%d:%d", arg.CallPos, arg.ArgIndex)
+		dirtyExternalArgs[key] = arg
+	}
+
 	// Copy type usage results from analysis pass
 	for k, v := range analyseResult.CheckTypeUsage {
 		checkTypeUsage[k] = v
@@ -330,6 +339,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 		bodyStart  int                        // Position after opening brace
 		validated  map[string][]*checker.Type // varName -> list of validated types
 		bodyNode   *ast.Node                  // Function body for dirty detection
+		funcKey    string                     // Unique key for cross-file analysis
 	}
 	var funcStack []*funcContext
 	nodeCount := 0
@@ -356,6 +366,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 					returnType: fn.Type(),
 					isAsync:    fn.IsAsync(),
 					validated:  make(map[string][]*checker.Type),
+					funcKey:    getFunctionKey(sourceFile, fn),
 				}
 
 				// Get body start position for inserting parameter validations
@@ -389,7 +400,23 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 					gen.ResetFuncIdx()
 					isFirstParam := true
 
-					for _, param := range fn.Parameters() {
+					params := fn.Parameters()
+					for paramIdx, param := range params {
+						// Check if cross-file analysis determined we can skip this parameter
+						if canSkipParamValidation(config, ctx.funcKey, paramIdx) {
+							// Add a comment explaining why validation is skipped
+							paramName := getParamName(param)
+							if paramName != "" {
+								comment := fmt.Sprintf("/* %s: validated by callers */", paramName)
+								insertions = append(insertions, insertion{
+									pos:       ctx.bodyStart,
+									text:      " " + comment,
+									sourcePos: param.Pos(),
+								})
+							}
+							continue
+						}
+
 						if param.Type != nil {
 							paramType := checker.Checker_getTypeFromTypeNode(c, param.Type)
 							if paramType != nil && !shouldSkipType(paramType) && !shouldSkipComplexType(paramType, c) {
@@ -583,6 +610,18 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 								debugf("[DEBUG] Skipping validation: already validated (from analyse)\n")
 							}
 
+							// Check project analysis: is return expression a validated variable?
+							if !skipValidation && isValidatedVariable(config, ctx.funcKey, returnStmt.Expression, returnStmt.Expression.Pos()) {
+								skipValidation = true
+								debugf("[DEBUG] Skipping validation: validated variable (project analysis)\n")
+							}
+
+							// Also check cross-file analysis: is return from a validated function?
+							if !skipValidation && isReturnFromValidatedFunction(config, c, returnStmt.Expression) {
+								skipValidation = true
+								debugf("[DEBUG] Skipping validation: return from validated function (cross-file)\n")
+							}
+
 							if skipValidation {
 								// Emit /* already valid */ comment after "return "
 								insertions = append(insertions, insertion{
@@ -596,62 +635,115 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 								lineNum := getLineNumber(returnPos)
 								gen.SetContext(fmt.Sprintf("return at line %d", lineNum))
 
-								result := gen.GenerateValidatorFromNode(actualType, actualTypeNode, "")
+								// Get expression positions
+								exprStart := returnStmt.Expression.Pos()
+								exprEnd := returnStmt.Expression.End()
 
-								if result.Ignored {
-									// Type was ignored - add a comment explaining why
-									insertions = append(insertions, insertion{
-										pos:       returnStmt.Expression.Pos(),
-										text:      "/* validation skipped: " + result.IgnoredReason + " */",
-										sourcePos: -1,
-									})
-								} else if result.Code != "" {
-									// Get expression positions
-									exprStart := returnStmt.Expression.Pos()
-									exprEnd := returnStmt.Expression.End()
+								// Get the source position of the return type annotation
+								returnTypePos := ctx.returnType.Pos()
 
-									// Get the source position of the return type annotation
-									returnTypePos := ctx.returnType.Pos()
+								// Get type name for the check function
+								typeName := getTypeNameWithChecker(actualType, c)
+								if typeName == "" {
+									typeName = "value"
+								}
 
-									if ctx.isAsync {
-										// Async function: Promise is automatically unwrapped
-										// return expr; -> return validator(expr, "return value");
+								if shouldUseReusableCheck(actualType, actualTypeNode) {
+									// Use reusable check function (type is used more than once)
+									checkFuncName := getOrCreateCheckFunction(actualType, actualTypeNode, typeName)
+									if checkFuncName != "" {
+										// Generate expression-compatible pattern using ternary:
+										// return ((_e = _check_X(expr)) !== null ? (() => { throw new TypeError(_e.replace(/%n/g, "return value")); })() : expr);
+										if ctx.isAsync {
+											// Async function: Promise is automatically unwrapped
+											insertions = append(insertions, insertion{
+												pos:       exprStart,
+												text:      fmt.Sprintf(`((_e = %s(`, checkFuncName),
+												sourcePos: returnTypePos,
+											})
+											insertions = append(insertions, insertion{
+												pos:       exprEnd,
+												text:      `)) !== null ? (() => { throw new TypeError(_e.replace(/%n/g, "return value")); })() : ` + text[exprStart:exprEnd] + `)`,
+												sourcePos: returnTypePos,
+											})
+										} else if isPromiseType(returnType, c) {
+											// Sync function returning Promise: add .then()
+											insertions = append(insertions, insertion{
+												pos:       exprStart,
+												text:      "(",
+												sourcePos: returnTypePos,
+											})
+											insertions = append(insertions, insertion{
+												pos:       exprEnd,
+												text:      fmt.Sprintf(`).then(_v => ((_e = %s(_v)) !== null ? (() => { throw new TypeError(_e.replace(/%%n/g, "return value")); })() : _v))`, checkFuncName),
+												sourcePos: returnTypePos,
+											})
+										} else {
+											// Normal sync function
+											insertions = append(insertions, insertion{
+												pos:       exprStart,
+												text:      fmt.Sprintf(`((_e = %s(`, checkFuncName),
+												sourcePos: returnTypePos,
+											})
+											insertions = append(insertions, insertion{
+												pos:       exprEnd,
+												text:      `)) !== null ? (() => { throw new TypeError(_e.replace(/%n/g, "return value")); })() : ` + text[exprStart:exprEnd] + `)`,
+												sourcePos: returnTypePos,
+											})
+										}
+									}
+								} else {
+									// Inline validation
+									result := gen.GenerateValidatorFromNode(actualType, actualTypeNode, "")
+
+									if result.Ignored {
+										// Type was ignored - add a comment explaining why
 										insertions = append(insertions, insertion{
-											pos:       exprStart,
-											text:      result.Code + "(",
-											sourcePos: returnTypePos,
+											pos:       returnStmt.Expression.Pos(),
+											text:      "/* validation skipped: " + result.IgnoredReason + " */",
+											sourcePos: -1,
 										})
-										insertions = append(insertions, insertion{
-											pos:       exprEnd,
-											text:      `, "return value")`,
-											sourcePos: returnTypePos,
-										})
-									} else if isPromiseType(returnType, c) {
-										// Sync function returning Promise: add .then()
-										// return expr; -> return (expr).then(_v => validator(_v, "return value"));
-										insertions = append(insertions, insertion{
-											pos:       exprStart,
-											text:      "(",
-											sourcePos: returnTypePos,
-										})
-										insertions = append(insertions, insertion{
-											pos:       exprEnd,
-											text:      ").then(_v => " + result.Code + `(_v, "return value"))`,
-											sourcePos: returnTypePos,
-										})
-									} else {
-										// Normal sync function
-										// return expr; -> return validator(expr, "return value");
-										insertions = append(insertions, insertion{
-											pos:       exprStart,
-											text:      result.Code + "(",
-											sourcePos: returnTypePos,
-										})
-										insertions = append(insertions, insertion{
-											pos:       exprEnd,
-											text:      `, "return value")`,
-											sourcePos: returnTypePos,
-										})
+									} else if result.Code != "" {
+										if ctx.isAsync {
+											// Async function: Promise is automatically unwrapped
+											// return expr; -> return validator(expr, "return value");
+											insertions = append(insertions, insertion{
+												pos:       exprStart,
+												text:      result.Code + "(",
+												sourcePos: returnTypePos,
+											})
+											insertions = append(insertions, insertion{
+												pos:       exprEnd,
+												text:      `, "return value")`,
+												sourcePos: returnTypePos,
+											})
+										} else if isPromiseType(returnType, c) {
+											// Sync function returning Promise: add .then()
+											// return expr; -> return (expr).then(_v => validator(_v, "return value"));
+											insertions = append(insertions, insertion{
+												pos:       exprStart,
+												text:      "(",
+												sourcePos: returnTypePos,
+											})
+											insertions = append(insertions, insertion{
+												pos:       exprEnd,
+												text:      ").then(_v => " + result.Code + `(_v, "return value"))`,
+												sourcePos: returnTypePos,
+											})
+										} else {
+											// Normal sync function
+											// return expr; -> return validator(expr, "return value");
+											insertions = append(insertions, insertion{
+												pos:       exprStart,
+												text:      result.Code + "(",
+												sourcePos: returnTypePos,
+											})
+											insertions = append(insertions, insertion{
+												pos:       exprEnd,
+												text:      `, "return value")`,
+												sourcePos: returnTypePos,
+											})
+										}
 									}
 								}
 							}
@@ -973,6 +1065,75 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 				}
 			}
 
+			// Handle dirty values passed to external functions
+			// The analyse pass identified arguments that need validation
+			if callExpr.Arguments != nil {
+				// Get current function context for project analysis checks
+				var currentFuncKey string
+				if len(funcStack) > 0 {
+					currentFuncKey = funcStack[len(funcStack)-1].funcKey
+				}
+
+				callPos := node.Pos()
+				for argIdx, arg := range callExpr.Arguments.Nodes {
+					key := fmt.Sprintf("%d:%d", callPos, argIdx)
+					dirtyArg, needsValidation := dirtyExternalArgs[key]
+					if !needsValidation {
+						continue
+					}
+
+					// Skip if project analysis knows this variable is validated
+					// (e.g., assigned from a function that validates its return)
+					if currentFuncKey != "" && isValidatedVariable(config, currentFuncKey, arg, arg.Pos()) {
+						continue
+					}
+
+					// Get type info for the validator
+					argType := dirtyArg.Type
+					if argType == nil {
+						continue
+					}
+
+					// Get type name for the check function
+					typeName := getTypeNameWithChecker(argType, c)
+					if typeName == "" {
+						typeName = dirtyArg.VarName
+					}
+
+					argText := text[arg.Pos():arg.End()]
+
+					// Check if we should use a reusable check function
+					typeKey := c.TypeToString(argType)
+					if checkTypeUsage[typeKey] > 1 {
+						// Use reusable check function
+						checkFuncName := getOrCreateCheckFunction(argType, nil, typeName)
+						if checkFuncName != "" {
+							// Wrap the argument: ((_e = _check_X(arg)) !== null ? (() => { throw ... })() : arg)
+							escapedName := escapeString(argText)
+							insertions = append(insertions, insertion{
+								pos:       arg.Pos(),
+								text:      fmt.Sprintf(`((_e = %s(%s)) !== null ? (() => { throw new TypeError(_e.replace(/%%n/g, "%s")); })() : %s)`, checkFuncName, argText, escapedName, argText),
+								sourcePos: arg.Pos(),
+								skipTo:    arg.End(),
+							})
+							continue
+						}
+					}
+
+					// Use inline validation
+					result := gen.GenerateValidator(argType, "")
+					if result.Code != "" && !result.Ignored {
+						// Wrap: validator(arg, "argName")
+						insertions = append(insertions, insertion{
+							pos:       arg.Pos(),
+							text:      result.Code + "(" + argText + `, "` + escapeString(argText) + `")`,
+							sourcePos: arg.Pos(),
+							skipTo:    arg.End(),
+						})
+					}
+				}
+			}
+
 		case ast.KindVariableDeclaration:
 			varDecl := node.AsVariableDeclaration()
 			if varDecl != nil {
@@ -1038,6 +1199,53 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 										return false
 									}
 								}
+							}
+						}
+					}
+				}
+
+				// Handle unvalidated call results: const x = externalFunc()
+				// These are calls to functions that don't validate their returns
+				// Adds validation after the assignment: const x = externalFunc(); if ((_e = _check_X(x)) !== null) throw ...
+				if config.ProjectAnalysis != nil && varDecl.Initializer != nil && varDecl.Initializer.Kind == ast.KindCallExpression {
+					callPos := varDecl.Initializer.Pos()
+					if unvalidatedCall, exists := config.ProjectAnalysis.UnvalidatedCallResults[callPos]; exists {
+						// Get type info
+						targetType := unvalidatedCall.Type
+						typeNode := unvalidatedCall.TypeNode
+
+						if targetType != nil && !shouldSkipType(targetType) && !shouldSkipComplexType(targetType, c) {
+							callStart := varDecl.Initializer.Pos()
+
+							// Get type name for the check function
+							typeName := getTypeNameWithChecker(targetType, c)
+							if typeName == "" {
+								typeName = "value"
+							}
+
+							varName := unvalidatedCall.VarName
+
+							// Use hoisted check function for the validation
+							// Insert after the declaration: ; if ((_e = _check_X(varName)) !== null) throw ...
+							// Source map points to the call expression so errors show the external call
+							checkFuncName := getOrCreateCheckFunction(targetType, typeNode, typeName)
+							if checkFuncName != "" {
+								// Insert right after the variable declaration ends
+								// Need semicolon before the if statement
+								insertPos := node.End()
+
+								insertions = append(insertions, insertion{
+									pos:       insertPos,
+									text:      fmt.Sprintf(`; if ((_e = %s(%s)) !== null) throw new TypeError(_e.replace(/%%n/g, "%s"))`, checkFuncName, varName, varName),
+									sourcePos: callStart,
+								})
+
+								// Mark as validated in context
+								if ctx != nil && varDecl.Name().Kind == ast.KindIdentifier {
+									ctx.validated[varDecl.Name().AsIdentifier().Text] = append(ctx.validated[varDecl.Name().AsIdentifier().Text], targetType)
+								}
+
+								return true
 							}
 						}
 					}
@@ -1248,100 +1456,6 @@ func shouldSkipComplexType(t *checker.Type, c *checker.Checker) bool {
 	// Skip checking union/intersection members and type arguments to avoid
 	// expensive checker calls that can hang on complex types.
 	// We'll let codegen handle these cases.
-	return false
-}
-
-// containsTypeParameter recursively checks if a type contains any type parameters.
-// Types with unresolved type parameters cannot be validated at runtime.
-func containsTypeParameter(t *checker.Type, c *checker.Checker, depth int) bool {
-	if depth > 10 {
-		// Prevent infinite recursion
-		return false
-	}
-
-	flags := checker.Type_flags(t)
-
-	// Direct type parameter
-	if flags&checker.TypeFlagsTypeParameter != 0 {
-		return true
-	}
-
-	// Check union members
-	if flags&checker.TypeFlagsUnion != 0 {
-		for _, m := range t.Types() {
-			if containsTypeParameter(m, c, depth+1) {
-				return true
-			}
-		}
-	}
-
-	// Check intersection members
-	if flags&checker.TypeFlagsIntersection != 0 {
-		for _, m := range t.Types() {
-			if containsTypeParameter(m, c, depth+1) {
-				return true
-			}
-		}
-	}
-
-	// Check type arguments of generic instantiations (e.g., NullToUndefined<T>)
-	// Only type references have type arguments, not all object types
-	if flags&checker.TypeFlagsObject != 0 {
-		objFlags := checker.Type_objectFlags(t)
-		if objFlags&checker.ObjectFlagsReference != 0 {
-			typeArgs := checker.Checker_getTypeArguments(c, t)
-			for _, arg := range typeArgs {
-				if containsTypeParameter(arg, c, depth+1) {
-					return true
-				}
-			}
-		}
-	}
-
-	return false
-}
-
-// isTypeComplex checks if a type has too many constituents to validate efficiently.
-// It recursively counts properties and union members up to a limit.
-func isTypeComplex(t *checker.Type, c *checker.Checker, depth int) bool {
-	if depth > 5 {
-		// Don't recurse too deep when checking complexity
-		return false
-	}
-
-	flags := checker.Type_flags(t)
-
-	// Check union types
-	if flags&checker.TypeFlagsUnion != 0 {
-		members := t.Types()
-		if len(members) > MaxTypeComplexity {
-			return true
-		}
-		// Check if any member is complex
-		for _, m := range members {
-			if isTypeComplex(m, c, depth+1) {
-				return true
-			}
-		}
-	}
-
-	// Check intersection types
-	if flags&checker.TypeFlagsIntersection != 0 {
-		members := t.Types()
-		if len(members) > MaxTypeComplexity {
-			return true
-		}
-		for _, m := range members {
-			if isTypeComplex(m, c, depth+1) {
-				return true
-			}
-		}
-	}
-
-	// For object types, we don't call getPropertiesOfType as it can hang
-	// on complex recursive types. Instead, we just accept object types
-	// and let the codegen handle any complexity.
-
 	return false
 }
 
@@ -1854,5 +1968,161 @@ type typeInfo struct {
 	t        *checker.Type
 	typeNode *ast.Node
 	typeName string
+}
+
+// getFunctionKey generates a key for looking up a function in the project analysis.
+func getFunctionKey(sourceFile *ast.SourceFile, fn *functionLike) string {
+	fileName := sourceFile.FileName()
+	name := getFunctionName(fn)
+	if name != "" {
+		return fmt.Sprintf("%s:%s", fileName, name)
+	}
+	return fmt.Sprintf("%s:anonymous@%d", fileName, fn.node.Pos())
+}
+
+// getFunctionName extracts the name from a function-like node.
+func getFunctionName(fn *functionLike) string {
+	switch fn.node.Kind {
+	case ast.KindFunctionDeclaration:
+		fd := fn.node.AsFunctionDeclaration()
+		if fd.Name() != nil {
+			return fd.Name().Text()
+		}
+	case ast.KindFunctionExpression:
+		fe := fn.node.AsFunctionExpression()
+		if fe.Name() != nil {
+			return fe.Name().Text()
+		}
+	case ast.KindMethodDeclaration:
+		md := fn.node.AsMethodDeclaration()
+		if md.Name() != nil {
+			return md.Name().Text()
+		}
+	}
+	return ""
+}
+
+// canSkipParamValidation checks if parameter validation can be skipped based on project analysis.
+func canSkipParamValidation(config Config, funcKey string, paramIndex int) bool {
+	if config.ProjectAnalysis == nil {
+		return false
+	}
+	funcInfo := config.ProjectAnalysis.GetFunctionInfo(funcKey)
+	if funcInfo == nil {
+		return false
+	}
+	if paramIndex >= len(funcInfo.CanSkipParamValidation) {
+		return false
+	}
+	return funcInfo.CanSkipParamValidation[paramIndex]
+}
+
+// isReturnFromValidatedFunction checks if an expression is a call to a function that validates its return.
+func isReturnFromValidatedFunction(config Config, c *checker.Checker, node *ast.Node) bool {
+	if config.ProjectAnalysis == nil || c == nil || node == nil {
+		return false
+	}
+	if node.Kind != ast.KindCallExpression {
+		return false
+	}
+
+	callExpr := node.AsCallExpression()
+	if callExpr == nil {
+		return false
+	}
+
+	// Resolve the callee type
+	calleeType := checker.Checker_GetTypeAtLocation(c, callExpr.Expression)
+	if calleeType == nil {
+		return false
+	}
+
+	// Get the callee symbol
+	calleeSym := checker.Type_symbol(calleeType)
+	if calleeSym == nil {
+		return false
+	}
+
+	// Try to find the function in our project analysis
+	for _, decl := range calleeSym.Declarations {
+		sf := ast.GetSourceFileOfNode(decl)
+		if sf == nil {
+			continue
+		}
+		declFileName := sf.FileName()
+
+		// Skip external files
+		if strings.Contains(declFileName, "node_modules") || strings.HasSuffix(declFileName, ".d.ts") {
+			continue
+		}
+
+		// Try to find the function key
+		funcName := ""
+		if calleeSym.Name != "" {
+			funcName = calleeSym.Name
+		}
+
+		// Try different key formats
+		possibleKey := fmt.Sprintf("%s:%s", declFileName, funcName)
+		if funcInfo := config.ProjectAnalysis.GetFunctionInfo(possibleKey); funcInfo != nil {
+			if funcInfo.ValidatesReturn {
+				return true
+			}
+		}
+
+		// Also try with position
+		posKey := fmt.Sprintf("%s:anonymous@%d", declFileName, decl.Pos())
+		if funcInfo := config.ProjectAnalysis.GetFunctionInfo(posKey); funcInfo != nil {
+			if funcInfo.ValidatesReturn {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// isValidatedVariable checks if an expression is a variable that's been validated in the current function.
+// This uses project analysis's ValidatedVariables and checks dirty tracking.
+func isValidatedVariable(config Config, funcKey string, node *ast.Node, nodePos int) bool {
+	if config.ProjectAnalysis == nil || node == nil {
+		return false
+	}
+
+	// Get variable name from the expression
+	varName := getRootIdentifierName(node)
+	if varName == "" {
+		return false
+	}
+
+	// Use project analysis's exported function which does dirty checking
+	analyseConfig := analyse.Config{
+		PureFunctions: config.PureFunctions,
+	}
+	result := analyse.IsVariableValidAtPosition(config.ProjectAnalysis, funcKey, varName, nodePos, analyseConfig)
+	debugf("[DEBUG] isValidatedVariable: funcKey=%s varName=%s pos=%d result=%v\n", funcKey, varName, nodePos, result)
+	return result
+}
+
+// getRootIdentifierName extracts the root identifier name from an expression.
+func getRootIdentifierName(node *ast.Node) string {
+	if node == nil {
+		return ""
+	}
+	switch node.Kind {
+	case ast.KindIdentifier:
+		return node.AsIdentifier().Text
+	case ast.KindPropertyAccessExpression:
+		pae := node.AsPropertyAccessExpression()
+		if pae != nil {
+			return getRootIdentifierName(pae.Expression)
+		}
+	case ast.KindElementAccessExpression:
+		eae := node.AsElementAccessExpression()
+		if eae != nil {
+			return getRootIdentifierName(eae.Expression)
+		}
+	}
+	return ""
 }
 

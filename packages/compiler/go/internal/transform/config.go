@@ -1,6 +1,10 @@
 package transform
 
-import "regexp"
+import (
+	"regexp"
+
+	"github.com/elliots/typical/packages/compiler/internal/analyse"
+)
 
 // Config specifies which validations to apply during transformation.
 type Config struct {
@@ -44,6 +48,10 @@ type Config struct {
 	// are trusted to be valid according to their type annotation.
 	// Example: "db.loadUser" -> const user: User = db.loadUser(id) -> user is valid
 	TrustedFunctions []*regexp.Regexp
+
+	// ProjectAnalysis contains cross-file analysis results for validation optimisation.
+	// When set, the transformer can skip redundant validation based on call graph analysis.
+	ProjectAnalysis *analyse.ProjectAnalysis
 }
 
 // DefaultMaxGeneratedFunctions is the default limit for generated helper functions.

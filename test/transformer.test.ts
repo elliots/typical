@@ -5,10 +5,10 @@ import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 
 // delete existing test output dir
-rmSync("test/output", { recursive: true, force: true });
+rmSync("test/output/transformer", { recursive: true, force: true });
 
 // Ensure test/output and test/fixtures directories exist
-mkdirSync("test/output", { recursive: true });
+mkdirSync("test/output/transformer", { recursive: true });
 mkdirSync("test/fixtures", { recursive: true });
 
 // Test fixtures - write before transformer starts
@@ -54,7 +54,7 @@ for (const fixture of Object.values(fixtures)) {
  */
 function writeTestOutput(testName: string, code: string) {
   const safeName = testName.replace(/[^a-zA-Z0-9]/g, "_");
-  writeFileSync(`test/output/${safeName}.ts`, code);
+  writeFileSync(`test/output/transformer/${safeName}.ts`, code);
 }
 
 void describe("TypicalTransformer v2", () => {

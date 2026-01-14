@@ -15,6 +15,7 @@ import (
 	"github.com/microsoft/typescript-go/shim/lsp/lsproto"
 	"github.com/microsoft/typescript-go/shim/project"
 
+	"github.com/elliots/typical/packages/compiler/internal/analyse"
 	"github.com/elliots/typical/packages/compiler/internal/transform"
 )
 
@@ -173,6 +174,21 @@ func (a *API) TransformSource(fileName, source string, options *TransformOptions
 	if options.MaxGeneratedFunctions > 0 {
 		config.MaxGeneratedFunctions = options.MaxGeneratedFunctions
 	}
+
+	// Run project analysis even for single-file transforms
+	// This enables cross-function optimisations within the file
+	analyseConfig := analyse.Config{
+		ValidateParameters:     config.ValidateParameters,
+		ValidateReturns:        config.ValidateReturns,
+		ValidateCasts:          config.ValidateCasts,
+		TransformJSONParse:     config.TransformJSONParse,
+		TransformJSONStringify: config.TransformJSONStringify,
+		IgnoreTypes:            config.IgnoreTypes,
+		PureFunctions:          config.PureFunctions,
+	}
+	projectAnalysis := analyse.AnalyseProject(program, checker, analyseConfig)
+	config.ProjectAnalysis = projectAnalysis
+	debugf("[WASM DEBUG] Project analysis complete: %d functions found\n", len(projectAnalysis.CallGraph))
 
 	code, sourceMap, err := transform.TransformFileWithSourceMapAndError(sourceFile, checker, program, config)
 	if err != nil {

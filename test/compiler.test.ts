@@ -610,11 +610,12 @@ void describe("Optional Parameters", () => {
         return target(...input);
       }
     `,
-    expectStrings: ["if (opt !== undefined)"], // Generated in 'target'
+    // Cross-project analysis skips opt validation in target since run validates the tuple
+    expectStrings: ["opt: validated by callers"],
     cases: [
       { input: ["A"], result: "ANone" },
       { input: ["A", "B"], result: "AB" },
-      { input: ["A", 123], error: "to be undefined | string" }, // Validation on 'opt' inside target
+      { input: ["A", 123], error: "to be undefined | string" }, // Validated in run's tuple check
     ],
   });
 });
@@ -1306,6 +1307,53 @@ void describe("Playground Examples", () => {
       },
       { input: JSON.stringify({ name: "Alice", email: "not@quite" }), error: "email" },
     ],
+  });
+});
+
+// =============================================================================
+// DESTRUCTURING ASSIGNMENTS
+// =============================================================================
+
+void describe("Destructuring Assignments", () => {
+  registerTestCase({
+    name: "object destructuring from function call",
+    source: `
+      interface User { name: string; age: number }
+      function getUser(): User { return { name: "Alice", age: 30 } }
+      export function run(input: any): string {
+        const { name, age } = getUser();
+        return name + age;
+      }
+    `,
+    // Should not panic when analysing destructuring patterns
+    cases: [{ input: null, result: "Alice30" }],
+  });
+
+  registerTestCase({
+    name: "array destructuring from function call",
+    source: `
+      function getPair(): [string, number] { return ["hello", 42] }
+      export function run(input: any): string {
+        const [str, num] = getPair();
+        return str + num;
+      }
+    `,
+    // Should not panic when analysing array destructuring patterns
+    cases: [{ input: null, result: "hello42" }],
+  });
+
+  registerTestCase({
+    name: "nested destructuring from function call",
+    source: `
+      interface Nested { user: { name: string } }
+      function getNested(): Nested { return { user: { name: "Bob" } } }
+      export function run(input: any): string {
+        const { user: { name } } = getNested();
+        return name;
+      }
+    `,
+    // Should not panic when analysing nested destructuring patterns
+    cases: [{ input: null, result: "Bob" }],
   });
 });
 

@@ -32,8 +32,9 @@ type APIOptions struct {
 }
 
 type projectInfo struct {
-	path    tspath.Path
-	project *project.Project
+	path     tspath.Path
+	project  *project.Project
+	analysis *analyse.ProjectAnalysis // cached project analysis
 }
 
 type API struct {
@@ -105,7 +106,7 @@ func (a *API) TransformFile(projectId, fileName, content string, ignoreTypes []s
 	debugf("[DEBUG] TransformFile called: project=%s file=%s contentLen=%d ignoreTypes=%v maxFuncs=%d\n", projectId, fileName, len(content), ignoreTypes, maxGeneratedFunctions)
 
 	a.mu.Lock()
-	_, ok := a.projects[projectId]
+	projInfo, ok := a.projects[projectId]
 	a.mu.Unlock()
 
 	if !ok {
@@ -127,6 +128,10 @@ func (a *API) TransformFile(projectId, fileName, content string, ignoreTypes []s
 		a.fileVersions[fileName]++
 		version := a.fileVersions[fileName]
 		isOpen := a.openFiles[fileName]
+
+		// Invalidate project analysis cache when any file changes
+		projInfo.analysis = nil
+		debugf("[DEBUG] Invalidated project analysis due to file change\n")
 		a.mu.Unlock()
 
 		if !isOpen {
@@ -180,6 +185,28 @@ func (a *API) TransformFile(projectId, fileName, content string, ignoreTypes []s
 	if maxGeneratedFunctions > 0 {
 		config.MaxGeneratedFunctions = maxGeneratedFunctions
 	}
+
+	// Lazy project analysis: compute if not cached
+	a.mu.Lock()
+	if projInfo.analysis == nil {
+		debugf("[DEBUG] Computing project analysis...\n")
+		analyseConfig := analyse.Config{
+			ValidateParameters:     config.ValidateParameters,
+			ValidateReturns:        config.ValidateReturns,
+			ValidateCasts:          config.ValidateCasts,
+			TransformJSONParse:     config.TransformJSONParse,
+			TransformJSONStringify: config.TransformJSONStringify,
+			IgnoreTypes:            config.IgnoreTypes,
+			PureFunctions:          config.PureFunctions,
+		}
+		projInfo.analysis = analyse.AnalyseProject(program, checker, analyseConfig)
+		debugf("[DEBUG] Project analysis complete: %d functions found\n", len(projInfo.analysis.CallGraph))
+	}
+	projectAnalysis := projInfo.analysis
+	a.mu.Unlock()
+
+	// Pass project analysis to transform config
+	config.ProjectAnalysis = projectAnalysis
 
 	// Transform the file with source map
 	debugf("[DEBUG] Starting transform...\n")
@@ -253,6 +280,21 @@ func (a *API) TransformSource(fileName, source string, ignoreTypes []string, max
 	if maxGeneratedFunctions > 0 {
 		config.MaxGeneratedFunctions = maxGeneratedFunctions
 	}
+
+	// Run project analysis even for single-file transforms
+	// This enables cross-function optimisations within the file
+	analyseConfig := analyse.Config{
+		ValidateParameters:     config.ValidateParameters,
+		ValidateReturns:        config.ValidateReturns,
+		ValidateCasts:          config.ValidateCasts,
+		TransformJSONParse:     config.TransformJSONParse,
+		TransformJSONStringify: config.TransformJSONStringify,
+		IgnoreTypes:            config.IgnoreTypes,
+		PureFunctions:          config.PureFunctions,
+	}
+	projectAnalysis := analyse.AnalyseProject(program, checker, analyseConfig)
+	config.ProjectAnalysis = projectAnalysis
+	debugf("[DEBUG] Project analysis complete: %d functions found\n", len(projectAnalysis.CallGraph))
 
 	code, sourceMap, err := transform.TransformFileWithSourceMapAndError(sourceFile, checker, program, config)
 	if err != nil {

@@ -78,7 +78,7 @@ export const testNestedUser: NestedUser = {
         country: "US-IL",
         zip: "60601",
       },
-    }
+    },
   },
 };
 
