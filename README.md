@@ -482,3 +482,10 @@ Runtime validation performance comparing Typical vs Zod vs no validation:
 
 - **vs Nothing**: Speed relative to no validation or filtering (1.0x = same speed)
 - **vs Zod**: Speed relative to Zod (1.0x = same speed)
+
+---
+
+## Changelog
+
+<!-- CHANGELOG_START -->
+<!-- CHANGELOG_END -->

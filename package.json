@@ -81,6 +81,12 @@
   "peerDependencies": {
     "typescript": "^5.0.0"
   },
+  "simple-git-hooks": {
+    "pre-commit": "pnpm nano-staged"
+  },
+  "nano-staged": {
+    "*.{js,ts,tsx,jsx,json,md,html,css}": "oxfmt"
+  },
   "engines": {
     "pnpm": ">=10"
   },
@@ -89,11 +95,5 @@
     "onlyBuiltDependencies": [
       "deasync"
     ]
-  },
-  "simple-git-hooks": {
-    "pre-commit": "pnpm nano-staged"
-  },
-  "nano-staged": {
-    "*.{js,ts,tsx,jsx,json,md,html,css}": "oxfmt"
   }
 }

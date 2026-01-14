@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 
 import { readFileSync, writeFileSync, existsSync } from "fs";
-import { execSync } from "child_process";
+import { execSync, spawnSync } from "child_process";
 import { createInterface } from "readline";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { tmpdir } from "os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
+const readmePath = resolve(rootDir, "README.md");
 
 // Platform-specific compiler packages
 const platformPackages = [
@@ -79,6 +81,77 @@ function incrementVersion(version, type) {
     default:
       return `${major}.${minor}.${patch + 1}`;
   }
+}
+
+/**
+ * Open the user's editor to write release notes.
+ * Returns the content written by the user.
+ */
+function openEditorForReleaseNotes(version) {
+  const tempFile = resolve(tmpdir(), `typical-release-${version}.md`);
+  const template = `# Release notes for v${version}
+
+# Write your release notes above this line.
+# Lines starting with # will be removed.
+# Save and close the editor when done.
+`;
+  writeFileSync(tempFile, template);
+
+  const editor = process.env.EDITOR || process.env.VISUAL || "nano";
+  const result = spawnSync(editor, [tempFile], { stdio: "inherit" });
+
+  if (result.status !== 0) {
+    throw new Error(`Editor exited with status ${result.status}`);
+  }
+
+  const content = readFileSync(tempFile, "utf-8");
+  // Remove comment lines and trim
+  const notes = content
+    .split("\n")
+    .filter((line) => !line.startsWith("#"))
+    .join("\n")
+    .trim();
+
+  return notes;
+}
+
+/**
+ * Add a changelog entry to the README.md file.
+ */
+function addChangelogEntry(version, notes) {
+  const readme = readFileSync(readmePath, "utf-8");
+  const date = new Date().toISOString().split("T")[0];
+
+  const entry = `### v${version} (${date})
+
+${notes}
+
+`;
+
+  const marker = "<!-- CHANGELOG_START -->";
+  if (!readme.includes(marker)) {
+    console.warn("Warning: CHANGELOG_START marker not found in README.md");
+    return;
+  }
+
+  const updated = readme.replace(marker, `${marker}\n\n${entry}`);
+  writeFileSync(readmePath, updated);
+  console.log(`  Added changelog entry for v${version}`);
+}
+
+/**
+ * Create a GitHub release using the gh CLI.
+ */
+function createGitHubRelease(version, notes, isPrerelease) {
+  const tag = `v${version}`;
+  const title = `v${version}`;
+
+  // Write notes to temp file for gh cli
+  const notesFile = resolve(tmpdir(), `typical-release-notes-${version}.md`);
+  writeFileSync(notesFile, notes);
+
+  const prereleaseFlag = isPrerelease ? " --prerelease" : "";
+  exec(`gh release create ${tag} --title "${title}" --notes-file "${notesFile}"${prereleaseFlag}`);
 }
 
 async function main() {
@@ -269,6 +342,28 @@ async function main() {
     }
   }
 
+  // Get release notes
+  console.log("\n==> Release notes");
+  const wantNotes = await prompt("Add release notes? [Y/n]: ");
+  let releaseNotes = "";
+
+  if (wantNotes.toLowerCase() !== "n") {
+    console.log("\nOpening editor for release notes...");
+    releaseNotes = openEditorForReleaseNotes(newVersion);
+
+    if (releaseNotes) {
+      console.log("\nRelease notes:");
+      console.log("---");
+      console.log(releaseNotes);
+      console.log("---");
+
+      // Add to README changelog
+      addChangelogEntry(newVersion, releaseNotes);
+    } else {
+      console.log("No release notes provided.");
+    }
+  }
+
   // Create git tag
   const createTag = await prompt(`\nCreate git tag v${newVersion}? [y/N]: `);
   if (createTag.toLowerCase() === "y") {
@@ -279,6 +374,16 @@ async function main() {
     const pushTag = await prompt("Push tag to origin? [y/N]: ");
     if (pushTag.toLowerCase() === "y") {
       exec("git push && git push --tags");
+
+      // Create GitHub release if we have notes and pushed
+      if (releaseNotes) {
+        const createRelease = await prompt("\nCreate GitHub release? [Y/n]: ");
+        if (createRelease.toLowerCase() !== "n") {
+          const isPrerelease = npmTag !== "latest";
+          console.log("\n==> Creating GitHub release...");
+          createGitHubRelease(newVersion, releaseNotes, isPrerelease);
+        }
+      }
     }
   }
 
