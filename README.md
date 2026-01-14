@@ -488,4 +488,12 @@ Runtime validation performance comparing Typical vs Zod vs no validation:
 ## Changelog
 
 <!-- CHANGELOG_START -->
+
+### v0.3.0 (2026-01-14)
+
+- Build call graph across whole project to avoid validating already-validated data
+- Source map vis in the playround
+- Add 'never' support, the property must not exist
+- Fix: Node 24
+
 <!-- CHANGELOG_END -->

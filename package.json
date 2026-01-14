@@ -1,6 +1,6 @@
 {
   "name": "@elliots/typical",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "description": "Runtime safe TypeScript transformer using typia",
   "keywords": [
     "runtime",

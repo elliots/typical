@@ -97,7 +97,7 @@ function openEditorForReleaseNotes(version) {
 `;
   writeFileSync(tempFile, template);
 
-  const editor = process.env.EDITOR || process.env.VISUAL || "nano";
+  const editor = "nano";
   const result = spawnSync(editor, [tempFile], { stdio: "inherit" });
 
   if (result.status !== 0) {
@@ -213,6 +213,30 @@ async function main() {
   if (confirm.toLowerCase() !== "y") {
     console.log("Aborted.");
     process.exit(0);
+  }
+
+  // Get release notes before publishing so README is updated (only for new versions)
+  let releaseNotes = "";
+  if (newVersion !== currentVersion) {
+    console.log("\n==> Release notes");
+    const wantNotes = await prompt("Add release notes? [Y/n]: ");
+
+    if (wantNotes.toLowerCase() !== "n") {
+      console.log("\nOpening editor for release notes...");
+      releaseNotes = openEditorForReleaseNotes(newVersion);
+
+      if (releaseNotes) {
+        console.log("\nRelease notes:");
+        console.log("---");
+        console.log(releaseNotes);
+        console.log("---");
+
+        // Add to README changelog before publishing
+        addChangelogEntry(newVersion, releaseNotes);
+      } else {
+        console.log("No release notes provided.");
+      }
+    }
   }
 
   // Build everything (Go binaries for all platforms + TypeScript packages)
@@ -339,28 +363,6 @@ async function main() {
         pkgJson[depType][depName] = value;
       }
       writeJson(pkgJsonPath, pkgJson);
-    }
-  }
-
-  // Get release notes
-  console.log("\n==> Release notes");
-  const wantNotes = await prompt("Add release notes? [Y/n]: ");
-  let releaseNotes = "";
-
-  if (wantNotes.toLowerCase() !== "n") {
-    console.log("\nOpening editor for release notes...");
-    releaseNotes = openEditorForReleaseNotes(newVersion);
-
-    if (releaseNotes) {
-      console.log("\nRelease notes:");
-      console.log("---");
-      console.log(releaseNotes);
-      console.log("---");
-
-      // Add to README changelog
-      addChangelogEntry(newVersion, releaseNotes);
-    } else {
-      console.log("No release notes provided.");
     }
   }
 
