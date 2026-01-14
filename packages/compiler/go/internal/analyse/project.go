@@ -619,17 +619,9 @@ func generateFunctionKey(fileName, name string, pos int) string {
 	return fmt.Sprintf("%s:anonymous@%d", fileName, pos)
 }
 
-// isPrimitiveType returns true if the type is a primitive type.
+// isPrimitiveType is a local alias for the exported IsPrimitiveType.
 func isPrimitiveType(t *checker.Type) bool {
-	if t == nil {
-		return false
-	}
-	flags := checker.Type_flags(t)
-	return flags&(checker.TypeFlagsString|checker.TypeFlagsNumber|checker.TypeFlagsBoolean|
-		checker.TypeFlagsBigInt|checker.TypeFlagsESSymbol|checker.TypeFlagsNull|
-		checker.TypeFlagsUndefined|checker.TypeFlagsVoid|
-		checker.TypeFlagsStringLiteral|checker.TypeFlagsNumberLiteral|checker.TypeFlagsBooleanLiteral|
-		checker.TypeFlagsBigIntLiteral) != 0
+	return IsPrimitiveType(t)
 }
 
 // analyseCallSites walks each function body to find call expressions and build the call graph.
@@ -863,26 +855,9 @@ func resolveCalleeKey(ctx *AnalysisContext, call *ast.CallExpression) string {
 	return ""
 }
 
-// getRootIdentifierName extracts the root identifier name from an expression.
+// getRootIdentifierName is a local alias for the exported GetRootIdentifierName.
 func getRootIdentifierName(node *ast.Node) string {
-	if node == nil {
-		return ""
-	}
-	switch node.Kind {
-	case ast.KindIdentifier:
-		return node.AsIdentifier().Text
-	case ast.KindPropertyAccessExpression:
-		pae := node.AsPropertyAccessExpression()
-		if pae != nil {
-			return getRootIdentifierName(pae.Expression)
-		}
-	case ast.KindElementAccessExpression:
-		eae := node.AsElementAccessExpression()
-		if eae != nil {
-			return getRootIdentifierName(eae.Expression)
-		}
-	}
-	return ""
+	return GetRootIdentifierName(node)
 }
 
 // analyseParameterMutations checks which parameters might be mutated in each function.
@@ -966,21 +941,9 @@ func analyseParameterMutations(ctx *AnalysisContext) {
 	}
 }
 
-// isAssignmentOperator returns true if the token is an assignment operator.
+// isAssignmentOperator is a local alias for the exported IsAssignmentOperator.
 func isAssignmentOperator(kind ast.Kind) bool {
-	switch kind {
-	case ast.KindEqualsToken,
-		ast.KindPlusEqualsToken,
-		ast.KindMinusEqualsToken,
-		ast.KindAsteriskEqualsToken,
-		ast.KindSlashEqualsToken,
-		ast.KindPercentEqualsToken,
-		ast.KindAmpersandEqualsToken,
-		ast.KindBarEqualsToken,
-		ast.KindCaretEqualsToken:
-		return true
-	}
-	return false
+	return IsAssignmentOperator(kind)
 }
 
 // isDirectIdentifier returns true if the node is exactly the given identifier (not a property access).
@@ -1006,32 +969,9 @@ func isPureCall(ctx *AnalysisContext, call *ast.CallExpression) bool {
 	return false
 }
 
-// getCallExpressionName gets the name of the called function.
+// getCallExpressionName is a local alias for the exported GetCallExpressionName.
 func getCallExpressionName(call *ast.CallExpression) string {
-	if call == nil || call.Expression == nil {
-		return ""
-	}
-	switch call.Expression.Kind {
-	case ast.KindIdentifier:
-		return call.Expression.AsIdentifier().Text
-	case ast.KindPropertyAccessExpression:
-		pae := call.Expression.AsPropertyAccessExpression()
-		if pae != nil {
-			objName := ""
-			if pae.Expression.Kind == ast.KindIdentifier {
-				objName = pae.Expression.AsIdentifier().Text
-			}
-			propName := ""
-			if pae.Name() != nil {
-				propName = pae.Name().Text()
-			}
-			if objName != "" && propName != "" {
-				return objName + "." + propName
-			}
-			return propName
-		}
-	}
-	return ""
+	return GetCallExpressionName(call)
 }
 
 // analyseParameterEscapes checks which parameters escape to external code.
@@ -1397,21 +1337,9 @@ func isJSONParseCall(call *ast.CallExpression) bool {
 	return nameNode != nil && nameNode.Text() == "parse"
 }
 
-// shouldSkipType checks if a type should be skipped for validation.
+// shouldSkipType is a local alias for the exported ShouldSkipType.
 func shouldSkipType(t *checker.Type) bool {
-	if t == nil {
-		return true
-	}
-	flags := checker.Type_flags(t)
-	return flags&checker.TypeFlagsAny != 0 ||
-		flags&checker.TypeFlagsUnknown != 0 ||
-		flags&checker.TypeFlagsNever != 0 ||
-		flags&checker.TypeFlagsVoid != 0 ||
-		flags&checker.TypeFlagsTypeParameter != 0 ||
-		flags&checker.TypeFlagsConditional != 0 ||
-		flags&checker.TypeFlagsIndexedAccess != 0 ||
-		flags&checker.TypeFlagsSubstitution != 0 ||
-		flags&checker.TypeFlagsIndex != 0
+	return ShouldSkipType(t)
 }
 
 // isVariableDirty checks if a variable has been modified between two positions.
@@ -1525,12 +1453,9 @@ func isVariableDirty(ctx *AnalysisContext, funcInfo *FunctionInfo, varName strin
 	return dirty
 }
 
-// isIdentifierNamed checks if a node is an identifier with the given name.
+// isIdentifierNamed is a local alias for the exported IsIdentifierNamed.
 func isIdentifierNamed(node *ast.Node, name string) bool {
-	if node == nil || node.Kind != ast.KindIdentifier {
-		return false
-	}
-	return node.AsIdentifier().Text == name
+	return IsIdentifierNamed(node, name)
 }
 
 // IsVariableValidAtPosition checks if a variable is validated and still valid at a given position.

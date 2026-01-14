@@ -141,15 +141,6 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 		return false
 	}
 
-	isPrimitiveType := func(t *checker.Type) bool {
-		flags := checker.Type_flags(t)
-		return flags&(checker.TypeFlagsString|checker.TypeFlagsNumber|checker.TypeFlagsBoolean|
-			checker.TypeFlagsBigInt|checker.TypeFlagsESSymbol|checker.TypeFlagsNull|
-			checker.TypeFlagsUndefined|checker.TypeFlagsVoid|
-			checker.TypeFlagsStringLiteral|checker.TypeFlagsNumberLiteral|checker.TypeFlagsBooleanLiteral|
-			checker.TypeFlagsBigIntLiteral) != 0
-	}
-
 	isFunctionType := func(t *checker.Type) bool {
 		callSigs := checker.Checker_getSignaturesOfType(c, t, checker.SignatureKindCall)
 		if len(callSigs) > 0 {
@@ -214,27 +205,10 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 		return ""
 	}
 
-	// shouldSkipType checks if a type should be skipped
-	shouldSkipType := func(t *checker.Type) bool {
-		if t == nil {
-			return true
-		}
-		flags := checker.Type_flags(t)
-		return flags&checker.TypeFlagsAny != 0 ||
-			flags&checker.TypeFlagsUnknown != 0 ||
-			flags&checker.TypeFlagsNever != 0 ||
-			flags&checker.TypeFlagsVoid != 0 ||
-			flags&checker.TypeFlagsTypeParameter != 0 ||
-			flags&checker.TypeFlagsConditional != 0 ||
-			flags&checker.TypeFlagsIndexedAccess != 0 ||
-			flags&checker.TypeFlagsSubstitution != 0 ||
-			flags&checker.TypeFlagsIndex != 0
-	}
-
 	// countNestedTypes recursively counts named types within properties
 	var countNestedTypes func(t *checker.Type, usage map[string]int, types map[string]TypeInfo)
 	countNestedTypes = func(t *checker.Type, usage map[string]int, types map[string]TypeInfo) {
-		if t == nil || shouldSkipType(t) {
+		if t == nil || ShouldSkipType(t) {
 			return
 		}
 
@@ -367,7 +341,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 		addValidationItem(node, typeNode, kind, name, t, false, "")
 
 		// Skip counting for hoisting if it's a builtin/primitive/function type
-		if isBuiltinClassType(t) || isPrimitiveType(t) || isFunctionType(t) {
+		if isBuiltinClassType(t) || IsPrimitiveType(t) || isFunctionType(t) {
 			return
 		}
 
@@ -436,7 +410,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 
 		addValidationItem(node, typeNode, kind, name, t, false, "")
 
-		if isBuiltinClassType(t) || isPrimitiveType(t) || isFunctionType(t) {
+		if isBuiltinClassType(t) || IsPrimitiveType(t) || isFunctionType(t) {
 			return
 		}
 
@@ -489,45 +463,6 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 				countNestedTypes(constituent, result.FilterTypeUsage, result.FilterTypeObjects)
 			}
 		}
-	}
-
-	// getParamName extracts parameter name from AST
-	getParamName := func(param *ast.ParameterDeclaration) string {
-		nameNode := param.Name()
-		if nameNode == nil {
-			return ""
-		}
-		if nameNode.Kind == ast.KindIdentifier {
-			return nameNode.AsIdentifier().Text
-		}
-		return ""
-	}
-
-	// getJSONMethodName checks if a call expression is JSON.parse or JSON.stringify
-	getJSONMethodName := func(callExpr *ast.CallExpression) (methodName string, isJSON bool) {
-		if callExpr.Expression.Kind != ast.KindPropertyAccessExpression {
-			return "", false
-		}
-		propAccess := callExpr.Expression.AsPropertyAccessExpression()
-		if propAccess == nil {
-			return "", false
-		}
-		if propAccess.Expression.Kind != ast.KindIdentifier {
-			return "", false
-		}
-		objName := propAccess.Expression.AsIdentifier().Text
-		if objName != "JSON" {
-			return "", false
-		}
-		nameNode := propAccess.Name()
-		if nameNode == nil {
-			return "", false
-		}
-		methodName = nameNode.Text()
-		if methodName == "parse" || methodName == "stringify" {
-			return methodName, true
-		}
-		return "", false
 	}
 
 	// functionLike provides a common interface for function-like nodes
@@ -614,28 +549,16 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 		return params
 	}
 
-	hasAsyncModifier := func(modifiers *ast.ModifierList) bool {
-		if modifiers == nil {
-			return false
-		}
-		for _, mod := range modifiers.Nodes {
-			if mod.Kind == ast.KindAsyncKeyword {
-				return true
-			}
-		}
-		return false
-	}
-
 	isFunctionAsync := func(f *functionLike) bool {
 		switch f.node.Kind {
 		case ast.KindFunctionDeclaration:
-			return hasAsyncModifier(f.node.AsFunctionDeclaration().Modifiers())
+			return HasAsyncModifier(f.node.AsFunctionDeclaration().Modifiers())
 		case ast.KindFunctionExpression:
-			return hasAsyncModifier(f.node.AsFunctionExpression().Modifiers())
+			return HasAsyncModifier(f.node.AsFunctionExpression().Modifiers())
 		case ast.KindArrowFunction:
-			return hasAsyncModifier(f.node.AsArrowFunction().Modifiers())
+			return HasAsyncModifier(f.node.AsArrowFunction().Modifiers())
 		case ast.KindMethodDeclaration:
-			return hasAsyncModifier(f.node.AsMethodDeclaration().Modifiers())
+			return HasAsyncModifier(f.node.AsMethodDeclaration().Modifiers())
 		}
 		return false
 	}
@@ -695,73 +618,8 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 	}
 	var funcStack []*funcContext
 
-	// Declare recursive functions first
-	var getRootIdentifier func(expr *ast.Node) string
-	var getEntityName func(expr *ast.Node) string
+	// Declare recursive function for validation type checking
 	var getValidatedType func(expr *ast.Node, validated map[string][]*checker.Type, targetType *checker.Type) (*checker.Type, bool)
-
-	// getRootIdentifier extracts the root variable name from an expression
-	getRootIdentifier = func(expr *ast.Node) string {
-		if expr == nil {
-			return ""
-		}
-		switch expr.Kind {
-		case ast.KindIdentifier:
-			return expr.AsIdentifier().Text
-		case ast.KindPropertyAccessExpression:
-			propAccess := expr.AsPropertyAccessExpression()
-			if propAccess != nil {
-				return getRootIdentifier(propAccess.Expression)
-			}
-		case ast.KindElementAccessExpression:
-			elemAccess := expr.AsElementAccessExpression()
-			if elemAccess != nil {
-				return getRootIdentifier(elemAccess.Expression)
-			}
-		}
-		return ""
-	}
-
-	// isIdentifierNamed checks if a node is an identifier with the given name
-	isIdentifierNamed := func(node *ast.Node, name string) bool {
-		if node == nil || node.Kind != ast.KindIdentifier {
-			return false
-		}
-		return node.AsIdentifier().Text == name
-	}
-
-	// getEntityName extracts full entity name for pure function matching (e.g. "console.log")
-	getEntityName = func(expr *ast.Node) string {
-		if expr == nil {
-			return ""
-		}
-		switch expr.Kind {
-		case ast.KindIdentifier:
-			return expr.AsIdentifier().Text
-		case ast.KindPropertyAccessExpression:
-			propAccess := expr.AsPropertyAccessExpression()
-			if propAccess == nil {
-				return ""
-			}
-			obj := getEntityName(propAccess.Expression)
-			nameNode := propAccess.Name()
-			if nameNode == nil {
-				return obj
-			}
-			prop := ""
-			if nameNode.Kind == ast.KindIdentifier {
-				prop = nameNode.AsIdentifier().Text
-			}
-			if obj != "" && prop != "" {
-				return obj + "." + prop
-			}
-			if prop != "" {
-				return prop
-			}
-			return obj
-		}
-		return ""
-	}
 
 	// getValidatedType checks if an expression is already validated
 	getValidatedType = func(expr *ast.Node, validated map[string][]*checker.Type, targetType *checker.Type) (*checker.Type, bool) {
@@ -840,16 +698,6 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 		return nil, false
 	}
 
-	// Helper to check if path is in node_modules
-	isNodeModulesPath := func(path string) bool {
-		return strings.Contains(path, "/node_modules/") || strings.Contains(path, "\\node_modules\\")
-	}
-
-	// Helper to check if path is a declaration file
-	isDeclarationFilePath := func(path string) bool {
-		return len(path) > 5 && path[len(path)-5:] == ".d.ts"
-	}
-
 	// Helper to get argument index in a call
 	getArgIndex := func(call *ast.CallExpression, arg *ast.Node) int {
 		if call.Arguments == nil {
@@ -881,7 +729,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 		if types, ok := funcCtx.validated[varName]; ok && len(types) > 0 {
 			validatedType = types[0]
 		}
-		varIsPrimitive := isPrimitiveType(validatedType)
+		varIsPrimitive := IsPrimitiveType(validatedType)
 
 		dirty := false
 		leaked := false
@@ -911,7 +759,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 						opKind == ast.KindSlashEqualsToken {
 
 						// Direct variable reassignment always dirties
-						if isIdentifierNamed(bin.Left, varName) {
+						if IsIdentifierNamed(bin.Left, varName) {
 							dirty = true
 							return false
 						}
@@ -921,14 +769,14 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 						// NOTE: We don't treat literals or validated properties as safe because they might
 						// not satisfy literal type constraints in discriminated unions
 						// e.g. type User = { name: 'elliot' } | { name: 'darlene' }
-						if !varIsPrimitive && getRootIdentifier(bin.Left) == varName {
+						if !varIsPrimitive && GetRootIdentifierName(bin.Left) == varName {
 							rhsIsValidated := false
 							if opKind == ast.KindEqualsToken {
 								// Check if RHS is JSON.parse (which gets filtered/validated against target type)
 								if bin.Right.Kind == ast.KindCallExpression {
 									callExpr := bin.Right.AsCallExpression()
 									if callExpr != nil {
-										methodName, isJSON := getJSONMethodName(callExpr)
+										methodName, isJSON := GetJSONMethodName(callExpr)
 										if isJSON && methodName == "parse" && config.TransformJSONParse {
 											rhsIsValidated = true
 										}
@@ -951,7 +799,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 				call := n.AsCallExpression()
 				if call != nil && call.Arguments != nil {
 					isPure := false
-					funcName := getEntityName(call.Expression)
+					funcName := GetEntityName(call.Expression)
 					if funcName != "" && len(config.PureFunctions) > 0 {
 						for _, re := range config.PureFunctions {
 							if re.MatchString(funcName) {
@@ -963,10 +811,10 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 
 					if !isPure {
 						for _, arg := range call.Arguments.Nodes {
-							root := getRootIdentifier(arg)
+							root := GetRootIdentifierName(arg)
 							if root == varName {
 								argType := checker.Checker_GetTypeAtLocation(c, arg)
-								if !isPrimitiveType(argType) {
+								if !IsPrimitiveType(argType) {
 									// Check if this is an internal call that we can analyse
 									isExternal := true
 									calleeMutates := true
@@ -982,7 +830,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 													if sf != nil {
 														declFileName := sf.FileName()
 														// Check if it's internal
-														if !isNodeModulesPath(declFileName) && !isDeclarationFilePath(declFileName) {
+														if !IsNodeModulesPath(declFileName) && !IsDeclarationFile(declFileName) {
 															isExternal = false
 															// Try to find the function info
 															calleeKey := declFileName + ":" + calleeSym.Name
@@ -1034,7 +882,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 				prefix := n.AsPrefixUnaryExpression()
 				if prefix != nil {
 					if prefix.Operator == ast.KindPlusPlusToken || prefix.Operator == ast.KindMinusMinusToken {
-						if isIdentifierNamed(prefix.Operand, varName) {
+						if IsIdentifierNamed(prefix.Operand, varName) {
 							dirty = true
 							return false
 						}
@@ -1045,7 +893,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 				postfix := n.AsPostfixUnaryExpression()
 				if postfix != nil {
 					if postfix.Operator == ast.KindPlusPlusToken || postfix.Operator == ast.KindMinusMinusToken {
-						if isIdentifierNamed(postfix.Operand, varName) {
+						if IsIdentifierNamed(postfix.Operand, varName) {
 							dirty = true
 							return false
 						}
@@ -1129,7 +977,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 				for _, param := range getFunctionParameters(fn) {
 					if param.Type != nil {
 						paramType := checker.Checker_getTypeFromTypeNode(c, param.Type)
-						paramName := getParamName(param)
+						paramName := GetParamName(param)
 						if paramName == "" {
 							paramName = "(destructured)"
 						}
@@ -1171,7 +1019,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 			if returnStmt.Expression.Kind == ast.KindCallExpression {
 				callExpr := returnStmt.Expression.AsCallExpression()
 				if callExpr != nil {
-					methodName, isJSON := getJSONMethodName(callExpr)
+					methodName, isJSON := GetJSONMethodName(callExpr)
 					if isJSON {
 						if methodName == "parse" && config.TransformJSONParse {
 							actualType := unwrapPromiseType(returnType, ctx.isAsync, c)
@@ -1183,7 +1031,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 							// Get the argument type for stringify
 							if callExpr.Arguments != nil && len(callExpr.Arguments.Nodes) > 0 {
 								argType := checker.Checker_GetTypeAtLocation(c, callExpr.Arguments.Nodes[0])
-								if argType != nil && !shouldSkipType(argType) {
+								if argType != nil && !ShouldSkipType(argType) {
 									countFilter(argType, nil, callExpr.Expression, "json-stringify", "JSON.stringify")
 									return false
 								}
@@ -1206,7 +1054,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 				// Check if the return expression is already validated and not dirty
 				skipValidation := false
 				if _, ok := getValidatedType(returnStmt.Expression, ctx.validated, actualType); ok {
-					rootVar := getRootIdentifier(returnStmt.Expression)
+					rootVar := GetRootIdentifierName(returnStmt.Expression)
 					if rootVar != "" {
 						if !isDirty(ctx, rootVar, ctx.bodyStart, node.Pos()) {
 							skipValidation = true
@@ -1256,7 +1104,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 			if asExpr.Expression.Kind == ast.KindCallExpression {
 				innerCall := asExpr.Expression.AsCallExpression()
 				if innerCall != nil {
-					methodName, isJSON := getJSONMethodName(innerCall)
+					methodName, isJSON := GetJSONMethodName(innerCall)
 					if isJSON {
 						if methodName == "parse" && config.TransformJSONParse {
 							// Highlight just "JSON.parse", pass nil for endNode so underline only covers "JSON.parse"
@@ -1318,7 +1166,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 				break
 			}
 
-			methodName, isJSON := getJSONMethodName(callExpr)
+			methodName, isJSON := GetJSONMethodName(callExpr)
 
 			// Check for dirty values passed to external functions (non-JSON calls)
 			if !isJSON && config.ValidateParameters && len(funcStack) > 0 {
@@ -1335,7 +1183,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 							if sf != nil {
 								declFileName := sf.FileName()
 								// External if in node_modules or is a .d.ts file
-								if isNodeModulesPath(declFileName) || isDeclarationFilePath(declFileName) {
+								if IsNodeModulesPath(declFileName) || IsDeclarationFile(declFileName) {
 									isExternal = true
 									break
 								}
@@ -1357,14 +1205,14 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 				// For external calls, check each argument for unvalidated or dirty values
 				if isExternal && callExpr.Arguments != nil {
 					for argIdx, arg := range callExpr.Arguments.Nodes {
-						rootVar := getRootIdentifier(arg)
+						rootVar := GetRootIdentifierName(arg)
 						if rootVar == "" {
 							continue
 						}
 
 						// Get the argument's type
 						argType := checker.Checker_GetTypeAtLocation(c, arg)
-						if argType == nil || shouldSkipType(argType) || isPrimitiveType(argType) {
+						if argType == nil || ShouldSkipType(argType) || IsPrimitiveType(argType) {
 							continue
 						}
 
@@ -1432,7 +1280,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 					arg := callExpr.Arguments.Nodes[0]
 					// Get the type of the argument from the checker
 					argType := checker.Checker_GetTypeAtLocation(c, arg)
-					if argType != nil && !shouldSkipType(argType) {
+					if argType != nil && !ShouldSkipType(argType) {
 						// Only use inferred type if it's a concrete object type (not any/unknown)
 						flags := checker.Type_flags(argType)
 						if flags&checker.TypeFlagsObject != 0 || flags&checker.TypeFlagsUnion != 0 {
@@ -1475,7 +1323,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 				// Check if initializer is a validated expression (identifier or property access)
 				if validatedType, ok := getValidatedType(varDecl.Initializer, ctx.validated, nil); ok {
 					// Check if the root variable has been dirtied
-					rootVar := getRootIdentifier(varDecl.Initializer)
+					rootVar := GetRootIdentifierName(varDecl.Initializer)
 					if rootVar != "" && !isDirty(ctx, rootVar, ctx.bodyStart, node.Pos()) {
 						// The variable inherits the validated type
 						ctx.validated[varName] = append(ctx.validated[varName], validatedType)
@@ -1489,7 +1337,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 				varDecl.Initializer.Kind == ast.KindCallExpression {
 				callExpr := varDecl.Initializer.AsCallExpression()
 				if callExpr != nil {
-					funcName := getEntityName(callExpr.Expression)
+					funcName := GetEntityName(callExpr.Expression)
 					isTrusted := false
 					for _, re := range config.TrustedFunctions {
 						if re.MatchString(funcName) {
@@ -1520,7 +1368,7 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 			if varDecl.Type != nil && config.TransformJSONParse && varDecl.Initializer.Kind == ast.KindCallExpression {
 				callExpr := varDecl.Initializer.AsCallExpression()
 				if callExpr != nil {
-					methodName, isJSON := getJSONMethodName(callExpr)
+					methodName, isJSON := GetJSONMethodName(callExpr)
 					if isJSON && methodName == "parse" {
 						targetType := checker.Checker_getTypeFromTypeNode(c, varDecl.Type)
 						// Highlight just "JSON.parse" (the property access expression), not the whole variable declaration
@@ -1552,11 +1400,11 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 			if config.TransformJSONParse && bin.Right.Kind == ast.KindCallExpression {
 				callExpr := bin.Right.AsCallExpression()
 				if callExpr != nil {
-					methodName, isJSON := getJSONMethodName(callExpr)
+					methodName, isJSON := GetJSONMethodName(callExpr)
 					if isJSON && methodName == "parse" {
 						// Get target type from the LHS
 						targetType := checker.Checker_GetTypeAtLocation(c, bin.Left)
-						if targetType != nil && !shouldSkipType(targetType) {
+						if targetType != nil && !ShouldSkipType(targetType) {
 							countFilter(targetType, nil, callExpr.Expression, "json-parse", "JSON.parse")
 							return false
 						}
@@ -1568,12 +1416,12 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 			if config.TransformJSONStringify && bin.Right.Kind == ast.KindCallExpression {
 				callExpr := bin.Right.AsCallExpression()
 				if callExpr != nil {
-					methodName, isJSON := getJSONMethodName(callExpr)
+					methodName, isJSON := GetJSONMethodName(callExpr)
 					if isJSON && methodName == "stringify" {
 						// Get the argument type for stringify
 						if callExpr.Arguments != nil && len(callExpr.Arguments.Nodes) > 0 {
 							argType := checker.Checker_GetTypeAtLocation(c, callExpr.Arguments.Nodes[0])
-							if argType != nil && !shouldSkipType(argType) {
+							if argType != nil && !ShouldSkipType(argType) {
 								countFilter(argType, nil, callExpr.Expression, "json-stringify", "JSON.stringify")
 								return false
 							}

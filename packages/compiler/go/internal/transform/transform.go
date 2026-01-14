@@ -1543,120 +1543,50 @@ func unwrapPromiseType(t *checker.Type, typeNode *ast.Node, c *checker.Checker) 
 	return t, typeNode
 }
 
-// getParamName extracts the parameter name as a string
+// getParamName delegates to the exported analyse.GetParamName.
 func getParamName(param *ast.ParameterDeclaration) string {
-	if param.Name() != nil {
-		nameNode := param.Name()
-		if nameNode.Kind == ast.KindIdentifier {
-			return nameNode.AsIdentifier().Text
-		}
-	}
-	return ""
+	return analyse.GetParamName(param)
 }
 
-// functionLike provides a common interface for function-like nodes
+// functionLike wraps analyse.FunctionLike for local use.
 type functionLike struct {
-	node *ast.Node
+	inner *analyse.FunctionLike
 }
 
 func getFunctionLike(node *ast.Node) *functionLike {
-	switch node.Kind {
-	case ast.KindFunctionDeclaration,
-		ast.KindFunctionExpression,
-		ast.KindArrowFunction,
-		ast.KindMethodDeclaration:
-		return &functionLike{node: node}
+	inner := analyse.GetFunctionLike(node)
+	if inner == nil {
+		return nil
 	}
-	return nil
+	return &functionLike{inner: inner}
 }
 
 func (f *functionLike) Parameters() []*ast.ParameterDeclaration {
-	switch f.node.Kind {
-	case ast.KindFunctionDeclaration:
-		decl := f.node.AsFunctionDeclaration()
-		return nodeListToParams(decl.Parameters)
-	case ast.KindFunctionExpression:
-		expr := f.node.AsFunctionExpression()
-		return nodeListToParams(expr.Parameters)
-	case ast.KindArrowFunction:
-		arrow := f.node.AsArrowFunction()
-		return nodeListToParams(arrow.Parameters)
-	case ast.KindMethodDeclaration:
-		method := f.node.AsMethodDeclaration()
-		return nodeListToParams(method.Parameters)
+	if f == nil || f.inner == nil {
+		return nil
 	}
-	return nil
+	return f.inner.Parameters()
 }
 
 func (f *functionLike) Type() *ast.Node {
-	switch f.node.Kind {
-	case ast.KindFunctionDeclaration:
-		return f.node.AsFunctionDeclaration().Type
-	case ast.KindFunctionExpression:
-		return f.node.AsFunctionExpression().Type
-	case ast.KindArrowFunction:
-		return f.node.AsArrowFunction().Type
-	case ast.KindMethodDeclaration:
-		return f.node.AsMethodDeclaration().Type
+	if f == nil || f.inner == nil {
+		return nil
 	}
-	return nil
+	return f.inner.Type()
 }
 
 func (f *functionLike) Body() *ast.Node {
-	switch f.node.Kind {
-	case ast.KindFunctionDeclaration:
-		return f.node.AsFunctionDeclaration().Body
-	case ast.KindFunctionExpression:
-		return f.node.AsFunctionExpression().Body
-	case ast.KindArrowFunction:
-		return f.node.AsArrowFunction().Body
-	case ast.KindMethodDeclaration:
-		return f.node.AsMethodDeclaration().Body
+	if f == nil || f.inner == nil {
+		return nil
 	}
-	return nil
+	return f.inner.Body()
 }
 
 func (f *functionLike) IsAsync() bool {
-	switch f.node.Kind {
-	case ast.KindFunctionDeclaration:
-		decl := f.node.AsFunctionDeclaration()
-		return hasAsyncModifier(decl.Modifiers())
-	case ast.KindFunctionExpression:
-		expr := f.node.AsFunctionExpression()
-		return hasAsyncModifier(expr.Modifiers())
-	case ast.KindArrowFunction:
-		arrow := f.node.AsArrowFunction()
-		return hasAsyncModifier(arrow.Modifiers())
-	case ast.KindMethodDeclaration:
-		method := f.node.AsMethodDeclaration()
-		return hasAsyncModifier(method.Modifiers())
-	}
-	return false
-}
-
-func hasAsyncModifier(modifiers *ast.ModifierList) bool {
-	if modifiers == nil {
+	if f == nil || f.inner == nil {
 		return false
 	}
-	for _, mod := range modifiers.Nodes {
-		if mod.Kind == ast.KindAsyncKeyword {
-			return true
-		}
-	}
-	return false
-}
-
-func nodeListToParams(list *ast.NodeList) []*ast.ParameterDeclaration {
-	if list == nil {
-		return nil
-	}
-	var params []*ast.ParameterDeclaration
-	for _, node := range list.Nodes {
-		if param := node.AsParameterDeclaration(); param != nil {
-			params = append(params, param)
-		}
-	}
-	return params
+	return f.inner.IsAsync()
 }
 
 // escapeString escapes a string for use in a JavaScript string literal.
@@ -1921,80 +1851,14 @@ func getTypeNameWithChecker(t *checker.Type, c *checker.Checker) string {
 	return getTypeName(t)
 }
 
-// getJSONMethodName checks if a call expression is JSON.parse or JSON.stringify.
-// Returns the method name ("parse" or "stringify") and true if it's a JSON method,
-// or empty string and false otherwise.
+// getJSONMethodName delegates to the exported analyse.GetJSONMethodName.
 func getJSONMethodName(callExpr *ast.CallExpression) (string, bool) {
-	if callExpr.Expression == nil {
-		return "", false
-	}
-
-	// Check for JSON.parse or JSON.stringify pattern
-	expr := callExpr.Expression
-	if expr.Kind == ast.KindPropertyAccessExpression {
-		propAccess := expr.AsPropertyAccessExpression()
-		if propAccess != nil && propAccess.Expression != nil {
-			// Check if it's JSON.xxx
-			if propAccess.Expression.Kind == ast.KindIdentifier {
-				objName := propAccess.Expression.AsIdentifier().Text
-				if objName == "JSON" {
-					// Get the method name
-					nameNode := propAccess.Name()
-					if nameNode != nil && nameNode.Kind == ast.KindIdentifier {
-						methodName := nameNode.AsIdentifier().Text
-						if methodName == "parse" || methodName == "stringify" {
-							return methodName, true
-						}
-					}
-				}
-			}
-		}
-	}
-	return "", false
+	return analyse.GetJSONMethodName(callExpr)
 }
 
-// getEntityName extracts the full name from an entity name (identifier or qualified name).
-// For qualified names like `React.FormEvent`, it returns the full dotted path.
+// getEntityName delegates to the exported analyse.GetEntityName.
 func getEntityName(node *ast.Node) string {
-	if node == nil {
-		return ""
-	}
-
-	switch node.Kind {
-	case ast.KindIdentifier:
-		return node.AsIdentifier().Text
-	case ast.KindQualifiedName:
-		qn := node.AsQualifiedName()
-		if qn != nil {
-			left := getEntityName(qn.Left)
-			right := ""
-			if qn.Right != nil {
-				right = qn.Right.Text()
-			}
-			if left != "" && right != "" {
-				return left + "." + right
-			}
-			if right != "" {
-				return right
-			}
-			return left
-		}
-	case ast.KindPropertyAccessExpression:
-		// Also handle PropertyAccessExpression (e.g. console.log)
-		pa := node.AsPropertyAccessExpression()
-		if pa != nil {
-			left := getEntityName(pa.Expression)
-			right := ""
-			if pa.Name() != nil {
-				right = pa.Name().AsIdentifier().Text
-			}
-			if left != "" && right != "" {
-				return left + "." + right
-			}
-		}
-	}
-
-	return ""
+	return analyse.GetEntityName(node)
 }
 
 func hasIgnoreComment(node *ast.Node, text string) bool {
@@ -2018,33 +1882,19 @@ type typeInfo struct {
 // getFunctionKey generates a key for looking up a function in the project analysis.
 func getFunctionKey(sourceFile *ast.SourceFile, fn *functionLike) string {
 	fileName := sourceFile.FileName()
-	name := getFunctionName(fn)
+	name := fn.Name()
 	if name != "" {
 		return fmt.Sprintf("%s:%s", fileName, name)
 	}
-	return fmt.Sprintf("%s:anonymous@%d", fileName, fn.node.Pos())
+	return fmt.Sprintf("%s:anonymous@%d", fileName, fn.inner.Node.Pos())
 }
 
-// getFunctionName extracts the name from a function-like node.
-func getFunctionName(fn *functionLike) string {
-	switch fn.node.Kind {
-	case ast.KindFunctionDeclaration:
-		fd := fn.node.AsFunctionDeclaration()
-		if fd.Name() != nil {
-			return fd.Name().Text()
-		}
-	case ast.KindFunctionExpression:
-		fe := fn.node.AsFunctionExpression()
-		if fe.Name() != nil {
-			return fe.Name().Text()
-		}
-	case ast.KindMethodDeclaration:
-		md := fn.node.AsMethodDeclaration()
-		if md.Name() != nil {
-			return md.Name().Text()
-		}
+// Name returns the function name (delegates to inner FunctionLike).
+func (f *functionLike) Name() string {
+	if f == nil || f.inner == nil {
+		return ""
 	}
-	return ""
+	return f.inner.Name()
 }
 
 // canSkipParamValidation checks if parameter validation can be skipped based on project analysis.
