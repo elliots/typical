@@ -27,8 +27,8 @@ func TestTransformFile(t *testing.T) {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`"string" === typeof name`,       // Uses param name directly (inline)
-				`_te("name", "string", name)`,    // _te helper call
+				`"string" === typeof name`,        // Uses param name directly (inline)
+				`Expected name to be string, got`, // Error message built inline (without escaped quotes)
 				`throw new TypeError`,
 			},
 		},
@@ -39,8 +39,8 @@ func TestTransformFile(t *testing.T) {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`"number" === typeof x`,     // Uses param name directly (inline)
-				`_te("x", "number", x)`,     // _te helper call
+				`"number" === typeof x`,         // Uses param name directly (inline)
+				`Expected x to be number, got`,  // Error message built inline
 			},
 		},
 		{
@@ -146,10 +146,10 @@ function greet(user: User): void {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`typeof user === "object"`, // Uses param name directly
-				`user !== null`,            // Uses param name directly
-				`user.name`,                // Property access on param
-				`_te("user.name"`,          // _te helper call with name
+				`typeof user === "object"`,           // Uses param name directly
+				`user !== null`,                      // Uses param name directly
+				`user.name`,                          // Property access on param
+				`Expected user.name to be string, got`, // Error message built inline with property path
 			},
 		},
 		{
@@ -159,9 +159,9 @@ function greet(user: User): void {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`Array.isArray(nums)`,              // Uses param name directly
-				`nums.length`,                      // Loop over array using param name
-				`_te("nums[" + _i0 + "]"`,          // _te helper call with array index expression
+				`Array.isArray(nums)`,                  // Uses param name directly
+				`nums.length`,                          // Loop over array using param name
+				`Expected nums[" + _i0 + "] to be number`, // Error message with array index expression
 			},
 		},
 		{
@@ -171,7 +171,7 @@ function greet(user: User): void {
 }`,
 			config: Config{ValidateParameters: true, ValidateReturns: false, ValidateCasts: false},
 			expectedParts: []string{
-				`_te("name", "string", name)`, // _te helper call with variable name
+				`Expected name to be string, got`, // Error message built inline with variable name
 			},
 		},
 	}
@@ -723,7 +723,6 @@ function greet(user: User): void {
 			unexpectedParts: []string{
 				"let _e: string | null;", // Should NOT have shared error var
 				"const _check_User",      // Should NOT hoist check function
-				`.replace(/%n/g`,         // Should NOT have %n replacement
 			},
 		},
 		{
@@ -741,10 +740,9 @@ function farewell(user: User): void {
 	console.log("Goodbye " + user.name);
 }`,
 			expectedParts: []string{
-				"let _e: string | null;",                       // Shared error variable
-				"const _check_User = (_v: any): string | null", // Hoisted check function
-				"_check_User(user)",                            // Both functions use same check
-				`.replace(/%n/g, "user")`,                      // Name substitution at call site
+				"let _e: string | null;",                                      // Shared error variable
+				"const _check_User = (_v: any, _n: string): string | null =>", // Hoisted check function with name param
+				`_check_User(user, "user")`,                                   // Both functions use same check with name arg
 			},
 			unexpectedParts: []string{
 				`typeof user === "object"`, // Should NOT have inline validation on param name
@@ -765,10 +763,10 @@ function greetUser2(user: User): void {}
 function logCompany1(company: Company): void {}
 function logCompany2(company: Company): void {}`,
 			expectedParts: []string{
-				"const _check_User = (_v: any): string | null",    // User check function
-				"const _check_Company = (_v: any): string | null", // Company check function
-				"_check_User(user)",                               // User validation
-				"_check_Company(company)",                         // Company validation
+				"const _check_User = (_v: any, _n: string): string | null",    // User check function with name param
+				"const _check_Company = (_v: any, _n: string): string | null", // Company check function with name param
+				`_check_User(user, "user")`,                                   // User validation with name arg
+				`_check_Company(company, "company")`,                          // Company validation with name arg
 			},
 		},
 	}

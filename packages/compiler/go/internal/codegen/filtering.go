@@ -7,13 +7,11 @@ import (
 	"github.com/microsoft/typescript-go/shim/checker"
 )
 
-// filteringThrow generates a throw statement using the _te helper.
-// This uses the shared _te helper which is hoisted at file level.
-// The throw happens at the call site (not in _te) so stack traces are correct.
+// filteringThrow generates a throw statement with an inline error message.
+// The throw happens at the call site so stack traces are correct.
 func (g *Generator) filteringThrow(nameExpr, expected, expr string) string {
-	g.needsTeHelper = true
-	g.fileNeedsTeHelper = true
-	return fmt.Sprintf(`throw new TypeError(_te(%s, %s, %s))`, nameExpr, escapeJSStringQuoted(expected), expr)
+	errorMsg := g.buildErrorMessage(nameExpr, expected, gotExprFor(expr))
+	return fmt.Sprintf(`throw new TypeError(%s)`, errorMsg)
 }
 
 // filteringError builds an error message for filtering validation.

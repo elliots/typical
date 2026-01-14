@@ -970,7 +970,7 @@ void describe("Configuration Options", () => {
     `,
     config: { ignoreTypes: ["Ignored"] },
     expectStrings: [
-      '"User"', // User should be validated (passed to _te helper)
+      "to be User, got", // User should be validated (inline error message)
       "validation skipped: type 'Ignored' matches ignoreTypes", // Ignored should be skipped
     ],
     cases: [
@@ -1234,8 +1234,8 @@ void describe("Error Messages", () => {
   registerTestCase({
     name: "literal mismatch shows actual value",
     source: `export function run(input: "admin"): string { return input }`,
-    // The _te helper should be present for literal checks (TypeError with value display)
-    expectStrings: ["_te"],
+    // Inline truncation for literal value display (no _show helper needed)
+    expectStrings: ["s.length>50"],
     cases: [
       // When the type is correct but value is wrong, show the actual value
       { input: "user", error: /got string \(user\)/ },
@@ -1248,7 +1248,7 @@ void describe("Error Messages", () => {
   registerTestCase({
     name: "numeric literal mismatch shows value",
     source: `export function run(input: 42): number { return input }`,
-    expectStrings: ["_te"],
+    expectStrings: ["s.length>50"],
     cases: [
       { input: 100, error: /got number \(100\)/ },
       { input: -1, error: /got number \(-1\)/ },

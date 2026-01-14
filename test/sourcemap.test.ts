@@ -575,18 +575,18 @@ export function validateCompany(company1: Company, company2: Company): Company {
     const transformedLines = result.code.split("\n");
     const mappingLines = parseMappings(result.sourceMap.mappings);
 
-    // Find the line with _check_Company(company2) in transformed code
+    // Find the line with _check_Company(company2, "company2") in transformed code
     const checkCompany2LineIdx = transformedLines.findIndex((l) =>
-      l.includes("_check_Company(company2)"),
+      l.includes('_check_Company(company2, "company2")'),
     );
     assert.ok(
       checkCompany2LineIdx >= 0,
-      "Should find _check_Company(company2) in transformed code",
+      'Should find _check_Company(company2, "company2") in transformed code',
     );
 
-    // Find the column position of _check_Company(company2)
+    // Find the column position of _check_Company(company2, "company2")
     const checkCompany2Line = transformedLines[checkCompany2LineIdx];
-    const checkCompany2Col = checkCompany2Line.indexOf("_check_Company(company2)");
+    const checkCompany2Col = checkCompany2Line.indexOf('_check_Company(company2, "company2")');
 
     // Find the source line with "company2: Company"
     const company2ParamLineIdx = sourceLines.findIndex((l) => l.includes("company2: Company"));

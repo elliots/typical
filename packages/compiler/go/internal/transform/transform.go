@@ -327,9 +327,9 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 	}
 
 	// generateCheckAndThrow generates the compact check-and-throw pattern for reusable validators
-	// Pattern: if ((_e = _check_Type(value)) !== null) throw new TypeError(_e.replace(/%n/g, "name"));
+	// Pattern: if ((_e = _check_Type(value, "name")) !== null) throw new TypeError(_e);
 	generateCheckAndThrow := func(checkFuncName, valueExpr, nameStr string) string {
-		return fmt.Sprintf(`if ((_e = %s(%s)) !== null) throw new TypeError(_e.replace(/%%n/g, "%s")); `,
+		return fmt.Sprintf(`if ((_e = %s(%s, "%s")) !== null) throw new TypeError(_e); `,
 			checkFuncName, valueExpr, nameStr)
 	}
 
@@ -571,7 +571,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 												// Generate: ((_f = _filter_X(JSON.parse(arg)))[0] !== null ? (() => { throw ... })() : _f[1])
 												insertions = append(insertions, insertion{
 													pos:       returnStmt.Expression.Pos(),
-													text:      fmt.Sprintf(`((_f = %s(JSON.parse(%s)))[0] !== null ? (() => { throw new TypeError(_f[0].replace(/%%n/g, "JSON.parse")); })() : _f[1])`, filterFuncName, argText),
+													text:      fmt.Sprintf(`((_f = %s(JSON.parse(%s), "JSON.parse"))[0] !== null ? (() => { throw new TypeError(_f[0]); })() : _f[1])`, filterFuncName, argText),
 													sourcePos: ctx.returnType.Pos(),
 													skipTo:    returnStmt.Expression.End(),
 												})
@@ -654,7 +654,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 									checkFuncName := getOrCreateCheckFunction(actualType, actualTypeNode, typeName)
 									if checkFuncName != "" {
 										// Generate expression-compatible pattern using ternary:
-										// return ((_e = _check_X(expr)) !== null ? (() => { throw new TypeError(_e.replace(/%n/g, "return value")); })() : expr);
+										// return ((_e = _check_X(expr, "return value")) !== null ? (() => { throw new TypeError(_e); })() : expr);
 										if ctx.isAsync {
 											// Async function: Promise is automatically unwrapped
 											insertions = append(insertions, insertion{
@@ -664,7 +664,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 											})
 											insertions = append(insertions, insertion{
 												pos:       exprEnd,
-												text:      `)) !== null ? (() => { throw new TypeError(_e.replace(/%n/g, "return value")); })() : ` + text[exprStart:exprEnd] + `)`,
+												text:      `, "return value")) !== null ? (() => { throw new TypeError(_e); })() : ` + text[exprStart:exprEnd] + `)`,
 												sourcePos: returnTypePos,
 											})
 										} else if isPromiseType(returnType, c) {
@@ -676,7 +676,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 											})
 											insertions = append(insertions, insertion{
 												pos:       exprEnd,
-												text:      fmt.Sprintf(`).then(_v => ((_e = %s(_v)) !== null ? (() => { throw new TypeError(_e.replace(/%%n/g, "return value")); })() : _v))`, checkFuncName),
+												text:      fmt.Sprintf(`).then(_v => ((_e = %s(_v, "return value")) !== null ? (() => { throw new TypeError(_e); })() : _v))`, checkFuncName),
 												sourcePos: returnTypePos,
 											})
 										} else {
@@ -688,7 +688,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 											})
 											insertions = append(insertions, insertion{
 												pos:       exprEnd,
-												text:      `)) !== null ? (() => { throw new TypeError(_e.replace(/%n/g, "return value")); })() : ` + text[exprStart:exprEnd] + `)`,
+												text:      `, "return value")) !== null ? (() => { throw new TypeError(_e); })() : ` + text[exprStart:exprEnd] + `)`,
 												sourcePos: returnTypePos,
 											})
 										}
@@ -807,7 +807,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 												// Generate: ((_f = _filter_X(JSON.parse(arg)))[0] !== null ? (() => { throw ... })() : _f[1])
 												insertions = append(insertions, insertion{
 													pos:       node.Pos(),
-													text:      fmt.Sprintf(`((_f = %s(JSON.parse(%s)))[0] !== null ? (() => { throw new TypeError(_f[0].replace(/%%n/g, "JSON.parse")); })() : _f[1])`, filterFuncName, argText),
+													text:      fmt.Sprintf(`((_f = %s(JSON.parse(%s), "JSON.parse"))[0] !== null ? (() => { throw new TypeError(_f[0]); })() : _f[1])`, filterFuncName, argText),
 													sourcePos: castTypePos,
 													skipTo:    node.End(),
 												})
@@ -843,7 +843,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 												// Generate: ((_f = _filter_X(arg))[0] !== null ? (() => { throw ... })() : JSON.stringify(_f[1]))
 												insertions = append(insertions, insertion{
 													pos:       node.Pos(),
-													text:      fmt.Sprintf(`((_f = %s(%s))[0] !== null ? (() => { throw new TypeError(_f[0].replace(/%%n/g, "JSON.stringify")); })() : JSON.stringify(_f[1]))`, filterFuncName, argText),
+													text:      fmt.Sprintf(`((_f = %s(%s, "JSON.stringify"))[0] !== null ? (() => { throw new TypeError(_f[0]); })() : JSON.stringify(_f[1]))`, filterFuncName, argText),
 													sourcePos: castTypePos,
 													skipTo:    node.End(),
 												})
@@ -875,7 +875,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 						// Get the expression text for error messages
 						exprStart := asExpr.Expression.Pos()
 						exprEnd := asExpr.Expression.End()
-						exprText := text[exprStart:exprEnd]
+						exprText := strings.TrimSpace(text[exprStart:exprEnd])
 
 						// Get type name for the check function
 						typeName := getTypeNameWithChecker(castType, c)
@@ -889,18 +889,18 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 							checkFuncName := getOrCreateCheckFunction(castType, asExpr.Type, typeName)
 							if checkFuncName != "" {
 								// Generate expression-compatible pattern using comma operator:
-								// ((_e = _check_X(expr)) !== null ? (() => { throw new TypeError(_e.replace(/%n/g, "name")); })() : expr)
+								// ((_e = _check_X(expr, "name")) !== null ? (() => { throw new TypeError(_e); })() : expr)
 								// This works inside expressions unlike the if-statement pattern
 								escapedName := escapeString(exprText)
 								insertions = append(insertions, insertion{
 									pos:       node.Pos(),
-									text:      fmt.Sprintf(`((_e = %s(%s)) !== null ? (() => { throw new TypeError(_e.replace(/%%n/g, "%s")); })() : `, checkFuncName, text[exprStart:exprEnd], escapedName),
+									text:      fmt.Sprintf(`((_e = %s(%s, "%s")) !== null ? (() => { throw new TypeError(_e); })() : `, checkFuncName, exprText, escapedName),
 									sourcePos: castTypePos,
 									skipTo:    exprEnd,
 								})
 								insertions = append(insertions, insertion{
 									pos:       exprEnd,
-									text:      text[exprStart:exprEnd] + ")",
+									text:      exprText + ")",
 									sourcePos: castTypePos,
 									skipTo:    node.End(),
 								})
@@ -920,11 +920,11 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 								})
 							} else if result.Code != "" {
 								// Wrap the entire as expression
-								// (expr as Type) -> validator(expr, "expr as Type")
+								// (expr as Type) -> validator(expr, "expr")
 								// Use skipTo to skip the entire "as Type" part
 								insertions = append(insertions, insertion{
 									pos:       node.Pos(),
-									text:      result.Code + "(" + text[exprStart:exprEnd] + `, "` + escapeString(exprText) + `")`,
+									text:      result.Code + "(" + exprText + `, "` + escapeString(exprText) + `")`,
 									sourcePos: castTypePos,
 									skipTo:    node.End(),
 								})
@@ -1004,7 +1004,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 										// Generate: ((_f = _filter_X(JSON.parse(arg)))[0] !== null ? (() => { throw ... })() : _f[1])
 										insertions = append(insertions, insertion{
 											pos:       node.Pos(),
-											text:      fmt.Sprintf(`((_f = %s(JSON.parse(%s)))[0] !== null ? (() => { throw new TypeError(_f[0].replace(/%%n/g, "JSON.parse")); })() : _f[1])`, filterFuncName, argText),
+											text:      fmt.Sprintf(`((_f = %s(JSON.parse(%s), "JSON.parse"))[0] !== null ? (() => { throw new TypeError(_f[0]); })() : _f[1])`, filterFuncName, argText),
 											sourcePos: sourcePos,
 											skipTo:    node.End(),
 										})
@@ -1044,7 +1044,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 										// Generate: ((_f = _filter_X(arg))[0] !== null ? (() => { throw ... })() : JSON.stringify(_f[1]))
 										insertions = append(insertions, insertion{
 											pos:       node.Pos(),
-											text:      fmt.Sprintf(`((_f = %s(%s))[0] !== null ? (() => { throw new TypeError(_f[0].replace(/%%n/g, "JSON.stringify")); })() : JSON.stringify(_f[1]))`, filterFuncName, argText),
+											text:      fmt.Sprintf(`((_f = %s(%s, "JSON.stringify"))[0] !== null ? (() => { throw new TypeError(_f[0]); })() : JSON.stringify(_f[1]))`, filterFuncName, argText),
 											sourcePos: sourcePos,
 											skipTo:    node.End(),
 										})
@@ -1118,7 +1118,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 							escapedName := escapeString(argText)
 							insertions = append(insertions, insertion{
 								pos:       arg.Pos(),
-								text:      fmt.Sprintf(`((_e = %s(%s)) !== null ? (() => { throw new TypeError(_e.replace(/%%n/g, "%s")); })() : %s)`, checkFuncName, argText, escapedName, argText),
+								text:      fmt.Sprintf(`((_e = %s(%s, "%s")) !== null ? (() => { throw new TypeError(_e); })() : %s)`, checkFuncName, argText, escapedName, argText),
 								sourcePos: arg.Pos(),
 								skipTo:    arg.End(),
 							})
@@ -1174,7 +1174,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 												// Generate: ((_f = _filter_X(JSON.parse(arg)))[0] !== null ? (() => { throw ... })() : _f[1])
 												insertions = append(insertions, insertion{
 													pos:       varDecl.Initializer.Pos(),
-													text:      fmt.Sprintf(`((_f = %s(JSON.parse(%s)))[0] !== null ? (() => { throw new TypeError(_f[0].replace(/%%n/g, "JSON.parse")); })() : _f[1])`, filterFuncName, argText),
+													text:      fmt.Sprintf(`((_f = %s(JSON.parse(%s), "JSON.parse"))[0] !== null ? (() => { throw new TypeError(_f[0]); })() : _f[1])`, filterFuncName, argText),
 													sourcePos: varDecl.Type.Pos(),
 													skipTo:    varDecl.Initializer.End(),
 												})
@@ -1242,7 +1242,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 
 								insertions = append(insertions, insertion{
 									pos:       insertPos,
-									text:      fmt.Sprintf(`; if ((_e = %s(%s)) !== null) throw new TypeError(_e.replace(/%%n/g, "%s"))`, checkFuncName, varName, varName),
+									text:      fmt.Sprintf(`; if ((_e = %s(%s, "%s")) !== null) throw new TypeError(_e)`, checkFuncName, varName, varName),
 									sourcePos: callStart,
 								})
 
@@ -1338,7 +1338,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 										// Generate: ((_f = _filter_X(JSON.parse(arg)))[0] !== null ? (() => { throw ... })() : _f[1])
 										insertions = append(insertions, insertion{
 											pos:       bin.Right.Pos(),
-											text:      fmt.Sprintf(`((_f = %s(JSON.parse(%s)))[0] !== null ? (() => { throw new TypeError(_f[0].replace(/%%n/g, "JSON.parse")); })() : _f[1])`, filterFuncName, argText),
+											text:      fmt.Sprintf(`((_f = %s(JSON.parse(%s), "JSON.parse"))[0] !== null ? (() => { throw new TypeError(_f[0]); })() : _f[1])`, filterFuncName, argText),
 											sourcePos: bin.Left.Pos(),
 											skipTo:    bin.Right.End(),
 										})
@@ -1389,7 +1389,7 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 
 							insertions = append(insertions, insertion{
 								pos:       insertPos,
-								text:      fmt.Sprintf(`; if ((_e = %s(%s)) !== null) throw new TypeError(_e.replace(/%%n/g, "%s"))`, checkFuncName, varName, varName),
+								text:      fmt.Sprintf(`; if ((_e = %s(%s, "%s")) !== null) throw new TypeError(_e)`, checkFuncName, varName, varName),
 								sourcePos: callStart,
 							})
 
@@ -1422,18 +1422,11 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 
 	debugf("[DEBUG] Visitor complete for %s, building source map with %d insertions...\n", fileName, len(insertions))
 
-	// If reusable validators or helpers were generated, prepend them at the start of the file
+	// If reusable validators were generated, prepend them at the start of the file
 	// Note: checkFunctions and filterFunctions only contain functions for types used more than once
 	// (due to shouldUseReusableCheck/shouldUseReusableFilter checks)
-	needsTeHelper := gen.NeedsTeHelper()
-	if len(checkFunctions) > 0 || len(filterFunctions) > 0 || needsTeHelper {
+	if len(checkFunctions) > 0 || len(filterFunctions) > 0 {
 		var hoistedCode strings.Builder
-
-		// Add the _te helper if any validator uses it (for TypeError with value display)
-		if needsTeHelper {
-			hoistedCode.WriteString(codegen.TeHelperCode)
-			hoistedCode.WriteString(";\n")
-		}
 
 		// Add the shared error variables
 		if len(checkFunctions) > 0 {
@@ -1462,8 +1455,8 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 			sourcePos: -1, // No source mapping for generated code
 		}}, insertions...)
 
-		debugf("[DEBUG] Hoisted %d check functions, %d filter functions, te helper: %v\n",
-			len(checkFunctions), len(filterFunctions), needsTeHelper)
+		debugf("[DEBUG] Hoisted %d check functions, %d filter functions\n",
+			len(checkFunctions), len(filterFunctions))
 	}
 
 	// Build result with source map

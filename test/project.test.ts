@@ -258,10 +258,10 @@ void describe("Cross-Project Validation Analysis", () => {
       );
 
       // Should validate the externalGetUser() result at assignment time
-      // Pattern: const user = externalGetUser(); if ((_e = _check_User(user)) !== null) throw ...
+      // Pattern: const user = externalGetUser(); if ((_e = _check_User(user, "user")) !== null) throw ...
       assertContains(
         results["index.ts"],
-        /externalGetUser\(\).*_check_User\(user\)/,
+        /externalGetUser\(\).*_check_User\(user, "user"\)/,
         "should validate external call result at assignment",
       );
       // Since user is now validated, return should be /* already valid */
@@ -331,7 +331,7 @@ void describe("Cross-Project Validation Analysis", () => {
       // The cast should be validated (creates validated 'user' variable)
       assertContains(
         results["internal.ts"],
-        "_check_User( data)",
+        '_check_User(data, "data")',
         "should validate cast from unknown",
       );
 
@@ -366,7 +366,11 @@ void describe("Cross-Project Validation Analysis", () => {
       );
 
       // Should validate parameter (uses _check_User)
-      assertContains(results["mutation.ts"], "_check_User(user)", "should validate user param");
+      assertContains(
+        results["mutation.ts"],
+        '_check_User(user, "user")',
+        "should validate user param",
+      );
       // Should NOT skip validation after mutation - must re-validate
       assertNotContains(
         results["mutation.ts"],
@@ -418,14 +422,14 @@ void describe("Cross-Project Validation Analysis", () => {
       // Should validate parameter initially
       assertContains(
         results["dirty-external.ts"],
-        "_check_User(user)",
+        '_check_User(user, "user")',
         "should validate user param initially",
       );
       // Should re-validate before passing to external function (dirty value)
       // The externalProcess call should wrap user with validation
       assertContains(
         results["dirty-external.ts"],
-        "externalProcess(((_e = _check_User(user))",
+        'externalProcess(((_e = _check_User(user, "user"))',
         "should validate dirty user before external call",
       );
     });
@@ -450,7 +454,7 @@ void describe("Cross-Project Validation Analysis", () => {
       // Should validate parameter initially
       assertContains(
         results["clean-external.ts"],
-        "_check_User(user)",
+        '_check_User(user, "user")',
         "should validate user param initially",
       );
       // Should NOT wrap the argument - user is clean
@@ -515,7 +519,7 @@ void describe("Cross-Project Validation Analysis", () => {
       // Should validate parameter (uses _check_User)
       assertContains(
         results["sync-external.ts"],
-        "_check_User(user)",
+        '_check_User(user, "user")',
         "should validate user param",
       );
       // After external call in sync function, should still validate return
@@ -545,7 +549,11 @@ void describe("Cross-Project Validation Analysis", () => {
       );
 
       // Should validate parameter (uses _check_User)
-      assertContains(results["async-escape.ts"], "_check_User(user)", "should validate user param");
+      assertContains(
+        results["async-escape.ts"],
+        '_check_User(user, "user")',
+        "should validate user param",
+      );
       // After external escape + await, must validate - NOT skip
       assertNotContains(
         results["async-escape.ts"],
@@ -578,7 +586,7 @@ void describe("Cross-Project Validation Analysis", () => {
       // Should validate parameter initially (uses _check_User)
       assertContains(
         results["permanent-escape.ts"],
-        "_check_User(user)",
+        '_check_User(user, "user")',
         "should validate user param",
       );
       // After permanent escape, every use should validate - not skip
@@ -635,7 +643,11 @@ void describe("Cross-Project Validation Analysis", () => {
       );
 
       // Should validate parameter (uses _check_User)
-      assertContains(results["stringify.ts"], "_check_User(user)", "should validate user param");
+      assertContains(
+        results["stringify.ts"],
+        '_check_User(user, "user")',
+        "should validate user param",
+      );
       // JSON.stringify is pure - should skip return validation
       assertContains(
         results["stringify.ts"],
@@ -909,7 +921,7 @@ void describe("Cross-Project Validation Analysis", () => {
       // Should validate the user parameter in process (exported function)
       assertContains(
         results["chain.ts"],
-        "_check_User(user)",
+        '_check_User(user, "user")',
         "should validate user param in exported function",
       );
 
@@ -973,7 +985,7 @@ void describe("Cross-Project Validation Analysis", () => {
       // Should validate the user parameter in process (exported function)
       assertContains(
         results["chain-var.ts"],
-        "_check_User(user)",
+        '_check_User(user, "user")',
         "should validate user param in exported function",
       );
 
@@ -1019,7 +1031,7 @@ void describe("Cross-Project Validation Analysis", () => {
       // Should validate user parameter in process
       assertContains(
         results["external-chain.ts"],
-        "_check_User(user)",
+        '_check_User(user, "user")',
         "should validate user param",
       );
 
@@ -1031,27 +1043,27 @@ void describe("Cross-Project Validation Analysis", () => {
       );
 
       // user3 = step3(user2) - step3 doesn't validate its return, validate after assignment
-      // Pattern: const user3 = step3(user2); if ((_e = _check_User(user3)) !== null) throw ...
+      // Pattern: const user3 = step3(user2); if ((_e = _check_User(user3, "user3")) !== null) throw ...
       assertContains(
         results["external-chain.ts"],
-        /step3\(user2\).*_check_User\(user3\)/,
+        /step3\(user2\).*_check_User\(user3, "user3"\)/,
         "should validate step3 result for user3",
       );
 
       // let user4 = step3(user3) - user4 is used (console.log(user4.name)), needs validation
-      // Pattern: let user4 = step3(user3); if ((_e = _check_User(user4)) !== null) throw ...
+      // Pattern: let user4 = step3(user3); if ((_e = _check_User(user4, "user4")) !== null) throw ...
       assertContains(
         results["external-chain.ts"],
-        /let user4 = step3\(user3\).*_check_User\(user4\)/,
+        /let user4 = step3\(user3\).*_check_User\(user4, "user4"\)/,
         "should validate first user4 assignment",
       );
 
       // user4 = step3(user3) - reassignment, user4 is used again, needs validation
-      // Pattern: user4 = step3(user3); if ((_e = _check_User(user4)) !== null) throw ...
+      // Pattern: user4 = step3(user3); if ((_e = _check_User(user4, "user4")) !== null) throw ...
       // Note: The reassignment also needs validation since user4 is read after it
       assertContains(
         results["external-chain.ts"],
-        /user4 = step3\(user3\).*_check_User\(user4\).*console\.log\(user4\.name\)/s,
+        /user4 = step3\(user3\).*_check_User\(user4, "user4"\).*console\.log\(user4\.name\)/s,
         "should validate second user4 assignment",
       );
 
@@ -1077,7 +1089,11 @@ void describe("Cross-Project Validation Analysis", () => {
       );
 
       // Should validate user parameter (uses _check_User)
-      assertContains(results["conditional.ts"], "_check_User(user)", "should validate user param");
+      assertContains(
+        results["conditional.ts"],
+        '_check_User(user, "user")',
+        "should validate user param",
+      );
       // Should validate flag parameter
       assertContains(results["conditional.ts"], "typeof flag", "should validate flag param");
     });
@@ -1119,7 +1135,11 @@ void describe("Cross-Project Validation Analysis", () => {
       );
 
       // Should validate user parameter (uses _check_User)
-      assertContains(results["spread.ts"], "_check_User(user)", "should validate user param");
+      assertContains(
+        results["spread.ts"],
+        '_check_User(user, "user")',
+        "should validate user param",
+      );
       // Return should have validation (spread creates new object)
       assertContains(results["spread.ts"], '"return value"', "should validate return value");
     });

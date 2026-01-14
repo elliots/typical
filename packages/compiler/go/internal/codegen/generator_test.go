@@ -590,9 +590,9 @@ function validate(user: SimpleUser): void {}
 		t.Error("Validator should check _v.age")
 	}
 
-	// Check that _te helper is used with _n parameter
-	if !strings.Contains(validator, `_te(_n`) {
-		t.Error("Validator should use _te helper with name parameter")
+	// Check that error messages are built inline with _n parameter
+	if !strings.Contains(validator, `"Expected "+_n+"`) {
+		t.Error("Validator should build error messages inline with _n parameter")
 	}
 }
 
@@ -681,10 +681,11 @@ interface User {
 	t.Logf("Generated check function:\n%s", checkFunc)
 
 	// Check function structure - should NOT throw, should return error or null
+	// Now takes (value, name) parameters
 	expectedParts := []string{
-		"const _check_User = (_v: any): string | null => {", // Function signature
-		`return _te("%n`,                                    // Should return _te helper call with %n placeholder
-		"return null;",                                      // Return null on success
+		"const _check_User = (_v: any, _n: string): string | null => {", // Function signature with name param
+		`return "Expected "+_n+"`,                                       // Should return error message built inline
+		"return null;",                                                  // Return null on success
 	}
 
 	for _, part := range expectedParts {
@@ -698,9 +699,9 @@ interface User {
 		t.Error("Check function should NOT throw - it should return error messages")
 	}
 
-	// Check that %n placeholder is used in the _te calls
-	if !strings.Contains(checkFunc, `_te("%n"`) {
-		t.Error("Check function should use %n placeholder in _te calls")
+	// Check that _n parameter is used in error messages
+	if !strings.Contains(checkFunc, `_n + "`) || !strings.Contains(checkFunc, `"+_n+"`) {
+		t.Error("Check function should use _n parameter in error messages")
 	}
 
 	// Check function name
@@ -783,13 +784,14 @@ interface User {
 	t.Logf("Generated filter function:\n%s", filterFunc)
 
 	// Filter function structure - should return [error, result] tuple
+	// Now takes (value, name) parameters
 	expectedParts := []string{
-		"const _filter_User = (_v: any): [string | null, any] => {", // Function signature with tuple return
-		`return [_te("%n`,                                           // Should return _te helper call in tuple with %n placeholder
-		"return [null, _r];",                                        // Return success tuple
-		"const _r: any = {};",                                       // Result object
-		"_r.name = _v.name",                                         // Property assignment
-		"_r.age = _v.age",                                           // Property assignment
+		"const _filter_User = (_v: any, _n: string): [string | null, any] => {", // Function signature with name param
+		`return ["Expected "`,                                                   // Should return error message built inline
+		"return [null, _r];",                                                    // Return success tuple
+		"const _r: any = {};",                                                   // Result object
+		"_r.name = _v.name",                                                     // Property assignment
+		"_r.age = _v.age",                                                       // Property assignment
 	}
 
 	for _, part := range expectedParts {
