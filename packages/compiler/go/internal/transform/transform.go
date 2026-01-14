@@ -884,23 +884,20 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 							typeName = "value"
 						}
 
+						// Get the type text for the cast (e.g., "DBUser" from "u as DBUser")
+						typeText := strings.TrimSpace(text[asExpr.Type.Pos():asExpr.Type.End()])
+
 						if shouldUseReusableCheck(castType, asExpr.Type) {
 							// Use reusable check function (type is used more than once)
 							checkFuncName := getOrCreateCheckFunction(castType, asExpr.Type, typeName)
 							if checkFuncName != "" {
-								// Generate expression-compatible pattern using comma operator:
-								// ((_e = _check_X(expr, "name")) !== null ? (() => { throw new TypeError(_e); })() : expr)
-								// This works inside expressions unlike the if-statement pattern
+								// Generate expression-compatible pattern:
+								// ((_e = _check_X(expr, "name")) !== null ? (() => { throw new TypeError(_e); })() : expr as Type)
+								// The final "as Type" preserves TypeScript's type narrowing
 								escapedName := escapeString(exprText)
 								insertions = append(insertions, insertion{
 									pos:       node.Pos(),
-									text:      fmt.Sprintf(`((_e = %s(%s, "%s")) !== null ? (() => { throw new TypeError(_e); })() : `, checkFuncName, exprText, escapedName),
-									sourcePos: castTypePos,
-									skipTo:    exprEnd,
-								})
-								insertions = append(insertions, insertion{
-									pos:       exprEnd,
-									text:      exprText + ")",
+									text:      fmt.Sprintf(`((_e = %s(%s, "%s")) !== null ? (() => { throw new TypeError(_e); })() : %s as %s)`, checkFuncName, exprText, escapedName, exprText, typeText),
 									sourcePos: castTypePos,
 									skipTo:    node.End(),
 								})

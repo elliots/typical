@@ -19,10 +19,16 @@ func (g *Generator) filteringThrow(nameExpr, expected, expr string) string {
 func filteringError(nameExpr, expected, gotExpr string) string {
 	// Build: "Expected " + nameExpr + " to be <expected>, got " + gotExpr
 	// Optimized when nameExpr is a literal
-	msg := concatStrings(`"Expected "`, nameExpr)
-	msg = concatStrings(msg, fmt.Sprintf(`" to be %s, got "`, escapeJSString(expected)))
-	msg = concatStrings(msg, gotExpr)
-	return msg
+	if isStringLiteral(nameExpr) {
+		return fmt.Sprintf(`"Expected %s to be %s, got "+%s`, extractStringLiteral(nameExpr), escapeJSString(expected), gotExpr)
+	}
+	// Optimise: if nameExpr ends with a string literal like `_n + ".foo"`, combine with " to be"
+	if idx := strings.LastIndex(nameExpr, `+ "`); idx != -1 && strings.HasSuffix(nameExpr, `"`) {
+		prefix := strings.TrimSuffix(nameExpr[:idx], " ")
+		trailingLit := nameExpr[idx+3 : len(nameExpr)-1]
+		return fmt.Sprintf(`"Expected "+%s+"%s to be %s, got "+%s`, prefix, trailingLit, escapeJSString(expected), gotExpr)
+	}
+	return fmt.Sprintf(`"Expected "+%s+" to be %s, got "+%s`, nameExpr, escapeJSString(expected), gotExpr)
 }
 
 // filteringReturn generates a return [error, null] statement with optimized error message.
@@ -31,11 +37,16 @@ func filteringReturn(nameExpr, expected, gotExpr string) string {
 }
 
 // filteringNameExpr builds the name expression for a nested property.
-// Optimizes concatenation when nameExpr is a string literal.
+// Optimizes concatenation by combining adjacent string literals.
 func filteringNameExpr(nameExpr, propName string) string {
 	// Build: nameExpr + ".propName"
 	if isStringLiteral(nameExpr) {
 		return fmt.Sprintf(`"%s.%s"`, extractStringLiteral(nameExpr), propName)
+	}
+	// Optimise: if nameExpr ends with a string literal like `_n + ".foo"`,
+	// combine with propName to get `_n + ".foo.bar"` instead of `_n + ".foo" + ".bar"`
+	if idx := strings.LastIndex(nameExpr, `+ "`); idx != -1 && strings.HasSuffix(nameExpr, `"`) {
+		return nameExpr[:len(nameExpr)-1] + "." + propName + `"`
 	}
 	return fmt.Sprintf(`%s + ".%s"`, nameExpr, propName)
 }

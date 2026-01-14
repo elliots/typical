@@ -358,11 +358,17 @@ func concatStrings(a, b string) string {
 }
 
 // appendToName appends a suffix to the name expression for nested property paths.
-// Optimises if nameExpr is a string literal by combining at compile time.
+// Optimises string concatenation by combining adjacent literals at compile time.
 func (g *Generator) appendToName(nameExpr, suffix string) string {
 	// Optimise: if nameExpr is a string literal, combine at compile time
 	if isStringLiteral(nameExpr) {
 		return fmt.Sprintf(`"%s%s"`, extractStringLiteral(nameExpr), suffix)
+	}
+	// Optimise: if nameExpr ends with a string literal like `_n + ".foo"`,
+	// combine with suffix to get `_n + ".foo.bar"` instead of `_n + ".foo" + ".bar"`
+	if idx := strings.LastIndex(nameExpr, `+ "`); idx != -1 && strings.HasSuffix(nameExpr, `"`) {
+		// Insert suffix before the closing quote
+		return nameExpr[:len(nameExpr)-1] + suffix + `"`
 	}
 	return fmt.Sprintf(`%s + "%s"`, nameExpr, suffix)
 }
@@ -433,6 +439,17 @@ func (g *Generator) buildErrorMessage(nameExpr, expected, gotExpr string) string
 	// Optimise: if nameExpr is a string literal, combine at compile time
 	if isStringLiteral(nameExpr) {
 		return fmt.Sprintf(`"Expected %s to be %s, got "+%s`, extractStringLiteral(nameExpr), escapeJSString(expected), gotExpr)
+	}
+	// Optimise: if nameExpr ends with a string literal like `_n + ".foo"`, combine with " to be"
+	// This turns `"Expected "+_n + ".foo"+" to be X"` into `"Expected "+_n+".foo to be X, got "+...`
+	if idx := strings.LastIndex(nameExpr, `+ "`); idx != -1 && strings.HasSuffix(nameExpr, `"`) {
+		// nameExpr is like: _n + ".foo"
+		// We want: "Expected "+_n+".foo to be X, got "+gotExpr
+		// prefix = everything before the trailing string literal: `_n `
+		// trailingLit = the content of the trailing literal: `.foo`
+		prefix := strings.TrimSuffix(nameExpr[:idx], " ")            // e.g., `_n`
+		trailingLit := nameExpr[idx+3 : len(nameExpr)-1]             // e.g., `.foo`
+		return fmt.Sprintf(`"Expected "+%s+"%s to be %s, got "+%s`, prefix, trailingLit, escapeJSString(expected), gotExpr)
 	}
 	return fmt.Sprintf(`"Expected "+%s+" to be %s, got "+%s`, nameExpr, escapeJSString(expected), gotExpr)
 }
