@@ -22,6 +22,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.25"
+          cache-dependency-path: packages/compiler/go/go.sum
 
       - run: pnpm install
 
@@ -46,6 +47,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.25"
+          cache-dependency-path: packages/compiler/go/go.sum
 
       - run: pnpm install
 
@@ -73,6 +75,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.25"
+          cache-dependency-path: packages/compiler/go/go.sum
 
       - uses: oven-sh/setup-bun@v2
 
