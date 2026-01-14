@@ -8,6 +8,7 @@ coverage/
 .DS_Store
 test/output
 test/fixtures
+test/project-fixtures
 
 # Go dependencies (cloned by sync-shims.sh)
 packages/compiler/go/typescript-go/

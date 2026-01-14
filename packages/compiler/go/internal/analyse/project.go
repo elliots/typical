@@ -1214,7 +1214,8 @@ func extendValidatedVariablesFromCalls(ctx *AnalysisContext) {
 				return false
 			}
 
-			if node.Kind == ast.KindVariableDeclaration {
+			switch node.Kind {
+			case ast.KindVariableDeclaration:
 				varDecl := node.AsVariableDeclaration()
 				if varDecl == nil || varDecl.Initializer == nil {
 					node.ForEachChild(visit)
@@ -1304,6 +1305,68 @@ func extendValidatedVariablesFromCalls(ctx *AnalysisContext) {
 									}
 								} else {
 									debugf("[DEBUG] Skipping UnvalidatedCallResult: var=%s not used after assignment\n", varName)
+								}
+							}
+						}
+					}
+				}
+
+			case ast.KindBinaryExpression:
+				// Handle reassignments: user4 = step3(user3)
+				bin := node.AsBinaryExpression()
+				if bin == nil || !isAssignmentOperator(bin.OperatorToken.Kind) {
+					node.ForEachChild(visit)
+					return false
+				}
+
+				// Get variable name from LHS
+				var varName string
+				if bin.Left.Kind == ast.KindIdentifier {
+					varName = bin.Left.AsIdentifier().Text
+				}
+				if varName == "" {
+					node.ForEachChild(visit)
+					return false
+				}
+
+				// Check if RHS is a call to a function that doesn't validate its return
+				if bin.Right.Kind == ast.KindCallExpression {
+					callExpr := bin.Right.AsCallExpression()
+					if callExpr != nil {
+						// Skip JSON.parse - handled separately
+						if isJSONParseCall(callExpr) {
+							node.ForEachChild(visit)
+							return false
+						}
+
+						calleeKey := resolveCalleeKey(ctx, callExpr)
+						calleeValidatesReturn := false
+						if calleeKey != "" {
+							calleeFunc := ctx.ProjectAnalysis.CallGraph[calleeKey]
+							if calleeFunc != nil && calleeFunc.ValidatesReturn {
+								calleeValidatesReturn = true
+							}
+						}
+
+						// If function doesn't validate its return, the result needs validation
+						if !calleeValidatesReturn {
+							// Get the type from the variable
+							targetType := checker.Checker_GetTypeAtLocation(ctx.Checker, bin.Left)
+
+							// Skip primitive types and types we don't validate
+							if targetType != nil && !shouldSkipType(targetType) && !isPrimitiveType(targetType) {
+								// Only validate if the variable is actually used after assignment
+								if isVariableUsedAfter(funcInfo, varName, node.End()) {
+									ctx.ProjectAnalysis.UnvalidatedCallResults[bin.Right.Pos()] = &UnvalidatedCallResult{
+										CallPos:  bin.Right.Pos(),
+										CallEnd:  bin.Right.End(),
+										Type:     targetType,
+										TypeNode: nil, // No explicit type node for reassignment
+										VarName:  varName,
+									}
+									debugf("[DEBUG] UnvalidatedCallResult (reassign): var=%s callPos=%d type=%v\n", varName, bin.Right.Pos(), targetType)
+								} else {
+									debugf("[DEBUG] Skipping UnvalidatedCallResult (reassign): var=%s not used after assignment\n", varName)
 								}
 							}
 						}

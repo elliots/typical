@@ -1354,6 +1354,51 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 					}
 				}
 			}
+
+			// Handle unvalidated call results in reassignments: user4 = step3(user3)
+			if config.ProjectAnalysis != nil && bin.Right.Kind == ast.KindCallExpression {
+				callPos := bin.Right.Pos()
+				if unvalidatedCall, exists := config.ProjectAnalysis.UnvalidatedCallResults[callPos]; exists {
+					// Get type info
+					targetType := unvalidatedCall.Type
+					typeNode := unvalidatedCall.TypeNode
+
+					if targetType != nil && !shouldSkipType(targetType) && !shouldSkipComplexType(targetType, c) {
+						callStart := bin.Right.Pos()
+
+						// Get type name for the check function
+						typeName := getTypeNameWithChecker(targetType, c)
+						if typeName == "" {
+							typeName = "value"
+						}
+
+						varName := unvalidatedCall.VarName
+
+						// Use hoisted check function for the validation
+						// Insert after the expression statement: ; if ((_e = _check_X(varName)) !== null) throw ...
+						checkFuncName := getOrCreateCheckFunction(targetType, typeNode, typeName)
+						if checkFuncName != "" {
+							// Insert right after the binary expression ends
+							insertPos := node.End()
+
+							insertions = append(insertions, insertion{
+								pos:       insertPos,
+								text:      fmt.Sprintf(`; if ((_e = %s(%s)) !== null) throw new TypeError(_e.replace(/%%n/g, "%s"))`, checkFuncName, varName, varName),
+								sourcePos: callStart,
+							})
+
+							// Mark as validated in context
+							if len(funcStack) > 0 {
+								if ctx := funcStack[len(funcStack)-1]; ctx != nil {
+									ctx.validated[varName] = append(ctx.validated[varName], targetType)
+								}
+							}
+
+							return true
+						}
+					}
+				}
+			}
 		}
 		// Continue visiting children
 		node.ForEachChild(visit)

@@ -201,7 +201,7 @@ console.log(calculateDistance([1,2], [2,'3'] as any))
   },
   {
     name: "Data leak prevention",
-    description: "Only stringify the data in the types",
+    description: "Only parse/stringify the data in the types",
     code: `interface DBUser {
   username: string
   password: string
@@ -210,14 +210,18 @@ console.log(calculateDistance([1,2], [2,'3'] as any))
 type APIUser = Omit<DBUser, 'password'>
 
 function getDBUser(): DBUser {
-  return {
-    username: "alice",
-    password: "supersecret"
-  };
+  return JSON.parse(\`{
+    "username": "alice",
+    "password": "supersecret",
+    "extra": "uh oh"
+  }\`);
 }
 
 // No problem compile-time. But the password is still there!
 const u: APIUser = getDBUser(); 
+
+console.log('Is the password still there?', (u as DBUser).password) // Still there
+console.log('Is the extra thing there?', (u as any).extra) // Was removed when parsed as DBUser
 
 // Object is filtered before stringify
 console.log("User:", JSON.stringify(u)); 

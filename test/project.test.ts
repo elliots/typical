@@ -1005,7 +1005,10 @@ void describe("Cross-Project Validation Analysis", () => {
           export function process(user: User): User {
             const user2 = step2(step1(user));
             const user3 = step3(user2);  // user2 validated, passes to external
-            const user4 = step3(user3);  // user3 is dirty (escaped to step3), needs validation
+            let user4 = step3(user3);  // user3 is dirty (escaped to step3), needs validation
+            console.log(user4.name);
+            user4 = step3(user3);  // user3 still dirty
+            console.log(user4.name)
             return user3;
           }
         `,
@@ -1035,12 +1038,21 @@ void describe("Cross-Project Validation Analysis", () => {
         "should validate step3 result for user3",
       );
 
-      // user4 = step3(user3) - user4 is never used after, so no validation needed
-      // This confirms we only validate when the value is actually read
-      assertNotContains(
+      // let user4 = step3(user3) - user4 is used (console.log(user4.name)), needs validation
+      // Pattern: let user4 = step3(user3); if ((_e = _check_User(user4)) !== null) throw ...
+      assertContains(
         results["external-chain.ts"],
-        "_check_User(user4)",
-        "should NOT validate user4 (never used)",
+        /let user4 = step3\(user3\).*_check_User\(user4\)/,
+        "should validate first user4 assignment",
+      );
+
+      // user4 = step3(user3) - reassignment, user4 is used again, needs validation
+      // Pattern: user4 = step3(user3); if ((_e = _check_User(user4)) !== null) throw ...
+      // Note: The reassignment also needs validation since user4 is read after it
+      assertContains(
+        results["external-chain.ts"],
+        /user4 = step3\(user3\).*_check_User\(user4\).*console\.log\(user4\.name\)/s,
+        "should validate second user4 assignment",
       );
 
       // Return should use _check_User (hoisted) not inline validator
