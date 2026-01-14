@@ -5,6 +5,7 @@ import { ModuleDetectionKind } from "typescript";
 import * as prettier from "prettier/standalone";
 import prettierPluginTypescript from "prettier/plugins/typescript";
 import prettierPluginEstree from "prettier/plugins/estree";
+import "./source-map-visualizer.js";
 
 // URL hash utilities for sharing with compression
 // Uses DeflateRaw for smaller output than gzip (no header/footer)
@@ -280,6 +281,23 @@ export class TypicalPlayground extends LitElement {
       height: 100%;
     }
 
+    /* Secondary toolbar */
+    .playground-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 1rem;
+      background: #252526;
+      border-bottom: 1px solid #3c3c3c;
+    }
+
+    .toolbar-left,
+    .toolbar-right {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
     /* Examples dropdown */
     .examples-dropdown {
       position: relative;
@@ -288,22 +306,22 @@ export class TypicalPlayground extends LitElement {
     .examples-btn {
       display: flex;
       align-items: center;
-      gap: 0.35rem;
-      padding: 0.25rem 0.5rem;
-      background: transparent;
-      border: 1px solid rgba(255, 255, 255, 0.2);
+      gap: 0.4rem;
+      padding: 0.5rem 0.75rem;
+      background: #505050;
+      border: 1px solid #666;
       border-radius: 4px;
-      color: #999;
+      color: #eee;
       font-family: inherit;
-      font-size: 0.8rem;
+      font-size: 0.85rem;
       cursor: pointer;
       transition: all 0.2s;
     }
 
     .examples-btn:hover {
-      background: rgba(255, 255, 255, 0.1);
+      background: #606060;
       color: white;
-      border-color: rgba(255, 255, 255, 0.3);
+      border-color: #777;
     }
 
     .examples-btn svg {
@@ -314,7 +332,7 @@ export class TypicalPlayground extends LitElement {
     .examples-menu {
       position: absolute;
       top: 100%;
-      right: 0;
+      left: 0;
       margin-top: 4px;
       background: white;
       border-radius: 6px;
@@ -373,9 +391,17 @@ export class TypicalPlayground extends LitElement {
 
     /* Main content */
     .playground-main {
+      position: relative;
       flex: 1;
       display: flex;
       overflow: hidden;
+    }
+
+    .playground-main .source-map-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      background: #1e1e1e;
     }
 
     /* Editor panels */
@@ -701,6 +727,49 @@ export class TypicalPlayground extends LitElement {
       border-top-color: #333;
     }
 
+    .sourcemap-btn {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.5rem 0.75rem;
+      background: transparent;
+      border: 1px solid #555;
+      border-radius: 4px;
+      color: #888;
+      font-family: inherit;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .sourcemap-btn:hover {
+      background: #3c3c3c;
+      color: #ccc;
+      border-color: #666;
+    }
+
+    .sourcemap-btn.active {
+      background: var(--color-primary, #3178c6);
+      border-color: var(--color-primary, #3178c6);
+      color: white;
+    }
+
+    .sourcemap-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .sourcemap-btn:disabled:hover {
+      background: transparent;
+      color: #888;
+      border-color: #555;
+    }
+
+    .sourcemap-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
     .console-output {
       flex: 1;
       overflow-y: auto;
@@ -755,7 +824,6 @@ export class TypicalPlayground extends LitElement {
   @state() private inputCode = EXAMPLES[0].code;
   @state() private shareTooltip = "";
   @state() private outputCode = "";
-  @state() private outputTab: "transformed" | "sourcemap" = "transformed";
   @state() private selectedExample = 0;
   @state() private examplesOpen = false;
   @state() private compilerStatus: "loading" | "ready" | "error" = "loading";
@@ -767,6 +835,7 @@ export class TypicalPlayground extends LitElement {
   @state() private consoleOutput: Array<{ type: "log" | "error" | "warn"; message: string }> = [];
   @state() private isRunning = false;
   @state() private formatOutput = false;
+  @state() private showSourceMapView = false;
 
   @query("#input-editor") private inputEditorContainer!: HTMLDivElement;
   @query("#output-editor") private outputEditorContainer!: HTMLDivElement;
@@ -1228,8 +1297,8 @@ ${jsCode}
         await import(/* @vite-ignore */ url);
       } finally {
         URL.revokeObjectURL(url);
-        delete (window as Record<string, unknown>).__playground_console__;
-        delete (window as Record<string, unknown>).__playground_fetch__;
+        delete (window as unknown as Record<string, unknown>).__playground_console__;
+        delete (window as unknown as Record<string, unknown>).__playground_fetch__;
       }
 
       this.consoleOutput = capturedLogs;
@@ -1284,39 +1353,75 @@ ${jsCode}
     }, 2000);
   }
 
+  private toggleSourceMapView() {
+    this.showSourceMapView = !this.showSourceMapView;
+  }
+
   render() {
     const isLoading = this.compilerStatus === "loading" || this.editorStatus === "loading";
 
     return html`
       <div class="playground-container">
+        <!-- Secondary toolbar -->
+        <div class="playground-toolbar">
+          <div class="toolbar-left">
+            <!-- Examples dropdown -->
+            <div class="examples-dropdown">
+              <button class="examples-btn" @click=${this.toggleExamples}>
+                Examples
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M6 9l6 6 6-6"/>
+                </svg>
+              </button>
+              <div class="examples-menu ${this.examplesOpen ? "open" : ""}">
+                ${EXAMPLES.map(
+                  (example, i) => html`
+                  <button
+                    class="example-item ${this.selectedExample === i ? "active" : ""}"
+                    @click=${() => this.selectExample(i)}
+                  >
+                    <div class="example-name">${example.name}</div>
+                    <div class="example-desc">${example.description}</div>
+                  </button>
+                `,
+                )}
+              </div>
+            </div>
+            <button
+              class="sourcemap-btn ${this.showSourceMapView ? "active" : ""}"
+              @click=${() => this.toggleSourceMapView()}
+              ?disabled=${!this.sourceMap}
+              title="Toggle source map visualisation"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/>
+                <circle cx="12" cy="10" r="3"/>
+              </svg>
+              Source Map
+            </button>
+          </div>
+        </div>
+
         <!-- Main editor area -->
         <main class="playground-main">
+          <!-- Source Map View (overlay) -->
+          ${
+            this.showSourceMapView && this.sourceMap
+              ? html`
+            <source-map-visualizer
+              class="source-map-overlay"
+              .originalCode=${this.inputCode}
+              .generatedCode=${this.outputCode}
+              .sourceMap=${this.sourceMap}
+            ></source-map-visualizer>
+          `
+              : ""
+          }
+
           <!-- Input panel -->
           <div class="editor-panel">
             <div class="panel-header">
               <span class="panel-label">Input (TypeScript)</span>
-              <!-- Examples dropdown -->
-              <div class="examples-dropdown">
-                <button class="examples-btn" @click=${this.toggleExamples}>
-                  Examples
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M6 9l6 6 6-6"/>
-                  </svg>
-                </button>
-                <div class="examples-menu ${this.examplesOpen ? "open" : ""}">
-                  ${EXAMPLES.map(
-                    (example, i) => html`
-                    <button
-                      class="example-item ${this.selectedExample === i ? "active" : ""}"
-                      @click=${() => this.selectExample(i)}
-                    >
-                      <div class="example-name">${example.name}</div>
-                      <div class="example-desc">${example.description}</div>
-                    </button>
-                  `,
-                  )}
-                </div>
-              </div>
             </div>
             <div class="editor-container" id="input-editor"></div>
           </div>
@@ -1327,20 +1432,7 @@ ${jsCode}
           <!-- Output panel -->
           <div class="editor-panel">
             <div class="panel-header">
-              <div class="panel-tabs">
-                <button
-                  class="panel-tab ${this.outputTab === "transformed" ? "active" : ""}"
-                  @click=${() => (this.outputTab = "transformed")}
-                >
-                  Transformed
-                </button>
-                <button
-                  class="panel-tab ${this.outputTab === "sourcemap" ? "active" : ""}"
-                  @click=${() => (this.outputTab = "sourcemap")}
-                >
-                  Source Map
-                </button>
-              </div>
+              <span class="panel-label">Output (TypeScript)</span>
               <label class="format-checkbox">
                 <input
                   type="checkbox"
@@ -1368,8 +1460,7 @@ ${jsCode}
                 <pre class="error-message">${this.transformError}</pre>
               `
                       : html`
-                <div class="editor-container" id="output-editor" style="${this.outputTab === "transformed" ? "" : "display: none"}"></div>
-                <pre class="output-code" style="${this.outputTab === "sourcemap" ? "" : "display: none"}">${this.sourceMap ? JSON.stringify(this.sourceMap, null, 2) : "No source map generated"}</pre>
+                <div class="editor-container" id="output-editor"></div>
               `
               }
             </div>
@@ -1428,7 +1519,7 @@ ${jsCode}
                 : ""
             }
           </div>
-          <div style="display: flex; align-items: center; gap: 1rem;">
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
             <button class="share-btn" @click=${() => this.shareCode()}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/>
