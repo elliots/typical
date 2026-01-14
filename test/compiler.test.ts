@@ -1418,3 +1418,51 @@ void describe("Source Map Generation", () => {
     assert.ok(nonEmptySegments.length > 0, "Should have non-empty mapping segments");
   });
 });
+
+// =============================================================================
+// CHAINED METHOD CALLS
+// =============================================================================
+
+void describe("Chained Method Calls", () => {
+  registerTestCase({
+    name: "Object.keys().map() should not validate callback as object type",
+    source: `
+      declare function externalFunc(obj: Record<string, string>): void;
+      const DATA: Record<string, string> = { a: "1", b: "2" };
+      export function run(_: unknown): string[] {
+        // Object.keys(DATA) is external, DATA needs validation
+        // But the callback to .map() should NOT be validated as Record<string, string>
+        return Object.keys(DATA).map((key) => key.toUpperCase());
+      }
+    `,
+    // The callback should NOT be wrapped in validation - it's a function, not an object
+    notExpectStrings: [
+      // Should not have validation wrapping the arrow function callback
+      /\)\s*\)\s*\.map\s*\(\s*\(\s*\(_v,\s*_n\)/,
+    ],
+    cases: [{ input: null, result: ["A", "B"] }],
+  });
+
+  registerTestCase({
+    name: "chained filter().map() should work correctly",
+    source: `
+      const ITEMS: string[] = ["a", "b", "c"];
+      export function run(_: unknown): string[] {
+        return ITEMS.filter((x) => x !== "b").map((x) => x.toUpperCase());
+      }
+    `,
+    cases: [{ input: null, result: ["A", "C"] }],
+  });
+
+  registerTestCase({
+    name: "array.map() with callback should execute without type errors",
+    source: `
+      interface Item { id: number; name: string }
+      const ITEMS: Item[] = [{ id: 1, name: "one" }, { id: 2, name: "two" }];
+      export function run(_: unknown): string[] {
+        return ITEMS.map((item) => item.name);
+      }
+    `,
+    cases: [{ input: null, result: ["one", "two"] }],
+  });
+});

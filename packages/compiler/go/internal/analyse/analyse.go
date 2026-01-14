@@ -1237,6 +1237,8 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 						countCheck(argType, arg, arg, "external-call-argument", argName)
 
 						// Store info for transform to use
+						// Include arg.Pos() in the key to handle chained calls like Object.keys(x).map(y)
+						// where multiple calls can share the same node.Pos() but have different argument positions
 						result.DirtyExternalArgs = append(result.DirtyExternalArgs, DirtyExternalArg{
 							CallPos:   node.Pos(),
 							ArgIndex:  argIdx,

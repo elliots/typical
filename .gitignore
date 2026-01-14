@@ -16,3 +16,5 @@ packages/compiler/go/.tsgolint-cache/
 
 
 *.vsix
+
+samples/vite-react/test-results/.last-run.json

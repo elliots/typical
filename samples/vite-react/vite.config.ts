@@ -5,6 +5,12 @@ import Typical from "@elliots/unplugin-typical/vite";
 export default defineConfig({
   build: {
     sourcemap: true,
+    minify: false,
+    rollupOptions: {
+      output: {
+        manualChunks: undefined, // Don't split chunks
+      },
+    },
   },
   plugins: [
     Typical({

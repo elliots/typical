@@ -152,11 +152,12 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 	}
 
 	// Build lookup for dirty external args (dirty values passed to external functions)
-	// Key is "callPos:argIndex" - maps to the DirtyExternalArg info
+	// Key is "callPos:argIndex:argPos" - includes argPos to handle chained calls
+	// where multiple calls share the same callPos but have different argument positions
 	dirtyExternalArgs := make(map[string]*analyse.DirtyExternalArg)
 	for i := range analyseResult.DirtyExternalArgs {
 		arg := &analyseResult.DirtyExternalArgs[i]
-		key := fmt.Sprintf("%d:%d", arg.CallPos, arg.ArgIndex)
+		key := fmt.Sprintf("%d:%d:%d", arg.CallPos, arg.ArgIndex, arg.ArgPos)
 		dirtyExternalArgs[key] = arg
 	}
 
@@ -1074,9 +1075,14 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 					currentFuncKey = funcStack[len(funcStack)-1].funcKey
 				}
 
+				// Use the position of the opening paren (node.End() is after the closing paren)
+				// For chained calls like Object.keys(x).map(y), node.Pos() returns the same
+				// position for both calls, but the argument positions are unique
 				callPos := node.Pos()
 				for argIdx, arg := range callExpr.Arguments.Nodes {
-					key := fmt.Sprintf("%d:%d", callPos, argIdx)
+					// Use argument position as part of the key to ensure uniqueness
+					// This handles chained calls where multiple calls share the same start position
+					key := fmt.Sprintf("%d:%d:%d", callPos, argIdx, arg.Pos())
 					dirtyArg, needsValidation := dirtyExternalArgs[key]
 					if !needsValidation {
 						continue
