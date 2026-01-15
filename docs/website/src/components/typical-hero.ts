@@ -291,7 +291,7 @@ export class TypicalHero extends LitElement {
     return html`
       <div class="container">
         <div class="content">
-          <h1>Typical is <strong>TypeScript<br>with type-safety at <i>runtime.</i></strong></h1>
+          <h1>Typical is <strong>TypeScript<br>with type safety at <i>runtime.</i></strong></h1>
           <p class="subtitle">
             Transforms your TypeScript to add runtime validation automatically.
             <ul>

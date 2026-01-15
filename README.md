@@ -1,6 +1,6 @@
 # Typical
 
-Typical makes TypeScript type-safe at runtime _with no changes to your code_.
+Typical makes TypeScript type safe at runtime _with no changes to your code_.
 
 It transforms your code to inject runtime validation based on your existing type annotations. With source maps, so errors point to the right lines in your original code.
 
