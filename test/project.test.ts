@@ -1146,6 +1146,265 @@ void describe("Cross-Project Validation Analysis", () => {
   });
 
   // =============================================================================
+  // PARAMETER ESCAPE ANALYSIS
+  // =============================================================================
+
+  void describe("Parameter Escape Analysis", () => {
+    it("should detect escape via field storage", async () => {
+      const results = await transformProject(
+        {
+          "field-escape.ts": `
+          interface User { name: string }
+          interface Container { user: User | null }
+
+          const container: Container = { user: null };
+
+          export function storeUser(user: User): void {
+            container.user = user; // Escapes via field storage
+          }
+
+          function internalProcess(user: User): string {
+            return user.name;
+          }
+
+          export function process(user: User): string {
+            storeUser(user);
+            return internalProcess(user); // user escaped, must re-validate
+          }
+        `,
+        },
+        "field-escape",
+      );
+
+      // storeUser should validate its parameter (exported function)
+      assertContains(
+        results["field-escape.ts"],
+        "function storeUser(user: User): void { if",
+        "storeUser should validate user param",
+      );
+
+      // internalProcess is NOT called with pre-validated values in all cases
+      // because in 'process', user has escaped via storeUser before being passed
+      // So internalProcess should NOT have "validated by callers" comment
+      // (The escape means we can't trust that all callers have pre-validated it)
+    });
+
+    it("should detect escape via global variable storage", async () => {
+      const results = await transformProject(
+        {
+          "global-escape.ts": `
+          interface User { name: string }
+
+          let cachedUser: User | null = null;
+
+          export function cacheUser(user: User): void {
+            cachedUser = user; // Escapes via global storage
+          }
+
+          function processInternal(user: User): string {
+            return user.name;
+          }
+
+          export function processAndCache(user: User): string {
+            cacheUser(user);
+            cachedUser!.name = 'modified'; // user has escaped via global, then modified
+            return processInternal(user); // user is now dirty - must re-validate
+          }
+        `,
+        },
+        "global-escape",
+      );
+
+      // cacheUser should validate parameter (exported)
+      assertContains(
+        results["global-escape.ts"],
+        "function cacheUser(user: User): void { if",
+        "cacheUser should validate user param",
+      );
+
+      // processInternal should validate because user was escaped then modified
+      // The call to processInternal(user) happens after cachedUser.name = 'modified'
+      // Since user and cachedUser point to the same object, user is now dirty
+      assertContains(
+        results["global-escape.ts"],
+        "function processInternal(user: User): string { if",
+        "processInternal should validate user param because user is dirty after escape+modify",
+      );
+    });
+
+    it("should detect escape via closure capture", async () => {
+      const results = await transformProject(
+        {
+          "closure-escape.ts": `
+          interface User { name: string }
+
+          export function createGreeter(user: User): () => string {
+            // user is captured by the returned closure - escapes
+            return () => {
+              return "Hello, " + user.name;
+            };
+          }
+
+          function internalGreet(user: User): string {
+            return user.name;
+          }
+
+          export function greetAndCapture(user: User): () => string {
+            const greeter = createGreeter(user);
+            internalGreet(user); // user has escaped via closure
+            return greeter;
+          }
+        `,
+        },
+        "closure-escape",
+      );
+
+      // createGreeter should validate parameter (exported, and user escapes via closure)
+      assertContains(
+        results["closure-escape.ts"],
+        "function createGreeter(user: User): () => string { if",
+        "createGreeter should validate user param",
+      );
+    });
+
+    it("should detect escape via arrow function capture", async () => {
+      const results = await transformProject(
+        {
+          "arrow-escape.ts": `
+          interface User { name: string }
+
+          export function createCallback(user: User): () => string {
+            // Arrow function captures user
+            const callback = () => user.name;
+            return callback;
+          }
+        `,
+        },
+        "arrow-escape",
+      );
+
+      // Should validate parameter since user escapes via arrow function
+      // Uses inline validation (not hoisted) for small files
+      assertContains(
+        results["arrow-escape.ts"],
+        'typeof user === "object"',
+        "should validate user param that escapes via arrow",
+      );
+    });
+
+    it("should NOT detect escape for primitives", async () => {
+      const results = await transformProject(
+        {
+          "primitive-no-escape.ts": `
+          let cached: string = "";
+
+          export function cacheString(input: string): void {
+            cached = input; // Primitive - doesn't escape
+          }
+
+          export function process(input: string): string {
+            cacheString(input);
+            return input; // Should still be valid - primitives don't escape
+          }
+        `,
+        },
+        "primitive-no-escape",
+      );
+
+      // cacheString should validate its string parameter
+      assertContains(
+        results["primitive-no-escape.ts"],
+        "typeof input",
+        "should validate input param",
+      );
+      // In process, returning input should be valid (primitives don't have escape issues)
+      assertContains(
+        results["primitive-no-escape.ts"],
+        "/* already valid */",
+        "should skip return validation for primitive",
+      );
+    });
+
+    it("should detect escape via nested property assignment", async () => {
+      const results = await transformProject(
+        {
+          "nested-field-escape.ts": `
+          interface User { name: string }
+          interface State { data: { user: User | null } }
+
+          const state: State = { data: { user: null } };
+
+          export function setUser(user: User): void {
+            state.data.user = user; // Escapes via nested field
+          }
+        `,
+        },
+        "nested-field-escape",
+      );
+
+      // Should validate parameter since user escapes via nested field assignment
+      // Uses inline validation (not hoisted) for small files
+      assertContains(
+        results["nested-field-escape.ts"],
+        'typeof user === "object"',
+        "should validate user that escapes via nested field",
+      );
+    });
+
+    it("should detect escape via element access assignment", async () => {
+      const results = await transformProject(
+        {
+          "element-escape.ts": `
+          interface User { name: string }
+
+          const users: User[] = [];
+
+          export function addUser(user: User): void {
+            users[users.length] = user; // Escapes via element access
+          }
+        `,
+        },
+        "element-escape",
+      );
+
+      // Should validate parameter since user escapes via array assignment
+      // Uses inline validation (not hoisted) for small files
+      assertContains(
+        results["element-escape.ts"],
+        'typeof user === "object"',
+        "should validate user that escapes via element access",
+      );
+    });
+
+    it("should handle shadowed parameters in closures", async () => {
+      const results = await transformProject(
+        {
+          "shadowed-closure.ts": `
+          interface User { name: string }
+
+          export function process(user: User): (u: User) => string {
+            // Inner function shadows 'user' - outer user does NOT escape
+            return (user: User) => {
+              return user.name;
+            };
+          }
+        `,
+        },
+        "shadowed-closure",
+      );
+
+      // Outer user should be validated (on the process function)
+      assertContains(
+        results["shadowed-closure.ts"],
+        "function process(user: User): (u: User) => string { if",
+        "should validate outer user param",
+      );
+      // Return should be valid since outer user doesn't escape (it's shadowed)
+      // The outer user is not captured by the closure
+    });
+  });
+
+  // =============================================================================
   // EDGE CASES
   // =============================================================================
 

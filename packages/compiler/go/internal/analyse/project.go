@@ -115,6 +115,7 @@ type FunctionInfo struct {
 	MutatesParams []bool
 
 	// EscapesParams indicates which parameters escape to external/stored locations
+	// When a parameter escapes, it becomes "dirty" forever (can't skip re-validation)
 	EscapesParams []bool
 
 	// CallSites contains all calls made within this function
@@ -307,14 +308,16 @@ func AnalyseProject(program *compiler.Program, c *checker.Checker, config Config
 	// This must happen after Phase 3 so we know which functions validate their returns
 	extendValidatedVariablesFromCalls(ctx)
 
-	// Phase 4: Analyse call sites within each function
-	analyseCallSites(ctx)
-
-	// Phase 5: Analyse parameter mutations
+	// Phase 4: Analyse parameter mutations
 	analyseParameterMutations(ctx)
 
-	// Phase 6: Analyse parameter escapes
+	// Phase 5: Analyse parameter escapes
+	// This must happen BEFORE call site analysis so isVariableDirty can check EscapesParams
 	analyseParameterEscapes(ctx)
+
+	// Phase 6: Analyse call sites within each function
+	// This uses EscapesParams and MutatesParams to determine if variables are dirty
+	analyseCallSites(ctx)
 
 	// Phase 7: Propagate validation through the call graph
 	propagateValidation(ctx)
@@ -1016,8 +1019,185 @@ func analyseParameterEscapes(ctx *AnalysisContext) {
 			}
 		}
 
-		// TODO: Also check for storage in fields, globals, closures
+		// Check for storage in fields, globals, and closure captures
+		bodyNode := getFunctionBodyNode(funcInfo.Node)
+		if bodyNode == nil {
+			continue
+		}
+
+		// Get module-level symbols to detect global storage
+		moduleLevelVars := getModuleLevelVariables(ctx, funcInfo.FileName)
+
+		var checkEscapes ast.Visitor
+		checkEscapes = func(node *ast.Node) bool {
+			if node == nil {
+				return false
+			}
+
+			switch node.Kind {
+			case ast.KindBinaryExpression:
+				bin := node.AsBinaryExpression()
+				if bin != nil && isAssignmentOperator(bin.OperatorToken.Kind) {
+					// Check if RHS references a parameter
+					rhsRoot := getRootIdentifierName(bin.Right)
+					if idx, ok := paramIndices[rhsRoot]; ok {
+						if funcInfo.Parameters[idx].IsPrimitive {
+							break
+						}
+
+						// Check if LHS is a property access (storage in field)
+						// e.g., obj.field = param, this.field = param
+						if bin.Left.Kind == ast.KindPropertyAccessExpression ||
+							bin.Left.Kind == ast.KindElementAccessExpression {
+							funcInfo.EscapesParams[idx] = true
+							debugf("[DEBUG] Parameter %s escapes via field storage at %d\n", rhsRoot, node.Pos())
+							break
+						}
+
+						// Check if LHS is a module-level variable (storage in global)
+						lhsRoot := getRootIdentifierName(bin.Left)
+						if lhsRoot != "" && moduleLevelVars[lhsRoot] {
+							funcInfo.EscapesParams[idx] = true
+							debugf("[DEBUG] Parameter %s (idx=%d) escapes via global storage to %s in func %s\n", rhsRoot, idx, lhsRoot, funcInfo.Name)
+							break
+						}
+					}
+				}
+
+			case ast.KindArrowFunction, ast.KindFunctionExpression, ast.KindFunctionDeclaration:
+				// Check if inner function captures any parameters from outer scope
+				checkClosureCaptures(node, paramIndices, funcInfo)
+				// Don't recurse into the inner function body - it has its own scope
+				return false
+			}
+
+			node.ForEachChild(checkEscapes)
+			return false
+		}
+		bodyNode.ForEachChild(checkEscapes)
 	}
+}
+
+// getModuleLevelVariables returns a set of variable names declared at module level for a file.
+func getModuleLevelVariables(ctx *AnalysisContext, fileName string) map[string]bool {
+	result := make(map[string]bool)
+
+	sourceFile := ctx.Program.GetSourceFile(fileName)
+	if sourceFile == nil {
+		return result
+	}
+
+	// Walk top-level statements to find variable declarations
+	for _, stmt := range sourceFile.Statements.Nodes {
+		if stmt.Kind == ast.KindVariableStatement {
+			varStmt := stmt.AsVariableStatement()
+			if varStmt != nil && varStmt.DeclarationList != nil {
+				for _, decl := range varStmt.DeclarationList.AsVariableDeclarationList().Declarations.Nodes {
+					varDecl := decl.AsVariableDeclaration()
+					if varDecl != nil && varDecl.Name() != nil && varDecl.Name().Kind == ast.KindIdentifier {
+						result[varDecl.Name().AsIdentifier().Text] = true
+					}
+				}
+			}
+		}
+	}
+
+	return result
+}
+
+// checkClosureCaptures checks if an inner function captures any parameters from the outer scope.
+func checkClosureCaptures(innerFunc *ast.Node, paramIndices map[string]int, funcInfo *FunctionInfo) {
+	// Get the body of the inner function
+	var innerBody *ast.Node
+	switch innerFunc.Kind {
+	case ast.KindArrowFunction:
+		af := innerFunc.AsArrowFunction()
+		if af != nil {
+			innerBody = af.Body
+		}
+	case ast.KindFunctionExpression:
+		fe := innerFunc.AsFunctionExpression()
+		if fe != nil {
+			innerBody = fe.Body
+		}
+	case ast.KindFunctionDeclaration:
+		fd := innerFunc.AsFunctionDeclaration()
+		if fd != nil {
+			innerBody = fd.Body
+		}
+	}
+
+	if innerBody == nil {
+		return
+	}
+
+	// Get parameter names of the inner function to exclude from capture detection
+	innerParams := make(map[string]bool)
+	switch innerFunc.Kind {
+	case ast.KindArrowFunction:
+		af := innerFunc.AsArrowFunction()
+		if af != nil && af.Parameters != nil {
+			for _, p := range af.Parameters.Nodes {
+				if param := p.AsParameterDeclaration(); param != nil {
+					if param.Name() != nil && param.Name().Kind == ast.KindIdentifier {
+						innerParams[param.Name().AsIdentifier().Text] = true
+					}
+				}
+			}
+		}
+	case ast.KindFunctionExpression:
+		fe := innerFunc.AsFunctionExpression()
+		if fe != nil && fe.Parameters != nil {
+			for _, p := range fe.Parameters.Nodes {
+				if param := p.AsParameterDeclaration(); param != nil {
+					if param.Name() != nil && param.Name().Kind == ast.KindIdentifier {
+						innerParams[param.Name().AsIdentifier().Text] = true
+					}
+				}
+			}
+		}
+	case ast.KindFunctionDeclaration:
+		fd := innerFunc.AsFunctionDeclaration()
+		if fd != nil && fd.Parameters != nil {
+			for _, p := range fd.Parameters.Nodes {
+				if param := p.AsParameterDeclaration(); param != nil {
+					if param.Name() != nil && param.Name().Kind == ast.KindIdentifier {
+						innerParams[param.Name().AsIdentifier().Text] = true
+					}
+				}
+			}
+		}
+	}
+
+	// Walk the inner function body looking for references to outer parameters
+	var checkCapture ast.Visitor
+	checkCapture = func(node *ast.Node) bool {
+		if node == nil {
+			return false
+		}
+
+		if node.Kind == ast.KindIdentifier {
+			name := node.AsIdentifier().Text
+			// Check if this references an outer parameter (not shadowed by inner param)
+			if idx, ok := paramIndices[name]; ok && !innerParams[name] {
+				if !funcInfo.Parameters[idx].IsPrimitive {
+					funcInfo.EscapesParams[idx] = true
+					debugf("[DEBUG] Parameter %s escapes via closure capture\n", name)
+				}
+			}
+		}
+
+		// Don't recurse into nested functions - they have their own scope
+		if node.Kind == ast.KindArrowFunction ||
+			node.Kind == ast.KindFunctionExpression ||
+			node.Kind == ast.KindFunctionDeclaration {
+			return false
+		}
+
+		node.ForEachChild(checkCapture)
+		return false
+	}
+	innerBody.ForEachChild(checkCapture)
 }
 
 // analyseValidatedVariables tracks which variables are validated within each function.
@@ -1344,6 +1524,7 @@ func shouldSkipType(t *checker.Type) bool {
 
 // isVariableDirty checks if a variable has been modified between two positions.
 // This is used to determine if a validated variable is still valid at a call site.
+// Simplified rule: if a variable escapes (via function call, field, global, closure), it's dirty forever.
 func isVariableDirty(ctx *AnalysisContext, funcInfo *FunctionInfo, varName string, fromPos, toPos int) bool {
 	if funcInfo.BodyNode == nil {
 		return false
@@ -1397,27 +1578,45 @@ func isVariableDirty(ctx *AnalysisContext, funcInfo *FunctionInfo, varName strin
 			}
 			call := n.AsCallExpression()
 			if call != nil && call.Arguments != nil {
-				// Check if varName is passed as an argument to a non-pure function
-				isPure := false
-				funcName := getCallExpressionName(call)
-				if funcName != "" && len(ctx.Config.PureFunctions) > 0 {
-					for _, re := range ctx.Config.PureFunctions {
-						if re.MatchString(funcName) {
-							isPure = true
-							break
+				// Check if varName is passed as an argument
+				for argIdx, arg := range call.Arguments.Nodes {
+					root := getRootIdentifierName(arg)
+					if root != varName {
+						continue
+					}
+
+					// Check if callee escapes this param - if so, dirty forever
+					calleeKey := resolveCalleeKey(ctx, call)
+					if calleeKey != "" {
+						if calleeFunc := ctx.ProjectAnalysis.CallGraph[calleeKey]; calleeFunc != nil {
+							// If the callee escapes this parameter, it's dirty forever
+							if argIdx < len(calleeFunc.EscapesParams) && calleeFunc.EscapesParams[argIdx] {
+								dirty = true
+								return false
+							}
+							// Internal function that doesn't mutate or escape - not dirty
+							if argIdx < len(calleeFunc.MutatesParams) && !calleeFunc.MutatesParams[argIdx] {
+								continue
+							}
 						}
 					}
-				}
 
-				if !isPure {
-					for _, arg := range call.Arguments.Nodes {
-						root := getRootIdentifierName(arg)
-						if root == varName {
-							// Variable passed to a non-pure function - conservatively mark as dirty
-							debugf("[DEBUG] isVariableDirtyExported: %s passed to call at pos=%d (toPos=%d)\n", varName, n.Pos(), toPos)
-							dirty = true
-							return false
+					// Check if it's a pure function
+					isPure := false
+					funcName := getCallExpressionName(call)
+					if funcName != "" && len(ctx.Config.PureFunctions) > 0 {
+						for _, re := range ctx.Config.PureFunctions {
+							if re.MatchString(funcName) {
+								isPure = true
+								break
+							}
 						}
+					}
+
+					if !isPure {
+						// Variable passed to a function that may mutate it - mark as dirty
+						dirty = true
+						return false
 					}
 				}
 			}
@@ -1476,12 +1675,13 @@ func IsVariableValidAtPosition(pa *ProjectAnalysis, funcKey string, varName stri
 	}
 
 	// Check if the variable was dirtied between validation and the given position
-	return !isVariableDirtyExported(funcInfo, varName, validation.Position, atPosition, config)
+	return !isVariableDirtyExported(pa, funcInfo, varName, validation.Position, atPosition, config)
 }
 
 // isVariableDirtyExported checks if a variable was dirtied between two positions.
-// This version doesn't need AnalysisContext - it uses the config directly.
-func isVariableDirtyExported(funcInfo *FunctionInfo, varName string, fromPos, toPos int, config Config) bool {
+// This version accepts ProjectAnalysis to look up internal functions.
+// Simplified rule: if a variable escapes (via function call, field, global, closure), it's dirty forever.
+func isVariableDirtyExported(pa *ProjectAnalysis, funcInfo *FunctionInfo, varName string, fromPos, toPos int, config Config) bool {
 	if funcInfo.BodyNode == nil {
 		return false
 	}
@@ -1534,31 +1734,47 @@ func isVariableDirtyExported(funcInfo *FunctionInfo, varName string, fromPos, to
 			}
 			call := n.AsCallExpression()
 			if call != nil && call.Arguments != nil {
-				// Check if varName is passed as an argument to a non-pure function
-				isPure := false
-				funcName := getCallExpressionName(call)
-				if funcName != "" && len(config.PureFunctions) > 0 {
-					for _, re := range config.PureFunctions {
-						if re.MatchString(funcName) {
-							isPure = true
-							break
+				// Check if varName is passed as an argument
+				for argIdx, arg := range call.Arguments.Nodes {
+					root := getRootIdentifierName(arg)
+					if root != varName {
+						continue
+					}
+
+					// Check if callee escapes this param - if so, dirty forever
+					if pa != nil {
+						calleeKey := resolveCalleeKeyFromPA(pa, funcInfo.FileName, call)
+						if calleeKey != "" {
+							if calleeFunc := pa.CallGraph[calleeKey]; calleeFunc != nil {
+								// If the callee escapes this parameter, it's dirty forever
+								if argIdx < len(calleeFunc.EscapesParams) && calleeFunc.EscapesParams[argIdx] {
+									dirty = true
+									return false
+								}
+								// Internal function that doesn't mutate or escape - not dirty
+								if argIdx < len(calleeFunc.MutatesParams) && !calleeFunc.MutatesParams[argIdx] {
+									continue
+								}
+							}
 						}
 					}
-				}
 
-				if !isPure {
-					for _, arg := range call.Arguments.Nodes {
-						root := getRootIdentifierName(arg)
-						if root == varName {
-							// Skip if this is the exact argument position we're checking for
-							// (we don't want to count the call we're validating for)
-							if arg.Pos() == toPos {
-								continue
+					// Check if it's a pure function
+					isPure := false
+					funcName := getCallExpressionName(call)
+					if funcName != "" && len(config.PureFunctions) > 0 {
+						for _, re := range config.PureFunctions {
+							if re.MatchString(funcName) {
+								isPure = true
+								break
 							}
-							// Variable passed to a non-pure function - conservatively mark as dirty
-							dirty = true
-							return false
 						}
+					}
+
+					if !isPure {
+						// Variable passed to a function that may mutate it - mark as dirty
+						dirty = true
+						return false
 					}
 				}
 			}
@@ -1592,6 +1808,35 @@ func isVariableDirtyExported(funcInfo *FunctionInfo, varName string, fromPos, to
 
 	funcInfo.BodyNode.ForEachChild(checkDirtyExported)
 	return dirty
+}
+
+// resolveCalleeKeyFromPA resolves a callee key from a call expression using only the ProjectAnalysis.
+// This is a simpler version that works without the type checker.
+func resolveCalleeKeyFromPA(pa *ProjectAnalysis, callerFileName string, call *ast.CallExpression) string {
+	if call == nil || pa == nil {
+		return ""
+	}
+
+	// Get the function name from the call expression
+	funcName := getCallExpressionName(call)
+	if funcName == "" {
+		return ""
+	}
+
+	// First, try to find it in the same file
+	key := generateFunctionKey(callerFileName, funcName, 0)
+	if _, ok := pa.CallGraph[key]; ok {
+		return key
+	}
+
+	// Search in all files
+	for _, funcInfo := range pa.CallGraph {
+		if funcInfo.Name == funcName {
+			return funcInfo.Key
+		}
+	}
+
+	return ""
 }
 
 // isVariableUsedAfter checks if a variable is read/accessed after a given position.

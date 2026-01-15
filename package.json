@@ -49,7 +49,7 @@
     "build:ts": "pnpm --filter './packages/*' run build && tsc",
     "build:website": "pnpm --filter typical-website run build",
     "dev": "tsc --watch",
-    "test": "rm -f test/test.temp.ts && tsc && node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
+    "test": "rm -f test/test.temp.ts && rm -rf test/project-fixtures && tsc && node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
     "test:coverage": "rm -f test/test.temp.ts && tsc && node --import ./dist/src/esm-loader-register.js --test --experimental-test-coverage dist/test/*.test.js",
     "test:coverage:html": "rm -f test/test.temp.ts && tsc && c8 --reporter=html --reporter=text --include='dist/src/**' node --import ./dist/src/esm-loader-register.js --test dist/test/*.test.js",
     "bench": "pnpm run build && cd bench && pnpm install && npm run bench",

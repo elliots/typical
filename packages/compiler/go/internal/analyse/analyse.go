@@ -5,8 +5,8 @@
 package analyse
 
 import (
+	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/elliots/typical/packages/compiler/internal/utils"
@@ -500,15 +500,15 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 		return ""
 	}
 
-	// getFunctionKey generates a unique key for a function (fileName:position)
+	// getFunctionKey generates a unique key for a function matching project.go format
 	getFunctionKey := func(fn *functionLike) string {
 		fileName := sourceFile.FileName()
 		pos := fn.node.Pos()
 		name := getFunctionName(fn)
 		if name != "" {
-			return fileName + ":" + name + ":" + strconv.Itoa(pos)
+			return fileName + ":" + name
 		}
-		return fileName + ":" + strconv.Itoa(pos)
+		return fmt.Sprintf("%s:anonymous@%d", fileName, pos)
 	}
 
 	getFunctionType := func(f *functionLike) *ast.Node {
@@ -974,7 +974,8 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 
 			// Analyse parameters and mark them as validated
 			if config.ValidateParameters {
-				for _, param := range getFunctionParameters(fn) {
+				params := getFunctionParameters(fn)
+				for _, param := range params {
 					if param.Type != nil {
 						paramType := checker.Checker_getTypeFromTypeNode(c, param.Type)
 						paramName := GetParamName(param)
@@ -988,6 +989,19 @@ func AnalyseFileWithProjectAnalysis(sourceFile *ast.SourceFile, c *checker.Check
 						skipReason := getSkipReason(paramType)
 						if skipReason == "" && paramName != "(destructured)" {
 							ctx.validated[paramName] = append(ctx.validated[paramName], paramType)
+						}
+					}
+				}
+
+				// Check if any parameters escape using project analysis
+				if projectAnalysis != nil {
+					if funcInfo, ok := projectAnalysis.CallGraph[ctx.funcKey]; ok {
+						for i, param := range params {
+							paramName := GetParamName(param)
+							if paramName != "" && i < len(funcInfo.EscapesParams) && funcInfo.EscapesParams[i] {
+								// Parameter escapes - mark it as escaped to external
+								ctx.escapedToExternal[paramName] = true
+							}
 						}
 					}
 				}
