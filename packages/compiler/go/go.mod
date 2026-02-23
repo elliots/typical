@@ -1,6 +1,6 @@
 module github.com/elliots/typical/packages/compiler
 
-go 1.25.0
+go 1.25.3
 
 replace (
 	github.com/microsoft/typescript-go/shim/ast => ./shim/ast
@@ -21,7 +21,7 @@ replace (
 
 require (
 	github.com/go-json-experiment/json v0.0.0-20251027170946-4849db3c2f7e
-	github.com/microsoft/typescript-go v0.0.0-20251228212439-1611cc951fa7
+	github.com/microsoft/typescript-go v0.0.0-20260114234201-f5bcdfc02e65
 	github.com/microsoft/typescript-go/shim/ast v0.0.0
 	github.com/microsoft/typescript-go/shim/bundled v0.0.0
 	github.com/microsoft/typescript-go/shim/checker v0.0.0
@@ -35,6 +35,7 @@ require (
 )
 
 require (
+	github.com/aperturerobotics/goscript v0.0.72 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
 	github.com/microsoft/typescript-go/shim/core v0.0.0 // indirect

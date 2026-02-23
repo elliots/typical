@@ -1,0 +1,25 @@
+{
+  "name": "sample-react-native",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./index.ts",
+  "scripts": {
+    "start": "expo start",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "android": "expo run:android"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~55.0.6",
+    "expo": "55.0.0-preview.12",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-native": "0.83.2",
+    "react-native-web": "~0.21.2"
+  },
+  "devDependencies": {
+    "@elliots/metro-transformer-typical": "workspace:*",
+    "@expo/metro-config": "~55.0.7",
+    "typescript": "5.9.3"
+  }
+}

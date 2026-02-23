@@ -38,13 +38,14 @@ const user = JSON.parse('{"name":"Alice","email":"not-an-email"}') as User;
 
 Choose the integration that fits your workflow:
 
-| Method                                                    | Best For                        | Package                       |
-| --------------------------------------------------------- | ------------------------------- | ----------------------------- |
-| [ESM Loader](#nodejs-esm-loader)                          | Node.js scripts, development    | `@elliots/typical`            |
-| [ttsx](#ttsx-tsx-wrapper)                                 | Quick scripts with tsx          | `@elliots/typical` + `tsx`    |
-| [Bun Plugin](#bun)                                        | Bun projects                    | `@elliots/bun-plugin-typical` |
-| [Vite/Webpack/etc](#bundlers-vite-webpack-rollup-esbuild) | Frontend apps, bundled projects | `@elliots/unplugin-typical`   |
-| [tsc Plugin](#typescript-compiler-tsc)                    | Pure TypeScript compilation     | `@elliots/typical-tsc-plugin` |
+| Method                                                    | Best For                        | Package                              |
+| --------------------------------------------------------- | ------------------------------- | ------------------------------------ |
+| [ESM Loader](#nodejs-esm-loader)                          | Node.js scripts, development    | `@elliots/typical`                   |
+| [ttsx](#ttsx-tsx-wrapper)                                 | Quick scripts with tsx          | `@elliots/typical` + `tsx`           |
+| [Bun Plugin](#bun)                                        | Bun projects                    | `@elliots/bun-plugin-typical`        |
+| [React Native / Expo](#react-native--expo)                | React Native apps               | `@elliots/metro-transformer-typical` |
+| [Vite/Webpack/etc](#bundlers-vite-webpack-rollup-esbuild) | Frontend apps, bundled projects | `@elliots/unplugin-typical`          |
+| [tsc Plugin](#typescript-compiler-tsc)                    | Pure TypeScript compilation     | `@elliots/typical-tsc-plugin`        |
 
 ---
 
@@ -119,6 +120,44 @@ Then run:
 
 ```bash
 bun run src/index.ts
+```
+
+---
+
+## React Native / Expo
+
+```bash
+npm add @elliots/metro-transformer-typical
+```
+
+Update your `metro.config.js`:
+
+```js
+// metro.config.js
+const { getDefaultConfig } = require("expo/metro-config");
+const { withTypical } = require("@elliots/metro-transformer-typical");
+
+module.exports = withTypical(getDefaultConfig(__dirname));
+```
+
+For vanilla React Native (without Expo):
+
+```js
+// metro.config.js
+const { getDefaultConfig } = require("@react-native/metro-config");
+const { withTypical } = require("@elliots/metro-transformer-typical");
+
+module.exports = withTypical(getDefaultConfig(__dirname));
+```
+
+With options:
+
+```js
+module.exports = withTypical(getDefaultConfig(__dirname), {
+  typical: {
+    validateCasts: true,
+  },
+});
 ```
 
 ---

@@ -61,6 +61,7 @@
     "sample:ttsc": "cd samples/ttsc && pnpm install && npm run build && npm run start",
     "sample:vite-react": "cd samples/vite-react && pnpm install && pnpm run test",
     "sample:bun": "cd samples/bun && pnpm install && bun run start",
+    "sample:react-native": "cd samples/react-native && pnpm install && npm run web",
     "samples": "npm run sample:esm && npm run sample:ttsx && npm run sample:vite-react && npm run sample:bun",
     "publish:all": "npm run lint && npm run format:check && node scripts/publish.js"
   },

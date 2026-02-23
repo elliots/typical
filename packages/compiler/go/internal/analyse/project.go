@@ -125,6 +125,10 @@ type FunctionInfo struct {
 	// because all callers pre-validate them (only for non-exported functions)
 	CanSkipParamValidation []bool
 
+	// ParamValidationReason explains why each param needs/skips validation
+	// Used for generating informative comments in transformed code
+	ParamValidationReason []string
+
 	// ValidatedVariables maps variable names to their validation position.
 	// A variable is validated at a position and may become dirty later.
 	ValidatedVariables map[string]*VariableValidation
@@ -223,6 +227,10 @@ type ArgumentInfo struct {
 
 	// IsValidated indicates if this argument is known to be pre-validated
 	IsValidated bool
+
+	// DirtyReason explains why the argument is not validated (if IsValidated is false)
+	// Examples: "escaped via cacheUser", "mutated at line 10", "passed to external function"
+	DirtyReason string
 
 	// EscapeKind describes how this argument escapes via this call
 	EscapeKind EscapeKind
@@ -603,6 +611,7 @@ func analyseFunctionNode(ctx *AnalysisContext, node *ast.Node, fileAnalysis *Fil
 	funcInfo.MutatesParams = make([]bool, paramCount)
 	funcInfo.EscapesParams = make([]bool, paramCount)
 	funcInfo.CanSkipParamValidation = make([]bool, paramCount)
+	funcInfo.ParamValidationReason = make([]string, paramCount)
 
 	// If config has ValidateParameters, mark all params as validated at entry
 	if ctx.Config.ValidateParameters {
@@ -773,9 +782,12 @@ func analyseCallExpression(ctx *AnalysisContext, caller *FunctionInfo, call *ast
 				// Check if this argument references a validated variable
 				if validation, ok := caller.ValidatedVariables[rootVar]; ok {
 					// Check if the variable has been dirtied between validation and this call
-					if !isVariableDirty(ctx, caller, rootVar, validation.Position, call.Pos()) {
+					dirty, dirtyReason := isVariableDirtyWithReason(ctx, caller, rootVar, validation.Position, call.Pos())
+					if !dirty {
 						argInfo.IsValidated = true
 						argInfo.ValidationPath = append(argInfo.ValidationPath, validation.Source)
+					} else {
+						argInfo.DirtyReason = dirtyReason
 					}
 				}
 			} else if argNode.Kind == ast.KindCallExpression {
@@ -1526,8 +1538,15 @@ func shouldSkipType(t *checker.Type) bool {
 // This is used to determine if a validated variable is still valid at a call site.
 // Simplified rule: if a variable escapes (via function call, field, global, closure), it's dirty forever.
 func isVariableDirty(ctx *AnalysisContext, funcInfo *FunctionInfo, varName string, fromPos, toPos int) bool {
+	dirty, _ := isVariableDirtyWithReason(ctx, funcInfo, varName, fromPos, toPos)
+	return dirty
+}
+
+// isVariableDirtyWithReason checks if a variable has been modified and returns the reason.
+// Returns (dirty, reason) where reason explains why the variable is dirty.
+func isVariableDirtyWithReason(ctx *AnalysisContext, funcInfo *FunctionInfo, varName string, fromPos, toPos int) (bool, string) {
 	if funcInfo.BodyNode == nil {
-		return false
+		return false, ""
 	}
 
 	// Get the validated type to check if it's primitive
@@ -1538,6 +1557,7 @@ func isVariableDirty(ctx *AnalysisContext, funcInfo *FunctionInfo, varName strin
 	varIsPrimitive := isPrimitiveType(validatedType)
 
 	dirty := false
+	reason := ""
 
 	var checkDirty func(n *ast.Node) bool
 	checkDirty = func(n *ast.Node) bool {
@@ -1561,12 +1581,14 @@ func isVariableDirty(ctx *AnalysisContext, funcInfo *FunctionInfo, varName strin
 					// Direct variable reassignment always dirties
 					if isIdentifierNamed(bin.Left, varName) {
 						dirty = true
+						reason = "reassigned"
 						return false
 					}
 
 					// For property assignment (x.prop = ...), mark as dirty for non-primitives
 					if !varIsPrimitive && getRootIdentifierName(bin.Left) == varName {
 						dirty = true
+						reason = "mutated"
 						return false
 					}
 				}
@@ -1592,6 +1614,7 @@ func isVariableDirty(ctx *AnalysisContext, funcInfo *FunctionInfo, varName strin
 							// If the callee escapes this parameter, it's dirty forever
 							if argIdx < len(calleeFunc.EscapesParams) && calleeFunc.EscapesParams[argIdx] {
 								dirty = true
+								reason = fmt.Sprintf("escaped via %s", calleeFunc.Name)
 								return false
 							}
 							// Internal function that doesn't mutate or escape - not dirty
@@ -1616,6 +1639,7 @@ func isVariableDirty(ctx *AnalysisContext, funcInfo *FunctionInfo, varName strin
 					if !isPure {
 						// Variable passed to a function that may mutate it - mark as dirty
 						dirty = true
+						reason = fmt.Sprintf("passed to %s", funcName)
 						return false
 					}
 				}
@@ -1627,6 +1651,7 @@ func isVariableDirty(ctx *AnalysisContext, funcInfo *FunctionInfo, varName strin
 				if prefix.Operator == ast.KindPlusPlusToken || prefix.Operator == ast.KindMinusMinusToken {
 					if isIdentifierNamed(prefix.Operand, varName) {
 						dirty = true
+						reason = "incremented/decremented"
 						return false
 					}
 				}
@@ -1638,6 +1663,7 @@ func isVariableDirty(ctx *AnalysisContext, funcInfo *FunctionInfo, varName strin
 				if postfix.Operator == ast.KindPlusPlusToken || postfix.Operator == ast.KindMinusMinusToken {
 					if isIdentifierNamed(postfix.Operand, varName) {
 						dirty = true
+						reason = "incremented/decremented"
 						return false
 					}
 				}
@@ -1649,7 +1675,7 @@ func isVariableDirty(ctx *AnalysisContext, funcInfo *FunctionInfo, varName strin
 	}
 
 	funcInfo.BodyNode.ForEachChild(checkDirty)
-	return dirty
+	return dirty, reason
 }
 
 // isIdentifierNamed is a local alias for the exported IsIdentifierNamed.
@@ -1952,6 +1978,7 @@ func propagateValidation(ctx *AnalysisContext) {
 				// Find all call sites to this function
 				allCallersValidate := true
 				callerCount := 0
+				var firstDirtyReason string
 
 				for _, otherFunc := range ctx.ProjectAnalysis.CallGraph {
 					for _, callSite := range otherFunc.CallSites {
@@ -1962,6 +1989,9 @@ func propagateValidation(ctx *AnalysisContext) {
 								arg := callSite.Arguments[paramIdx]
 								if !arg.IsValidated {
 									allCallersValidate = false
+									if firstDirtyReason == "" && arg.DirtyReason != "" {
+										firstDirtyReason = arg.DirtyReason
+									}
 									break
 								}
 							} else {
@@ -1977,7 +2007,10 @@ func propagateValidation(ctx *AnalysisContext) {
 				// If all callers validate this param, we can skip validation
 				if callerCount > 0 && allCallersValidate {
 					funcInfo.CanSkipParamValidation[paramIdx] = true
+					funcInfo.ParamValidationReason[paramIdx] = "validated by callers"
 					changed = true
+				} else if firstDirtyReason != "" {
+					funcInfo.ParamValidationReason[paramIdx] = firstDirtyReason
 				}
 			}
 		}

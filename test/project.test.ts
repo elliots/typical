@@ -1225,9 +1225,10 @@ void describe("Cross-Project Validation Analysis", () => {
       // processInternal should validate because user was escaped then modified
       // The call to processInternal(user) happens after cachedUser.name = 'modified'
       // Since user and cachedUser point to the same object, user is now dirty
+      // The comment explains why validation is required
       assertContains(
         results["global-escape.ts"],
-        "function processInternal(user: User): string { if",
+        "function processInternal(user: User): string { /* user: escaped via cacheUser */ if",
         "processInternal should validate user param because user is dirty after escape+modify",
       );
     });

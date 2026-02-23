@@ -28,6 +28,10 @@ const mainPackages = [
   { name: "@elliots/unplugin-typical", path: resolve(rootDir, "packages/unplugin") },
   { name: "@elliots/bun-plugin-typical", path: resolve(rootDir, "packages/bun-plugin") },
   { name: "@elliots/typical-tsc-plugin", path: resolve(rootDir, "packages/tsc-plugin") },
+  {
+    name: "@elliots/metro-transformer-typical",
+    path: resolve(rootDir, "packages/metro-transformer"),
+  },
 ];
 
 function readJson(filePath) {
@@ -332,6 +336,7 @@ async function main() {
     { name: "unplugin", path: resolve(rootDir, "packages/unplugin") },
     { name: "bun-plugin", path: resolve(rootDir, "packages/bun-plugin") },
     { name: "tsc-plugin", path: resolve(rootDir, "packages/tsc-plugin") },
+    { name: "metro-transformer", path: resolve(rootDir, "packages/metro-transformer") },
   ];
 
   for (const pkg of dependentPackages) {

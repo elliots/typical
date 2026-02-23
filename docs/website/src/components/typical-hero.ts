@@ -259,6 +259,8 @@ export class TypicalHero extends LitElement {
           <ul class="tools-list">
             <li><span class="tool-name">Node.js</span><span class="tool-method">@elliots/typical/esm</span></li>
             <li><span class="tool-name">Bun</span><span class="tool-method">@elliots/bun-plugin-typical</span></li>
+            <li><span class="tool-name">React Native</span><span class="tool-method">@elliots/metro-transformer-typical</span></li>
+            <li><span class="tool-name">Expo</span><span class="tool-method">@elliots/metro-transformer-typical</span></li>
             <li><span class="tool-name">Vite</span><span class="tool-method">@elliots/unplugin-typical</span></li>
             <li><span class="tool-name">Webpack</span><span class="tool-method">@elliots/unplugin-typical</span></li>
             <li><span class="tool-name">Rollup</span><span class="tool-method">@elliots/unplugin-typical</span></li>

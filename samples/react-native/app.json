@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "typical-react-native-sample",
+    "slug": "typical-react-native-sample",
+    "version": "1.0.0",
+    "platforms": ["ios", "web"],
+    "ios": {
+      "bundleIdentifier": "com.typical.sample"
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

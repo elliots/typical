@@ -1,0 +1,75 @@
+{
+  "name": "@elliots/metro-transformer-typical",
+  "version": "0.3.0",
+  "description": "Metro bundler transformer for typical - runtime safe TypeScript transformer",
+  "keywords": [
+    "expo",
+    "metro",
+    "react-native",
+    "runtime",
+    "transformer",
+    "typescript",
+    "typical",
+    "validation"
+  ],
+  "homepage": "https://github.com/elliots/typical#readme",
+  "bugs": {
+    "url": "https://github.com/elliots/typical/issues"
+  },
+  "license": "MIT",
+  "author": "Elliot Shepherd <elliot@jarofworms.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/elliots/typical.git",
+    "directory": "packages/metro-transformer"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/transformer.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./transformer": {
+      "types": "./dist/transformer.d.mts",
+      "require": "./dist/transformer.cjs",
+      "import": "./dist/transformer.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@elliots/typical": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsdown": "^0.18.3"
+  },
+  "peerDependencies": {
+    "@expo/metro-config": ">=0.10.0",
+    "metro-react-native-babel-transformer": ">=0.72.0",
+    "typescript": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "metro-react-native-babel-transformer": {
+      "optional": true
+    },
+    "@expo/metro-config": {
+      "optional": true
+    }
+  }
+}

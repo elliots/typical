@@ -408,7 +408,11 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 							// Add a comment explaining why validation is skipped
 							paramName := getParamName(param)
 							if paramName != "" {
-								comment := fmt.Sprintf("/* %s: validated by callers */", paramName)
+								reason := getParamValidationReason(config, ctx.funcKey, paramIdx)
+								if reason == "" {
+									reason = "validated by callers"
+								}
+								comment := fmt.Sprintf("/* %s: %s */", paramName, reason)
 								insertions = append(insertions, insertion{
 									pos:       ctx.bodyStart,
 									text:      " " + comment,
@@ -417,6 +421,10 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 							}
 							continue
 						}
+
+						// Check if there's a reason why validation can't be skipped
+						// This helps explain why validation is required in internal functions
+						validationReason := getParamValidationReason(config, ctx.funcKey, paramIdx)
 
 						if param.Type != nil {
 							paramType := checker.Checker_getTypeFromTypeNode(c, param.Type)
@@ -506,6 +514,17 @@ func TransformFileWithSourceMapAndError(sourceFile *ast.SourceFile, c *checker.C
 										validationText = fmt.Sprintf(" if (%s !== undefined) { %s}", paramName, validation)
 									} else {
 										validationText = " " + validation
+									}
+
+									// Add a comment explaining why validation is required if there's a specific reason
+									// This helps developers understand why an internal function can't skip validation
+									if validationReason != "" {
+										comment := fmt.Sprintf("/* %s: %s */", paramName, validationReason)
+										insertions = append(insertions, insertion{
+											pos:       ctx.bodyStart,
+											text:      " " + comment,
+											sourcePos: param.Pos(),
+										})
 									}
 
 									// Map to the parameter name (start of the param declaration)
@@ -1906,6 +1925,21 @@ func canSkipParamValidation(config Config, funcKey string, paramIndex int) bool 
 		return false
 	}
 	return funcInfo.CanSkipParamValidation[paramIndex]
+}
+
+// getParamValidationReason returns the reason why a param needs/skips validation.
+func getParamValidationReason(config Config, funcKey string, paramIndex int) string {
+	if config.ProjectAnalysis == nil {
+		return ""
+	}
+	funcInfo := config.ProjectAnalysis.GetFunctionInfo(funcKey)
+	if funcInfo == nil {
+		return ""
+	}
+	if paramIndex >= len(funcInfo.ParamValidationReason) {
+		return ""
+	}
+	return funcInfo.ParamValidationReason[paramIndex]
 }
 
 // isReturnFromValidatedFunction checks if an expression is a call to a function that validates its return.
