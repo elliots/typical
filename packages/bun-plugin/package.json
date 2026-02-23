@@ -1,6 +1,6 @@
 {
   "name": "@elliots/bun-plugin-typical",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Bun plugin for typical - runtime safe TypeScript transformer",
   "keywords": [
     "bun",

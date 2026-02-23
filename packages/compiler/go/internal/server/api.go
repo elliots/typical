@@ -38,19 +38,20 @@ type projectInfo struct {
 }
 
 type API struct {
-	session        *project.Session
-	cwd            string
-	fs             vfs.FS
-	mu             sync.Mutex
-	projects       map[string]*projectInfo
-	nextId         int
-	fileVersions   map[string]int32 // track version per file for overlays
-	openFiles      map[string]bool  // track which files have been opened via DidOpenFile
+	session      *project.Session
+	cwd          string
+	fs           vfs.FS
+	mu           sync.Mutex
+	projects     map[string]*projectInfo
+	nextId       int
+	fileVersions map[string]int32 // track version per file for overlays
+	openFiles    map[string]bool  // track which files have been opened via DidOpenFile
 }
 
 func NewAPI(opts *APIOptions) *API {
 	session := project.NewSession(&project.SessionInit{
-		FS: opts.FS,
+		BackgroundCtx: context.Background(),
+		FS:            opts.FS,
 		Options: &project.SessionOptions{
 			CurrentDirectory:   opts.Cwd,
 			DefaultLibraryPath: opts.DefaultLibraryPath,
@@ -77,10 +78,11 @@ func (a *API) LoadProject(configFileName string) (*ProjectResponse, error) {
 	}
 
 	ctx := context.Background()
-	proj, err := a.session.OpenProject(ctx, configFileName)
+	proj, _, release, err := a.session.APIOpenProject(ctx, configFileName, project.FileChangeSummary{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open project: %w", err)
 	}
+	release()
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -252,7 +254,8 @@ func (a *API) TransformSource(fileName, source string, ignoreTypes []string, max
 	// Create a session for this temporary project
 	ctx := context.Background()
 	tmpSession := project.NewSession(&project.SessionInit{
-		FS: a.fs,
+		BackgroundCtx: ctx,
+		FS:            a.fs,
 		Options: &project.SessionOptions{
 			CurrentDirectory:   tmpDir,
 			DefaultLibraryPath: bundled.LibPath(),
@@ -260,10 +263,11 @@ func (a *API) TransformSource(fileName, source string, ignoreTypes []string, max
 		},
 	})
 
-	proj, err := tmpSession.OpenProject(ctx, tsconfigPath)
+	proj, _, release, err := tmpSession.APIOpenProject(ctx, tsconfigPath, project.FileChangeSummary{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create project: %w", err)
 	}
+	release()
 
 	program := proj.GetProgram()
 	sourceFile := program.GetSourceFile(sourcePath)

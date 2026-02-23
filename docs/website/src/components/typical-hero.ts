@@ -339,7 +339,7 @@ export class TypicalHero extends LitElement {
         </div>
       </div>
       <div class="version-bar">
-        <span class="version-date">2026-01-13</span> <a href="https://www.npmjs.com/package/@elliots/typical" target="_blank">Typical 0.2.5</a> is now available
+        <span class="version-date">2026-02-23</span> <a href="https://www.npmjs.com/package/@elliots/typical" target="_blank">Typical 0.3.1</a> is now available, with React Native/Expo support.
       </div>
     `;
   }

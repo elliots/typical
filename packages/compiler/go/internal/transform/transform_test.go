@@ -830,19 +830,20 @@ func transformTestCode(t *testing.T, input string, config Config) string {
 
 	// Setup project with bundled lib files for Promise support
 	fs := bundled.WrapFS(osvfs.FS())
+	ctx := context.Background()
 	session := project.NewSession(&project.SessionInit{
-		FS: fs,
+		BackgroundCtx: ctx,
+		FS:            fs,
 		Options: &project.SessionOptions{
 			CurrentDirectory:   tmpDir,
 			DefaultLibraryPath: bundled.LibPath(),
 		},
 	})
-
-	ctx := context.Background()
-	proj, err := session.OpenProject(ctx, tsconfigFile)
+	proj, _, releaseSnap, err := session.APIOpenProject(ctx, tsconfigFile, project.FileChangeSummary{})
 	if err != nil {
 		t.Fatalf("Failed to open project: %v", err)
 	}
+	releaseSnap()
 
 	program := proj.GetProgram()
 	sourceFile := program.GetSourceFile(testFile)

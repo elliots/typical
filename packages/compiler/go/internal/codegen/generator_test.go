@@ -76,19 +76,20 @@ function testFunc(user: User, names: string[], nullable: string | null): void {}
 
 	// Setup project
 	fs := osvfs.FS()
+	ctx := context.Background()
 	session := project.NewSession(&project.SessionInit{
-		FS: fs,
+		BackgroundCtx: ctx,
+		FS:            fs,
 		Options: &project.SessionOptions{
 			CurrentDirectory:   tmpDir,
-			DefaultLibraryPath: "", // Will use bundled libs
+			DefaultLibraryPath: "",
 		},
 	})
-
-	ctx := context.Background()
-	proj, err := session.OpenProject(ctx, tsconfigPath)
+	proj, _, releaseSnap, err := session.APIOpenProject(ctx, tsconfigPath, project.FileChangeSummary{})
 	if err != nil {
 		t.Fatalf("failed to open project: %v", err)
 	}
+	releaseSnap()
 
 	program := proj.GetProgram()
 	sourceFile := program.GetSourceFile(testTsPath)
@@ -361,19 +362,20 @@ function processNullable(value: string | null): void {}
 
 	// Setup project
 	fs := osvfs.FS()
+	ctx := context.Background()
 	session := project.NewSession(&project.SessionInit{
-		FS: fs,
+		BackgroundCtx: ctx,
+		FS:            fs,
 		Options: &project.SessionOptions{
 			CurrentDirectory:   tmpDir,
 			DefaultLibraryPath: "",
 		},
 	})
-
-	ctx := context.Background()
-	proj, err := session.OpenProject(ctx, tsconfigPath)
+	proj, _, releaseSnap, err := session.APIOpenProject(ctx, tsconfigPath, project.FileChangeSummary{})
 	if err != nil {
 		t.Fatalf("failed to open project: %v", err)
 	}
+	releaseSnap()
 
 	program := proj.GetProgram()
 	sourceFile := program.GetSourceFile(testTsPath)
@@ -513,19 +515,20 @@ function validate(user: SimpleUser): void {}
 
 	// Setup project
 	fs := osvfs.FS()
+	ctx := context.Background()
 	session := project.NewSession(&project.SessionInit{
-		FS: fs,
+		BackgroundCtx: ctx,
+		FS:            fs,
 		Options: &project.SessionOptions{
 			CurrentDirectory:   tmpDir,
 			DefaultLibraryPath: "",
 		},
 	})
-
-	ctx := context.Background()
-	proj, err := session.OpenProject(ctx, tsconfigPath)
+	proj, _, releaseSnap, err := session.APIOpenProject(ctx, tsconfigPath, project.FileChangeSummary{})
 	if err != nil {
 		t.Fatalf("failed to open project: %v", err)
 	}
+	releaseSnap()
 
 	program := proj.GetProgram()
 	sourceFile := program.GetSourceFile(testTsPath)
@@ -633,19 +636,20 @@ interface User {
 
 	// Setup project
 	fs := osvfs.FS()
+	ctx := context.Background()
 	session := project.NewSession(&project.SessionInit{
-		FS: fs,
+		BackgroundCtx: ctx,
+		FS:            fs,
 		Options: &project.SessionOptions{
 			CurrentDirectory:   tmpDir,
 			DefaultLibraryPath: "",
 		},
 	})
-
-	ctx := context.Background()
-	proj, err := session.OpenProject(ctx, tsconfigPath)
+	proj, _, releaseSnap, err := session.APIOpenProject(ctx, tsconfigPath, project.FileChangeSummary{})
 	if err != nil {
 		t.Fatalf("failed to open project: %v", err)
 	}
+	releaseSnap()
 
 	program := proj.GetProgram()
 	sourceFile := program.GetSourceFile(testTsPath)
@@ -736,19 +740,20 @@ interface User {
 
 	// Setup project
 	fs := osvfs.FS()
+	ctx := context.Background()
 	session := project.NewSession(&project.SessionInit{
-		FS: fs,
+		BackgroundCtx: ctx,
+		FS:            fs,
 		Options: &project.SessionOptions{
 			CurrentDirectory:   tmpDir,
 			DefaultLibraryPath: "",
 		},
 	})
-
-	ctx := context.Background()
-	proj, err := session.OpenProject(ctx, tsconfigPath)
+	proj, _, releaseSnap, err := session.APIOpenProject(ctx, tsconfigPath, project.FileChangeSummary{})
 	if err != nil {
 		t.Fatalf("failed to open project: %v", err)
 	}
+	releaseSnap()
 
 	program := proj.GetProgram()
 	sourceFile := program.GetSourceFile(testTsPath)

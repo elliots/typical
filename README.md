@@ -528,6 +528,10 @@ Runtime validation performance comparing Typical vs Zod vs no validation:
 
 <!-- CHANGELOG_START -->
 
+### v0.3.1 (2026-02-23)
+
+Add metro transformer (React Native/Expo)
+
 ### v0.3.0 (2026-01-14)
 
 - Build call graph across whole project to avoid validating already-validated data

@@ -109,7 +109,8 @@ func (a *API) TransformSource(fileName, source string, options *TransformOptions
 	// Create a session for this temporary project
 	ctx := context.Background()
 	tmpSession := project.NewSession(&project.SessionInit{
-		FS: fs,
+		BackgroundCtx: ctx,
+		FS:            fs,
 		Options: &project.SessionOptions{
 			CurrentDirectory:   tmpDir,
 			DefaultLibraryPath: bundled.LibPath(),
@@ -131,10 +132,11 @@ func (a *API) TransformSource(fileName, source string, options *TransformOptions
 	}
 
 	debugf("[WASM DEBUG] Opening project at: %s\n", tsconfigPath)
-	proj, err := tmpSession.OpenProject(ctx, tsconfigPath)
+	proj, _, release, err := tmpSession.APIOpenProject(ctx, tsconfigPath, project.FileChangeSummary{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create project: %w", err)
 	}
+	release()
 	debugf("[WASM DEBUG] Project opened successfully\n")
 
 	program := proj.GetProgram()

@@ -49,20 +49,21 @@ func setupTestProject(t *testing.T, code string) (*checker.Checker, *ast.SourceF
 	}
 
 	fs := bundled.WrapFS(osvfs.FS())
+	ctx := context.Background()
 	session := project.NewSession(&project.SessionInit{
-		FS: fs,
+		BackgroundCtx: ctx,
+		FS:            fs,
 		Options: &project.SessionOptions{
 			CurrentDirectory:   tmpDir,
 			DefaultLibraryPath: bundled.LibPath(),
 		},
 	})
-
-	ctx := context.Background()
-	proj, err := session.OpenProject(ctx, tsconfigPath)
+	proj, _, releaseSnap, err := session.APIOpenProject(ctx, tsconfigPath, project.FileChangeSummary{})
 	if err != nil {
 		cleanup()
 		t.Fatalf("failed to open project: %v", err)
 	}
+	releaseSnap()
 
 	program := proj.GetProgram()
 	sourceFile := program.GetSourceFile(testTsPath)

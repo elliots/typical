@@ -1395,7 +1395,7 @@ void describe("Source Map Generation", () => {
     const mappings = result.sourceMap.mappings;
 
     // VLQ mappings should only contain valid Base64 characters and separators
-    const validChars = /^[A-Za-z0-9+\/,;]*$/;
+    const validChars = /^[A-Za-z0-9+/,;]*$/;
     assert.ok(validChars.test(mappings), `Mappings contain invalid characters: ${mappings}`);
   });
 

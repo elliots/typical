@@ -201,7 +201,7 @@ void describe("Source Map Structure", () => {
     const result = await compiler.transformSource("test.ts", source);
 
     assert.ok(result.sourceMap, "Source map should be present");
-    const validChars = /^[A-Za-z0-9+\/,;]*$/;
+    const validChars = /^[A-Za-z0-9+/,;]*$/;
     assert.ok(
       validChars.test(result.sourceMap.mappings),
       `Mappings contain invalid characters: ${result.sourceMap.mappings}`,

@@ -1,6 +1,6 @@
 module github.com/elliots/typical/packages/compiler
 
-go 1.25.3
+go 1.26.0
 
 replace (
 	github.com/microsoft/typescript-go/shim/ast => ./shim/ast
